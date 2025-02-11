@@ -76,6 +76,7 @@ export default {
       },
     ]);
 
+    
     const activeTab = ref("all");
 
     // Фильтр невыполненных задач
@@ -93,4 +94,16 @@ export default {
   },
 };
 </script>
+
+<q-toggle
+  v-if="task.canChange"
+  v-model="task.completed"
+  :false-value="false"
+  :true-value="true"
+  :label="task.completed ? 'Выполнено' : 'Не выполнено'"
+  color="green"
+  @update:model-value="() => showToast('Задача сохранена')"
+  style="width: fit-content"
+  :style="task.completed ? {} : { '--q-primary': 'red' }"
+/>
 
