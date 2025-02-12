@@ -12,49 +12,35 @@ export default defineComponent({
 })
 
 <template>
-  <ul class="table-list">
-    <li class="table-row-item column">
-      РВииггаи тщкуткш кп33 55 кптшк кпшткп кштпктш
-    </li>
+  <li class="table-row-item date-pick">
+    <q-input v-model="formattedDate" filled label="Выберите дату" readonly>
+      <template v-slot:append>
+        <q-icon name="event" class="cursor-pointer" @click="showDatePicker = true" />
+      </template>
 
-    <li class="table-row-item column">
-      <q-toggle :false-value="false" :true-value="true" label="Не выполнено" color="green" unchecked-color="red" />
-      <q-toggle :false-value="false" :true-value="true" label="Выполнено" color="green" unchecked-color="red" />
-    </li>
-
-    <li class="table-row-item column">
-      <q-toggle :false-value="false" :true-value="true" label="Не выполнено" color="green" disable />
-      <q-toggle :false-value="false" :true-value="true" label="Не выполнено" color="green" disable />
-    </li>
-
-    <li class="table-row-item">
-      12.04.2025 <br />
-      17.04.2025
-    </li>
-
-    <!-- Date Picker -->
-    <li class="table-row-item date-pick">
-      <q-input v-model="selectedDate" filled readonly label="Выберите дату">
-        <template v-slot:append>
-          <q-icon name="event" class="cursor-pointer" @click="showDatePicker = true" />
-        </template>
-
-        <q-popup-proxy v-model="showDatePicker" transition-show="scale" transition-hide="scale">
-          <q-date v-model="selectedDate" mask="DD.MM.YYYY" @update:model-value="showDatePicker = false" />
-        </q-popup-proxy>
-      </q-input>
-    </li>
-
-    <li class="table-row-item">
-      цель выполнена тысытв ымвтгым мывгштгвытм мвмт
-    </li>
-  </ul>
+      <q-popup-proxy v-model="showDatePicker" transition-show="scale" transition-hide="scale">
+        <q-date v-model="selectedDate" mask="YYYY-MM-DD" @update:model-value="updateFormattedDate" />
+      </q-popup-proxy>
+    </q-input>
+  </li>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+import { date } from 'quasar'
 
-const selectedDate = ref('23.03.2025') // Начальная дата
+const selectedDate = ref('2025-03-23') // Начальная дата в формате YYYY-MM-DD
 const showDatePicker = ref(false)
+
+// Форматируем дату для отображения в инпуте (DD.MM.YYYY)
+const formattedDate = computed(() => {
+  return selectedDate.value ? date.formatDate(selectedDate.value, 'DD.MM.YYYY') : ''
+})
+
+// Функция для обновления формата даты после выбора в календаре
+const updateFormattedDate = (val) => {
+  selectedDate.value = val
+  showDatePicker.value = false
+}
 </script>
 
