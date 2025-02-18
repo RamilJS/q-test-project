@@ -10,6 +10,98 @@ import { defineComponent } from 'vue'
 export default defineComponent({
   name: 'App'
 })
+  
+<template>
+  <div>
+    <!-- Предполагается, что объект task доступен (например, передаётся через props или из store) -->
+    <q-toggle
+      v-if="task.canChange"
+      v-model="task.completed"
+      @update:model-value="handleToggle"
+      :false-value="false"
+      :true-value="true"
+      :label="task.completed ? 'Выполнено' : 'Не выполнено'"
+      color="green"
+      style="width: fit-content"
+    />
+  </div>
+</template>
+
+<script>
+import axios from "axios";
+
+const BACKEND_URL =
+  window.location.origin + `/pp/Ext5/extjs_json_collection_data.html`;
+
+export default {
+  name: "TaskToggle",
+  props: {
+    // Например, задача может передаваться через пропс
+    task: {
+      type: Object,
+      required: true,
+    },
+  },
+  data() {
+    return {
+      // Пример хранения данных, полученных с сервера
+      cabinetData: [],
+    };
+  },
+  methods: {
+    async handleToggle(newValue) {
+      // newValue содержит новое значение переключателя (true/false)
+      // Вызываем метод для отправки состояния задачи на сервер
+      await this.postTaskState(this.task.id);
+
+      // После успешного запроса показываем уведомление
+      this.showToast("Задача сохранена");
+    },
+    async postTaskState(taskId) {
+      try {
+        const params = {
+          collection_code: "vtbl_adaptation_2025",
+          parameters: "task_id=" + taskId,
+        };
+
+        // Отправляем POST-запрос на сервер
+        const response = await axios.post(
+          BACKEND_URL,
+          new URLSearchParams(params).toString()
+        );
+
+        // Обновляем данные, если необходимо
+        this.cabinetData = response.data.results;
+        console.log("Данные с сервера:", this.cabinetData);
+      } catch (error) {
+        console.error("Ошибка при обновлении состояния задачи", error);
+        this.showToast("Ошибка при обновлении задачи");
+      }
+    },
+    showToast(message) {
+      // Если вы используете Quasar, можно воспользоваться его уведомлениями:
+      this.$q.notify({
+        message: message,
+        color: "green",
+        position: "top",
+      });
+      // Либо используйте любую другую реализацию уведомлений
+    },
+    // Пример метода, который может быть вызван в mounted
+    fetchCabinetData() {
+      // Логика получения данных
+    },
+    changeStepperStyle() {
+      // Логика изменения стилей (если требуется)
+    },
+  },
+  mounted() {
+    // При монтировании компонента можно загрузить данные
+    this.fetchCabinetData();
+    this.changeStepperStyle();
+  },
+};
+</script>
 
 <template>
   <li class="table-row-item date-pick">
