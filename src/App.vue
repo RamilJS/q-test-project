@@ -136,3 +136,35 @@ const updateFormattedDate = (val) => {
 }
 </script>
 
+async postTaskState(newValue, taskId) {
+  try {
+    const requestBody = {
+      action: "eval_action",
+      remote_action_id: "0x657A265843D9142D",
+      wvars: [
+        { name: "_object_id", value: "" },
+        { name: "_secid", value: "D9B4A57C66982CDE9869AA8583A8F5AD" },
+        { name: "user_id", value: "" },
+        { name: "adaptation_id", value: "" },
+        { name: "role", value: "collaborator" },
+        { name: "action_name", value: "save_task" },
+        { name: "task_id", value: taskId },
+        { name: "task_status", value: newValue },
+        { name: "task_comment", value: "1" }
+      ]
+    };
+
+    const response = await axios.post(BACKEND_URL, requestBody, {
+      headers: {
+        "Content-Type": "application/json",
+        "secID": wtSecId // передаем secID в заголовке
+      }
+    });
+
+    this.cabinetData = response.data.results;
+    console.log("Данные с сервера:", this.cabinetData);
+  } catch (error) {
+    console.error("Ошибка при обновлении состояния задачи", error);
+    this.showToast("Ошибка при обновлении задачи");
+  }
+}
