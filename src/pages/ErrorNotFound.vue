@@ -78,6 +78,20 @@ updateLocalTask(taskId, newValue) {
   });
 }
 
+async handleToggle(newValue, id) {
+  await this.postTaskState(newValue, id);
+  this.updateLocalTask(id, newValue);
+},
+
+updateLocalTask(taskId, newValue) {
+  this.cabinetData.forEach(process => {
+    process.tasks.forEach(task => {
+      if (task.id === taskId) {
+        task.completed = newValue;
+      }
+    });
+  });
+}
 
 
 </script>
