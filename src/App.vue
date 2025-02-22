@@ -4,6 +4,15 @@
   </div>
 </template
 
+document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll("span").forEach(span => {
+        if (span.textContent.trim() === "Выгрузить отчёт по фактическому обучению") {
+            span.textContent = "Отчёт по обучению";
+        }
+    });
+});
+
+  
 async postTaskState(newValue, taskId) {
   try {
     // Создаем объект FormData
