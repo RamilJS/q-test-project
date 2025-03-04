@@ -51,3 +51,52 @@ async postTaskState(newValue, taskId) {
     this.showToast("Ошибка при обновлении задачи");
   }
 }
+
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Копирование ссылки</title>
+    <script src="https://cdn.jsdelivr.net/npm/quasar@2.14.1/dist/quasar.umd.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/quasar@2.14.1/dist/quasar.prod.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.47/dist/vue.global.prod.js"></script>
+</head>
+<body>
+
+<div id="app">
+    <q-btn @click="copyToClipboard" label="Скопировать ссылку" color="primary">
+        <q-tooltip v-if="copied" anchor="bottom middle" self="top middle" :offset="[10, 10]">
+            Ссылка успешно скопирована!
+        </q-tooltip>
+    </q-btn>
+</div>
+
+<script>
+const { createApp, ref } = Vue;
+const { Quasar } = window;
+
+createApp({
+    setup() {
+        const copied = ref(false);
+        const link = "https://example.com"; // Замените на свою ссылку
+
+        const copyToClipboard = async () => {
+            try {
+                await navigator.clipboard.writeText(link);
+                copied.value = true;
+                setTimeout(() => copied.value = false, 2000); // Убираем сообщение через 2 секунды
+            } catch (err) {
+                console.error("Ошибка при копировании: ", err);
+            }
+        };
+
+        return { copied, copyToClipboard };
+    }
+}).use(Quasar).mount("#app");
+</script>
+
+</body>
+</html>
+
