@@ -162,3 +162,84 @@ export default {
     };
   },
 };
+
+<script setup>
+import { ref, computed } from 'vue'
+
+// Пример списка комментариев
+const commentListData = ref([
+  {
+    id: 1,
+    date: '19.02.2025 00:00:00',
+    person_fullname: 'Иванов Иван',
+    person_position: 'Менеджер',
+    person_subdivision: 'Отдел продаж',
+    person_icon_url: 'https://example.com/avatar1.jpg',
+    text: 'Комментарий 1'
+  },
+  {
+    id: 2,
+    date: '10.01.2024 15:20:30',
+    person_fullname: 'Петров Петр',
+    person_position: 'Разработчик',
+    person_subdivision: 'IT отдел',
+    person_icon_url: 'https://example.com/avatar2.jpg',
+    text: 'Комментарий 2'
+  }
+  // другие комментарии
+])
+
+// Функция для парсинга даты
+const parseDate = (dateStr) => {
+  const [datePart, timePart] = dateStr.split(' ')
+  const [day, month, year] = datePart.split('.').map(Number)
+  const [hours, minutes, seconds] = timePart.split(':').map(Number)
+  return new Date(year, month - 1, day, hours, minutes, seconds)
+}
+
+// Вычисляемое свойство для сортировки комментариев
+const sortedCommentList = computed(() => {
+  return [...commentListData.value].sort((a, b) => {
+    const dateA = parseDate(a.date)
+    const dateB = parseDate(b.date)
+    return dateB - dateA // Сортировка по убыванию (новые выше)
+  })
+})
+</script>
+<ul class="comment-list">
+  <li
+    v-for="comment in sortedCommentList"
+    :key="comment.id"
+    class="comment-item"
+  >
+    <div class="comment-user-info">
+      <q-avatar size="40px" class="comment-avatar">
+        <img
+          :src="comment.person_icon_url"
+          alt="Фото сотрудника"
+          style="object-fit: cover"
+        />
+      </q-avatar>
+      <div class="user-meta">
+        <div class="user-name">
+          {{ comment.person_fullname }}
+        </div>
+        <div class="user-role">
+          {{ comment.person_position }}
+        </div>
+        <div class="user-department">
+          {{ comment.person_subdivision }}
+        </div>
+      </div>
+      <div class="comment-date">
+        <div class="comment-phone">
+          {{ comment.date }}
+        </div>
+      </div>
+    </div>
+    <div class="comment-value">
+      {{ comment.text }}
+    </div>
+  </li>
+</ul>
+
