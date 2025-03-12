@@ -4,50 +4,32 @@
   </div>
 </template>
 
-onMounted(async () => {
-  await fetchCabinetData();
+.table-list {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  column-gap: 5px;
+  padding: 0 0 10px;
+  margin-bottom: 10px;
+  border-bottom: 2px solid #ddd;
+  list-style-type: none;
+}
 
-  // После загрузки данных проверяем, что есть в sessionStorage
-  const savedExpandedProcesses = sessionStorage.getItem("expandedProcesses");
+.table-row-item {
+  display: flex;
+  flex-wrap: wrap;
+  flex-direction: column;
+  max-width: 300px;
+  width: 100%;
+  box-sizing: border-box;
+}
 
-  if (savedExpandedProcesses !== null) {
-    expandedProcesses.value = JSON.parse(savedExpandedProcesses);
-  } else {
-    // Если ничего не сохранено — инициализируем в зависимости от allExpanded
-    cabinetData.value.forEach((process) => {
-      expandedProcesses.value[process.id] = allExpanded.value;
-    });
-  }
+.table-row-name {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
 
-  // Вотчер сохраняет состояние при любом изменении
-  watch(
-    expandedProcesses,
-    (newVal) => {
-      sessionStorage.setItem("expandedProcesses", JSON.stringify(newVal));
-    },
-    { deep: true }
-  );
-
-  fetchMaterialsData();
-  fetchCommentListData();
-  fetchUsersData();
-  fetchCoworkers();
-
-  observer = new MutationObserver(async (mutationsList) => {
-    await nextTick();
-
-    mutationsList.forEach(() => {
-      changeStepperStyle();
-      changeFontSizeStyle();
-      changeAnotherFontSizeStyle();
-      changeLeftLineStyle();
-      changeQItemLabelSize();
-    });
-  });
-
-  observer.observe(document.querySelector(".content-container"), {
-    childList: true,
-    subtree: true,
-    attributes: true,
-  });
-});
+  /* Эти параметры обеспечивают перенос текста вниз */
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
