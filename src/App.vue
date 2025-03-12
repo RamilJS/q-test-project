@@ -243,3 +243,42 @@ const sortedCommentList = computed(() => {
   </li>
 </ul>
 
+gghhh
+const allExpanded = ref(false);
+
+// При инициализации проверяем сохранённое значение
+const savedAllExpanded = sessionStorage.getItem('allExpanded');
+if (savedAllExpanded !== null) {
+  allExpanded.value = JSON.parse(savedAllExpanded);
+}
+
+const toggleProcessList = () => {
+  if (allExpanded.value) {
+    cabinetData.value.forEach((process) => {
+      expandedProcesses.value[process.id] = false;
+    });
+  } else {
+    cabinetData.value.forEach((process) => {
+      expandedProcesses.value[process.id] = true;
+    });
+  }
+
+  allExpanded.value = !allExpanded.value;
+
+  sessionStorage.setItem('allExpanded', JSON.stringify(allExpanded.value));
+};
+
+onMounted(async () => {
+  await fetchCabinetData();
+  fetchMaterialsData();
+  fetchCommentListData();
+  fetchUsersData();
+  fetchCoworkers();
+
+  nextTick(() => {
+    cabinetData.value.forEach((process) => {
+      expandedProcesses.value[process.id] = allExpanded.value;
+    });
+  });
+});
+
