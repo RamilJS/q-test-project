@@ -4,15 +4,28 @@
   </div>
 </template>
 
-export default {
-  methods: {
-    openOutlook() {
-      const url = "https://outlook.office.com/calendar/action/compose?subject=Встреча%20с%20командой&startdt=2024-04-10T10:00:00Z&enddt=2024-04-10T11:00:00Z&location=Офис&body=Обсудим%20проект";
-      window.open(url, "_blank");
-    }
-  }
-};
-
-<a href="ms-outlook://calendar/action/compose?subject=Встреча%20с%20командой&startdt=2024-04-10T10:00:00Z&enddt=2024-04-10T11:00:00Z&location=Офис&body=Обсудим%20проект">
-  Открыть в Outlook (десктоп)
-</a>
+<template>
+  <div class="q-pa-md">
+    <q-table
+      :rows="optionsCoworkers"
+      :columns="columns"
+      row-key="id"
+      flat
+      bordered
+    >
+      <template v-slot:body-cell-fio="props">
+        <q-checkbox
+          v-model="props.row.selected"
+          :label="props.row.fio"
+          color="primary"
+        />
+      </template>
+      <template v-slot:body-cell-position="props">
+        {{ props.row.position }}
+      </template>
+      <template v-slot:body-cell-subdivision="props">
+        {{ props.row.subdivision }}
+      </template>
+    </q-table>
+  </div>
+</template>
