@@ -16,41 +16,41 @@
   />
 
   <q-dialog v-model="newMeetingModalOpen">
-    <q-card style="min-width: 400px;">
-      <q-card-section>
-        <div class="text-h6" style="padding: 10px; padding-bottom: 0px;">
+    <q-card class="q-pa-md" style="min-width: 450px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);">
+      <q-card-section class="q-pb-none">
+        <div class="text-h6" style="padding-bottom: 10px;">
           Назначение встречи
         </div>
       </q-card-section>
 
       <q-card-section>
-        <div class="column q-gutter-md" style="max-width: 350px;">
-          <div class="row items-center q-gutter-sm">
+        <div class="column q-gutter-lg" style="max-width: 400px;">
+          <div class="row items-center justify-between q-gutter-sm">
             <span>Кому</span>
             <q-input dense v-model="newMeetingEmail" filled type="email" hint="Email" />
           </div>
 
-          <div class="row items-center q-gutter-sm">
+          <div class="row items-center justify-between q-gutter-sm">
             <span>Тема встречи</span>
             <q-input dense outlined v-model="newMeetingTopic" placeholder="Встреча по адаптации" hint="Скорректируйте тему при необходимости" />
           </div>
 
-          <div class="row items-center q-gutter-sm">
+          <div class="row items-center justify-between q-gutter-sm">
             <span>Дата встречи</span>
             <q-input dense v-model="newMeetingDate" filled type="date" hint="Выберите дату" />
           </div>
 
-          <div class="row items-center q-gutter-sm">
+          <div class="row items-center justify-between q-gutter-sm">
             <span>Место встречи</span>
             <q-input dense v-model="newMeetingLocation" filled hint="Укажите место встречи" />
           </div>
 
-          <div class="row items-center q-gutter-sm">
+          <div class="row items-center justify-between q-gutter-sm">
             <span>Начало встречи</span>
             <q-input dense v-model="newMeetingTimeStart" filled type="time" hint="Выберите время" />
           </div>
 
-          <div class="row items-center q-gutter-sm">
+          <div class="row items-center justify-between q-gutter-sm">
             <span>Конец встречи</span>
             <q-input dense v-model="newMeetingTimeEnd" filled type="time" hint="Выберите время" />
           </div>
@@ -63,4 +63,3 @@
     </q-card>
   </q-dialog>
 </div>
-
