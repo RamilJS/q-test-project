@@ -4,16 +4,51 @@
   </div>
 </template>
 
-const submitComment = async () => {
-  if (!newComment.value.text.trim() || newComment.value.text.length > 1000)
-    return;
+<script setup>
+import { ref, computed } from "vue";
 
-  try {
-    await postCommentState(newComment.value.text);
-    await fetchCommentListData(); // <-- вместо локального добавления
-    newComment.value.text = "";
-  } catch (error) {
-    console.error("Ошибка при отправке комментария", error);
-    showToast("Не удалось отправить комментарий");
+const isAppointAssistantOpen = ref(false);
+const isAppointAssistantClosing = ref(false);
+
+// Модель текущего выбранного сотрудника
+const selectedEmployee = ref({
+  person: {
+    person_fullname: "Иванов Иван Иванович"
+  },
+  mentor: {
+    person_fullname: "Петров Петр Петрович",
+    position: "Управляющий отделением",
+    department: "Название подразделения",
+    change_list: [
+      {
+        person_fullname: "Петров Петр Петрович",
+        position: "Управляющий отделением",
+        department: "Название подразделения"
+      },
+      {
+        person_fullname: "Сидоров Сидр Сидорович",
+        position: "Старший специалист",
+        department: "Отдел ИТ"
+      }
+    ]
   }
+});
+
+const delegatedTasks = ref([
+  { label: "Делегировать все задачи (из возможных)", value: "1" },
+  { label: "Создайте заявки из АРМ", value: "2" },
+  { label: "Направьте командное письмо", value: "3" }
+]);
+
+// Radio (одиночный выбор)
+const optionGroup = ref(null);
+
+const openAppointAssistantModal = () => {
+  isAppointAssistantOpen.value = true;
 };
+
+const openDelegationError = () => {
+  isAppointAssistantClosing.value = true;
+};
+</script>
+
