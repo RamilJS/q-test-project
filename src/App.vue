@@ -23,3 +23,15 @@ const copyEmployeeStatuses = async () => {
 
   showToast("Статусы скопированы");
 };
+
+const copyEmployeeStatuses = async () => {
+  for (const task of cabinetData.value) {
+    if (task.completed !== task.completedMentor) {
+      await postTaskState(task.completed, task.id);
+      updateLocalTask(task.id, task.completed);
+    }
+  }
+
+  await fetchCabinetData();
+  showToast("Статусы скопированы");
+};
