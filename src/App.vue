@@ -98,3 +98,30 @@ return {
   collaboratorPage,
   selectCollaborator,
 };
+const fetchCollaboratorList = async () => {
+  try {
+    const pageSize = 10;
+    const page = collaboratorPage.value;
+    const start = (page - 1) * pageSize;
+
+    const params = {
+      collection_code: "uni_catalog_list", // или твой конкретный code
+      secid: wtSecId,
+      limit: pageSize,
+      page: page,
+      start: start,
+      sort: JSON.stringify([{ property: "d1", direction: "ASC" }]),
+      parameters: `data_mode=collaborator_list;search_str=${collaboratorSearch.value || ''};secid=${wtSecId}`,
+    };
+
+    const response = await axios.post(
+      BACKEND_URL,
+      new URLSearchParams(params).toString()
+    );
+
+    collaboratorListData.value = response.data.results;
+  } catch (error) {
+    console.error("Ошибка при загрузке сотрудников:", error);
+  }
+};
+
