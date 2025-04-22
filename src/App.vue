@@ -4,30 +4,78 @@
   </div>
 </template>
 
-<q-card-section class="q-pt-none">
-  <div class="row q-col-gutter-md">
-    <div class="col">
-      <q-input
-        v-model="collaboratorSearch"
-        placeholder="Поиск сотрудника..."
-        outlined
-        dense
-        @keyup.enter="fetchCollaboratorList"
-      />
-    </div>
-    <div>
-      <q-btn color="primary" label="Найти" @click="fetchCollaboratorList" />
-    </div>
-  </div>
+const collaboratorSearch = ref("");
+const selectedCoworkerId = ref(null);
+const collaboratorPage = ref(1); // Для постраничной загрузки
 
-  <q-list bordered class="q-mt-md">
-    <q-item
-      v-for="item in collaboratorListData"
-      :key="item.person_id"
-      clickable
-      @click="selectCollaborator(item)"
-    >
-      <q-item-section>{{ item.fullname }}</q-item-section>
-    </q-item>
-  </q-list>
-</q-card-section>
+const columnsCoworkers = ref([
+  { name: 'radio', label: '', align: 'center', field: 'id', sortable: false },
+  { name: 'fullname', label: 'ФИО', align: 'left', field: 'fullname' },
+  { name: 'position_name', label: 'Должность', align: 'left', field: 'position_name' },
+  { name: 'subdivision_name', label: 'Подразделение', align: 'left', field: 'subdivision_name' },
+  { name: 'email', label: 'Email', align: 'left', field: 'email' },
+  { name: 'org_name', label: 'Организация', align: 'left', field: 'org_name' },
+]);
+
+<q-input
+  v-model="collaboratorSearch"
+  @update:model-value="fetchCollaboratorSearch"
+  dense
+  outlined
+  placeholder="Поиск"
+  class="bg-white col"
+  style="margin-top: 8px"
+/>
+
+<q-table
+  :rows="collaboratorListData"
+  :columns="columnsCoworkers"
+  row-key="id"
+  flat
+  bordered
+>
+  <template v-slot:body="props">
+    <tr>
+      <td class="text-center">
+        <q-radio
+          v-model="selectedCoworkerId"
+          :val="props.row.id"
+          color="primary"
+        />
+      </td>
+      <td>{{ props.row.fullname }}</td>
+      <td>{{ props.row.position_name }}</td>
+      <td>{{ props.row.subdivision_name }}</td>
+      <td>{{ props.row.email }}</td>
+      <td>{{ props.row.org_name }}</td>
+    </tr>
+  </template>
+</q-table>
+
+const openCoworkersModal = async () => {
+  isCoworkersModalOpen.value = true;
+  await fetchCollaboratorList();
+};
+
+const fetchCollaboratorSearch = async () => {
+  try {
+    const params = {
+      collection_code: "vtbl_adaptation_manager_2025",
+      secid: wtSecId,
+      limit: 10,
+      page: 0,
+      start: 0,
+      parameters: `data_mode=collaborator_list;search_str=${collaboratorSearch.value};secid=${wtSecId}`,
+    };
+
+    const response = await axios.post(
+      BACKEND_URL,
+      new URLSearchParams(params).toString()
+    );
+
+    collaboratorListData.value = response.data.results;
+  } catch (error) {
+    console.error("Ошибка при поиске сотрудников:", error);
+  }
+};
+
