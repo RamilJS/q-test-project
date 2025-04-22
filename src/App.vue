@@ -4,37 +4,30 @@
   </div>
 </template>
 
-const collaboratorSearch = ref('');
-const collaboratorListData = ref([]);
+<q-card-section class="q-pt-none">
+  <div class="row q-col-gutter-md">
+    <div class="col">
+      <q-input
+        v-model="collaboratorSearch"
+        placeholder="Поиск сотрудника..."
+        outlined
+        dense
+        @keyup.enter="fetchCollaboratorList"
+      />
+    </div>
+    <div>
+      <q-btn color="primary" label="Найти" @click="fetchCollaboratorList" />
+    </div>
+  </div>
 
-watch(collaboratorSearch, async () => {
-  await fetchCollaboratorList();
-});
-
-const fetchCollaboratorList = async () => {
-  try {
-    const params = {
-      collection_code: "uni_catalog_list",
-      secid: wtSecId,
-      limit: 100,
-      start: 0,
-      sort: JSON.stringify([{ property: "d1", direction: "ASC" }]),
-      parameters: `data_mode=collaborator_list;search_str=${collaboratorSearch.value};secid=${wtSecId}`,
-    };
-
-    const response = await axios.post(
-      BACKEND_URL,
-      new URLSearchParams(params).toString()
-    );
-
-    collaboratorListData.value = response.data.results || [];
-  } catch (error) {
-    console.error("Ошибка при загрузке сотрудников:", error);
-  }
-};
-
-<input
-  v-model="collaboratorSearch"
-  placeholder="Поиск сотрудника..."
-  class="border px-4 py-2 rounded w-full"
-/>
+  <q-list bordered class="q-mt-md">
+    <q-item
+      v-for="item in collaboratorListData"
+      :key="item.person_id"
+      clickable
+      @click="selectCollaborator(item)"
+    >
+      <q-item-section>{{ item.fullname }}</q-item-section>
+    </q-item>
+  </q-list>
+</q-card-section>
