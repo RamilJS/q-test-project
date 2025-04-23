@@ -4,24 +4,33 @@
   </div>
 </template>
 
-<div class="employee-search-container">
-  <span class="text-bold">Рекомендации коллег</span>
-  <div class="row q-gutter-sm" style="margin-top: 8px;">
-    <q-input
-      v-model="collaboratorSearch"
-      @keyup.enter="fetchCollaboratorSearch"
-      dense
-      outlined
-      placeholder="Поиск"
-      class="bg-white col"
-    />
-    <q-btn
-      icon="search"
-      color="primary"
-      flat
-      @click="fetchCollaboratorSearch"
-    />
-  </div>
+<!-- Пагинация -->
+<div class="row justify-end q-mt-md q-gutter-sm">
+  <q-btn
+    label="Назад"
+    color="primary"
+    outline
+    :disable="collaboratorPage <= 1"
+    @click="prevCollaboratorPage"
+  />
+  <q-btn
+    label="Вперёд"
+    color="primary"
+    outline
+    @click="nextCollaboratorPage"
+  />
 </div>
+
+const nextCollaboratorPage = async () => {
+  collaboratorPage.value += 1;
+  await fetchCollaboratorList();
+};
+
+const prevCollaboratorPage = async () => {
+  if (collaboratorPage.value > 1) {
+    collaboratorPage.value -= 1;
+    await fetchCollaboratorList();
+  }
+};
 
 
