@@ -1,36 +1,12 @@
-<template>
-  <div id="q-app">
-    <router-view />
-  </div>
-</template>
+const copyToClipboard = async (taskId, path) => {
+  try {
+    await navigator.clipboard.writeText(path);
+    copiedState.value[taskId] = true;
 
-<!-- Пагинация -->
-<div class="row justify-end q-mt-md q-gutter-sm">
-  <q-btn
-    label="Назад"
-    color="primary"
-    outline
-    :disable="collaboratorPage <= 1"
-    @click="prevCollaboratorPage"
-  />
-  <q-btn
-    label="Вперёд"
-    color="primary"
-    outline
-    @click="nextCollaboratorPage"
-  />
-</div>
-
-const nextCollaboratorPage = async () => {
-  collaboratorPage.value += 1;
-  await fetchCollaboratorList();
-};
-
-const prevCollaboratorPage = async () => {
-  if (collaboratorPage.value > 1) {
-    collaboratorPage.value -= 1;
-    await fetchCollaboratorList();
+    setTimeout(() => {
+      copiedState.value[taskId] = false;
+    }, 3000);
+  } catch (err) {
+    console.error("Ошибка при копировании: ", err);
   }
 };
-
-
