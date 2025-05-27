@@ -1,23 +1,14 @@
-<li class="table-row-item" style="position: relative">
-  <p style="margin-bottom: 10px">Название документа</p>
+const copyToClipboard = async (taskId, path) => {
+  try {
+    await navigator.clipboard.writeText(path);
 
-  <span v-if="copiedState[infoTask.id]" class="copied-message">
-    Ссылка успешно скопирована!
-  </span>
+    // Обновляем реактивно
+    copiedState.value = { ...copiedState.value, [taskId]: true };
 
-  <div>
-    <q-btn
-      v-if="infoTask.path !== ''"
-      flat
-      unelevated
-      size="sm"
-      padding="none"
-      color="secondary"
-      @click="copyToClipboard(infoTask.id, infoTask.path)"
-      class="info-task-link"
-    >
-      Копировать ссылку для ознакомления
-    </q-btn>
-    <span v-else>{{ infoTask.pathText }}</span>
-  </div>
-</li>
+    setTimeout(() => {
+      copiedState.value = { ...copiedState.value, [taskId]: false };
+    }, 3000);
+  } catch (err) {
+    console.error("Ошибка при копировании: ", err);
+  }
+};
