@@ -1,89 +1,58 @@
-<template>
-  <div class="q-ml-md">
-    <q-checkbox
-      :label="task.name"
-      :model-value="isChecked"
-      :indeterminate="isIndeterminate"
-      @update:model-value="toggleSelection"
-      color="primary"
-    />
-    <div v-if="task.children" class="q-ml-lg">
-      <TaskCheckboxTree
-        v-for="child in task.children"
-        :key="child.id"
-        :task="child"
-        :selected="selected"
-      />
-    </div>
-  </div>
-</template>
-
-<script setup>
-import { computed } from 'vue';
-import TaskCheckboxTree from './TaskCheckboxTree.vue'; // рекурсия
-
-const props = defineProps({
-  task: Object,
-  selected: Array
-});
-
-const emit = defineEmits(['update:selected']);
-
-// Все ID подзадач
-const getAllTaskIds = (task) => {
-  let ids = [task.id];
-  if (task.children) {
-    task.children.forEach(child => {
-      ids = ids.concat(getAllTaskIds(child));
-    });
-  }
-  return ids;
-};
-
-const isChecked = computed(() => {
-  return getAllTaskIds(props.task).every(id => props.selected.includes(id));
-});
-
-const isIndeterminate = computed(() => {
-  const allIds = getAllTaskIds(props.task);
-  const selectedCount = allIds.filter(id => props.selected.includes(id)).length;
-  return selectedCount > 0 && selectedCount < allIds.length;
-});
-
-const toggleSelection = (checked) => {
-  const allIds = getAllTaskIds(props.task);
-  let updated = [...props.selected];
-
-  if (checked) {
-    updated = Array.from(new Set([...updated, ...allIds]));
-  } else {
-    updated = updated.filter(id => !allIds.includes(id));
-  }
-
-  emit('update:selected', updated);
-};
-</script>
-
-<!-- Контейнер для иерархического выбора задач -->
+<!-- Иерархический выбор задач -->
 <div class="delegate-container" style="margin-top: 15px">
   <div
     v-for="task in currentTaskList"
     :key="task.id"
     class="q-mb-sm"
   >
-    <TaskCheckboxTreeInline
-      :task="task"
-      :selected="selectedTaskIds"
-      @update:selected="val => selectedTaskIds = val"
-    />
+    <div>
+      <q-checkbox
+        :label="task.name"
+        :model-value="isTaskChecked(task)"
+        :indeterminate="isTaskIndeterminate(task)"
+        @update:model-value="checked => toggleTask(task, checked)"
+        color="primary"
+        class="q-ml-sm"
+      />
+    </div>
+
+    <div v-if="task.children" class="q-ml-lg">
+      <div
+        v-for="subtask in task.children"
+        :key="subtask.id"
+        class="q-mb-xs"
+      >
+        <q-checkbox
+          :label="subtask.name"
+          :model-value="isTaskChecked(subtask)"
+          :indeterminate="isTaskIndeterminate(subtask)"
+          @update:model-value="checked => toggleTask(subtask, checked)"
+          color="primary"
+          class="q-ml-sm"
+        />
+
+        <div v-if="subtask.children" class="q-ml-lg">
+          <div
+            v-for="subsubtask in subtask.children"
+            :key="subsubtask.id"
+            class="q-mb-xs"
+          >
+            <q-checkbox
+              :label="subsubtask.name"
+              :model-value="isTaskChecked(subsubtask)"
+              @update:model-value="checked => toggleTask(subsubtask, checked)"
+              color="primary"
+              class="q-ml-sm"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
-
-import { ref, computed, defineComponent, h } from 'vue';
-
 const selectedTaskIds = ref([]);
 
-// Функция рекурсивно собирает все ID из задачи и её подзадач
+// Получает все вложенные ID задачи
 const getAllTaskIds = (task) => {
   let ids = [task.id];
   if (task.children) {
@@ -94,63 +63,31 @@ const getAllTaskIds = (task) => {
   return ids;
 };
 
-// Встроенный компонент для рекурсивной отрисовки чекбоксов
-const TaskCheckboxTreeInline = defineComponent({
-  name: 'TaskCheckboxTreeInline',
-  props: {
-    task: Object,
-    selected: Array
-  },
-  emits: ['update:selected'],
-  setup(props, { emit }) {
-    const allIds = computed(() => getAllTaskIds(props.task));
+// Проверка, выбрана ли вся задача и её потомки
+const isTaskChecked = (task) => {
+  const allIds = getAllTaskIds(task);
+  return allIds.every(id => selectedTaskIds.value.includes(id));
+};
 
-    const isChecked = computed(() =>
-      allIds.value.every(id => props.selected.includes(id))
-    );
+// Проверка, выбраны ли только некоторые из потомков
+const isTaskIndeterminate = (task) => {
+  const allIds = getAllTaskIds(task);
+  const count = allIds.filter(id => selectedTaskIds.value.includes(id)).length;
+  return count > 0 && count < allIds.length;
+};
 
-    const isIndeterminate = computed(() => {
-      const selectedCount = allIds.value.filter(id =>
-        props.selected.includes(id)
-      ).length;
-      return selectedCount > 0 && selectedCount < allIds.value.length;
+// Обработчик выбора/снятия задачи и её подзадач
+const toggleTask = (task, checked) => {
+  const allIds = getAllTaskIds(task);
+  let updated = [...selectedTaskIds.value];
+
+  if (checked) {
+    allIds.forEach(id => {
+      if (!updated.includes(id)) updated.push(id);
     });
-
-    const toggleSelection = (checked) => {
-      let updated = [...props.selected];
-      if (checked) {
-        updated = Array.from(new Set([...updated, ...allIds.value]));
-      } else {
-        updated = updated.filter(id => !allIds.value.includes(id));
-      }
-      emit('update:selected', updated);
-    };
-
-    return () =>
-      h('div', [
-        h('q-checkbox', {
-          label: props.task.name,
-          modelValue: isChecked.value,
-          indeterminate: isIndeterminate.value,
-          'onUpdate:modelValue': toggleSelection,
-          color: 'primary',
-          class: 'q-ml-sm'
-        }),
-        props.task.children &&
-          h(
-            'div',
-            { class: 'q-ml-lg' },
-            props.task.children.map(child =>
-              h(TaskCheckboxTreeInline, {
-                key: child.id,
-                task: child,
-                selected: props.selected,
-                onUpdateSelected: (val) => emit('update:selected', val)
-              })
-            )
-          )
-      ]);
+  } else {
+    updated = updated.filter(id => !allIds.includes(id));
   }
-});
 
-{ name: "mentor_tasks", value: JSON.stringify(selectedTaskIds.value) },
+  selectedTaskIds.value = updated;
+};
