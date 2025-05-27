@@ -1,3 +1,5 @@
+{ name: "mentor_tasks", value: JSON.stringify(selectedTaskIds.value) },
+
 <!-- Иерархический выбор задач -->
 <div class="delegate-container" style="margin-top: 15px">
   <div
