@@ -1,28 +1,31 @@
-function pluralizeMeetings(count: number): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
+<q-tooltip class="bg-white text-black">
+  <ul class="q-mb-none q-pa-none">
+    <li
+      v-for="event in employee.events"
+      :key="event.date_start"
+    >
+      {{ event.date_start }} — {{ event.subject_line || 'Без темы' }}
+    </li>
+  </ul>
+</q-tooltip>
 
-  if (mod10 === 1 && mod100 !== 11) return `${count} встреча`;
-  if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return `${count} встречи`;
-  return `${count} встреч`;
 
-  }
-
-<template>
-  <div class="q-mt-sm text-caption text-grey-8">
-    {{ pluralizeMeetings(meetingCount) }}
-  </div>
-</template>
-
-<script setup>
-const meetingCount = ref(5) // Пример
-
-function pluralizeMeetings(count) {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-
-  if (mod10 === 1 && mod100 !== 11) return `${count} встреча`;
-  if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return `${count} встречи`;
-  return `${count} встреч`;
-}
-</script>
+<q-btn
+  v-if="employee.events.length > 0"
+  color="grey"
+  icon="fa-solid fa-info"
+  size="6px"
+  push
+  round
+  class="metting-modal-button"
+  style="margin-bottom: auto; margin-left: 10px;"
+>
+  <q-tooltip class="bg-white text-black" style="white-space: pre-line;">
+    {{ formattedEvents }}
+  </q-tooltip>
+</q-btn>
+const formattedEvents = computed(() =>
+  employee.events
+    .map(event => `• ${event.date_start} — ${event.subject_line || 'Без темы'}`)
+    .join('\n')
+);
