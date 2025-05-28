@@ -1,55 +1,46 @@
-const fetchUsersData = async () => {
-  try {
-    const params = {
-      collection_code: "",
-      parameters: "",
-    };
+<template>
+  <q-dialog v-model="isOpen" persistent>
+    <q-card class="q-pa-md" style="max-width: 600px; width: 100%">
+      <q-card-section>
+        <div class="text-h6">Задачи, которые не могут быть делегированы</div>
+      </q-card-section>
 
-    const response = await axios.post(
-      BACKEND_URL,
-      new URLSearchParams(params).toString()
-    );
+      <q-separator />
 
-    usersData.value = response.data.results;
+      <q-card-section class="scroll q-py-sm" style="max-height: 300px">
+        <q-list bordered separator>
+          <q-item v-for="task in disabledDelegationTasks" :key="task.id">
+            <q-item-section>{{ task.name }}</q-item-section>
+          </q-item>
+        </q-list>
+      </q-card-section>
 
-    underGoingAdaptation.value = response.data.results.filter(
-      (elem) => elem.stage === "Проходят адаптацию"
-    );
+      <q-separator />
 
-    preparingForReception.value = response.data.results.filter(
-      (elem) => elem.stage === "Готовятся к приему"
-    );
+      <q-card-actions align="right">
+        <q-btn flat label="Понятно" color="primary" @click="closeDialog" />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
+</template>
 
-    completedAdaptation.value = response.data.results.filter(
-      (elem) => elem.stage === "Завершили адаптацию"
-    );
+<script setup>
+import { defineProps, defineEmits } from 'vue';
 
-    wasFiredOnAdaptation.value = response.data.results.filter(
-      (elem) => elem.stage === "Были уволены в процессе адаптации"
-    );
-
-    // Сюда будем сохранять все disabled задачи
-    disabledDelegationTasks.value = [];
-
-    // Рекурсивная функция для сбора disabled задач
-    const collectDisabledTasks = (tasks) => {
-      for (const task of tasks) {
-        if (task.disabled) {
-          disabledDelegationTasks.value.push(task);
-        }
-        if (task.tasks && task.tasks.length > 0) {
-          collectDisabledTasks(task.tasks);
-        }
-      }
-    };
-
-    // Проходим по каждому пользователю и собираем disabled задачи
-    for (const user of response.data.results) {
-      const taskList = user.mentor?.task_list || [];
-      collectDisabledTasks(taskList);
-    }
-
-  } catch (error) {
-    console.error("Ошибка загрузки кабинета руководителя", error);
+const props = defineProps({
+  disabledDelegationTasks: {
+    type: Array,
+    required: true
+  },
+  isOpen: {
+    type: Boolean,
+    required: true
   }
-};
+});
+
+const emit = defineEmits(['update:isOpen']);
+
+function closeDialog() {
+  emit('update:isOpen', false);
+}
+</script>
