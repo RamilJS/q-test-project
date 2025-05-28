@@ -1,46 +1,28 @@
+function pluralizeMeetings(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+
+  if (mod10 === 1 && mod100 !== 11) return `${count} встреча`;
+  if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return `${count} встречи`;
+  return `${count} встреч`;
+
+  }
+
 <template>
-  <q-dialog v-model="isOpen" persistent>
-    <q-card class="q-pa-md" style="max-width: 600px; width: 100%">
-      <q-card-section>
-        <div class="text-h6">Задачи, которые не могут быть делегированы</div>
-      </q-card-section>
-
-      <q-separator />
-
-      <q-card-section class="scroll q-py-sm" style="max-height: 300px">
-        <q-list bordered separator>
-          <q-item v-for="task in disabledDelegationTasks" :key="task.id">
-            <q-item-section>{{ task.name }}</q-item-section>
-          </q-item>
-        </q-list>
-      </q-card-section>
-
-      <q-separator />
-
-      <q-card-actions align="right">
-        <q-btn flat label="Понятно" color="primary" @click="closeDialog" />
-      </q-card-actions>
-    </q-card>
-  </q-dialog>
+  <div class="q-mt-sm text-caption text-grey-8">
+    {{ pluralizeMeetings(meetingCount) }}
+  </div>
 </template>
 
 <script setup>
-import { defineProps, defineEmits } from 'vue';
+const meetingCount = ref(5) // Пример
 
-const props = defineProps({
-  disabledDelegationTasks: {
-    type: Array,
-    required: true
-  },
-  isOpen: {
-    type: Boolean,
-    required: true
-  }
-});
+function pluralizeMeetings(count) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
 
-const emit = defineEmits(['update:isOpen']);
-
-function closeDialog() {
-  emit('update:isOpen', false);
+  if (mod10 === 1 && mod100 !== 11) return `${count} встреча`;
+  if (mod10 >= 2 && mod10 <= 4 && !(mod100 >= 12 && mod100 <= 14)) return `${count} встречи`;
+  return `${count} встреч`;
 }
 </script>
