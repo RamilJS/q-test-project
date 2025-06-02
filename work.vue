@@ -1,55 +1,24 @@
-const confirmDeleteMentorDialogOpen = ref(false);
-const mentorToDeleteId = ref(null);
+const taskIdsSet = new Set();
+disabledDelegationTasks.value = [];
 
-<q-btn
-  v-if="employee.mentor.person_fullname"
-  label="Удалить помощника"
-  flat
-  color="primary"
-  class="delete-mentor-button"
-  size="sm"
-  padding="sm"
-  @click="openConfirmDeleteMentor(employee.id)"
-  style="min-width: 145px;"
-/>
-
-const openConfirmDeleteMentor = (id) => {
-  mentorToDeleteId.value = id;
-  confirmDeleteMentorDialogOpen.value = true;
-};
-
-<q-dialog v-model="confirmDeleteMentorDialogOpen">
-  <q-card style="min-width: 400px;">
-    <q-card-section class="text-h6">
-      Удалить помощника?
-    </q-card-section>
-
-    <q-card-actions align="right">
-      <q-btn
-        flat
-        label="Нет"
-        color="primary"
-        @click="confirmDeleteMentorDialogOpen = false"
-      />
-      <q-btn
-        label="Да"
-        color="primary"
-        @click="confirmDeleteMentor"
-      />
-    </q-card-actions>
-  </q-card>
-</q-dialog>
-
-const confirmDeleteMentor = () => {
-  if (mentorToDeleteId.value !== null) {
-    deleteDelegationInfo(mentorToDeleteId.value);
-    confirmDeleteMentorDialogOpen.value = false;
-    mentorToDeleteId.value = null;
+const collectDisabledTasks = (tasks) => {
+  for (const task of tasks) {
+    if (task.disabled && !taskIdsSet.has(task.task_id)) {
+      taskIdsSet.add(task.task_id);
+      disabledDelegationTasks.value.push(task);
+    }
+    if (task.tasks && task.tasks.length > 0) {
+      collectDisabledTasks(task.tasks);
+    }
   }
 };
 
-return {
-  openConfirmDeleteMentor,
-  confirmDeleteMentorDialogOpen,
-  confirmDeleteMentor,
-};
+// Внутри fetchUsersData, как у тебя сейчас:
+for (const user of response.data.results) {
+  const taskList = user.mentor?.task_list || [];
+  collectDisabledTasks(taskList);
+}
+
+const disabledTaskNames = computed(() =>
+  disabledDelegationTasks.value.map(task => task.name)
+);
