@@ -1,22 +1,33 @@
 
-<q-btn
-  v-if="employee.mentor.person_fullname && (employee.status == 'active' || employee.status == 'planned')"
-  label="Удалить помощника"
-  flat
-  color="primary"
-  class="delete-mentor-button"
-  size="sm"
-  padding="sm"
-  @click="openConfirmDeleteMentor(employee.id)"
-  style="min-width: 145px;"
+const selectedTaskIds = ref([]); // <--- добавить это
+
+function transformTasksToTree(tasks) {
+  return tasks.map(task => {
+    if (task.checked) {
+      selectedTaskIds.value.push(task.id); // добавляем в ticked список
+    }
+
+    return {
+      ...task,
+      children: task.tasks ? transformTasksToTree(task.tasks) : []
+    };
+  });
+}
+
+  const treeData = computed(() => {
+  if (!currentTaskList.value?.length) return [];
+  selectedTaskIds.value = []; // очищаем перед каждой трансформацией
+  return transformTasksToTree(currentTaskList.value);
+});
+
+<q-tree
+  :nodes="treeData"
+  node-key="id"
+  label-key="name"
+  tick-strategy="leaf"
+  tickable
+  v-model:ticked="selectedTaskIds"
+  default-expand-all
 />
 
-<q-btn
-  v-if="employee.status == 'active' || employee.status == 'planned'"
-  color="primary"
-  text-color="white"
-  label="Назначить помощника"
-  size="sm"
-  padding="sm"
-  @click="openAppointAssistantModal(employee.person.person_id)"
-/>
+  
