@@ -39,3 +39,24 @@ const getRoleColor = (role) => {
       return 'grey';
   }
 };
+
+<!-- Отображаем блок автора действия только если task.users не пустой -->
+<div
+  v-if="task.users"
+  class="manager-title"
+  style="
+    margin-left: 10px;
+    background-color: #ddd;
+    border-radius: 10px;
+    width: fit-content;
+    padding: 0 5px;
+  "
+>
+  <template v-for="role in task.users.split(';')" :key="role">
+    <q-icon :color="getRoleColor(role)" size="8px" name="fa-solid fa-circle" />
+    <span class="manager-title-item" style="margin-left: 5px; font-size: 12px;">
+      {{ getUserLabel(role) }}
+    </span>
+  </template>
+</div>
+
