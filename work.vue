@@ -26,3 +26,16 @@ const getTooltipText = (task) => {
 
   return `Данное поле заполняется ${roles.join(', ')}`;
 };
+
+const getRoleColor = (role) => {
+  switch (role.trim()) {
+    case 'mentor':
+      return 'blue';
+    case 'collaborator':
+      return 'green';
+    case 'manager':
+      return 'red';
+    default:
+      return 'grey';
+  }
+};
