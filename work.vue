@@ -13,3 +13,16 @@ const getUserRoles = (usersString) => {
     }
   });
 };
+
+const getTooltipText = (task) => {
+  if (!task.users) {
+    return 'Задача сохраняется автоматически';
+  }
+
+  const roles = getUserRoles(task.users);
+  if (roles.length === 0) {
+    return 'Задача сохраняется автоматически';
+  }
+
+  return `Данное поле заполняется ${roles.join(', ')}`;
+};
