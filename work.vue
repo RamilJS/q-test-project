@@ -1,32 +1,66 @@
-const isCoworkersSuccessModalOpen = ref(false);
+// ... остальной код без изменений ...
 
-<q-dialog v-model="isCoworkersSuccessModalOpen">
-  <q-card style="min-width: 500px">
-    <q-card-section class="text-h6">
-      {{ coworkersMessage }}
-    </q-card-section>
+// Измененная функция отправки комментария
+const postCommentState = async (taskId) => {
+  if (!newCommentText.value.trim()) return;
 
-    <q-card-actions align="right">
-      <q-btn label="Закрыть" flat color="primary" @click="isCoworkersSuccessModalOpen = false" />
-      <q-btn
-        label="Порекомендовать ещё коллегу"
-        color="primary"
-        @click="recommendAnotherCoworker"
-      />
-    </q-card-actions>
-  </q-card>
-</q-dialog>
+  try {
+    const requestBody = {
+      action: "eval_action",
+      remote_action_id: "",
+      wvars: [
+        { name: "_object_id", value: "" },
+        { name: "_secid", value: wtSecId },
+        { name: "user_id", value: "" },
+        { name: "adaptation_id", value: String(adaptationId) },
+        { name: "role", value: "collaborator" },
+        { name: "action_name", value: "add_comment_task" },
+        { name: "task_id", value: taskId },
+        { name: "task_status", value: "" },
+        { name: "task_comment", value: String(newCommentText.value) },
+        { name: "comment_text", value: "" },
+      ],
+    };
 
-const recommendAnotherCoworker = async () => {
-  isCoworkersSuccessModalOpen.value = false;
-  await nextTick(); // чтобы гарантировать закрытие предыдущего окна
-  openCoworkersModal(); // снова открываем форму
+    const formData = new FormData();
+    formData.append("action", JSON.stringify(requestBody));
+    const queryString = new URLSearchParams({
+      secid: wtSecId,
+    }).toString();
+
+    await axios.post(`${BACKEND_POST_URL}${queryString}`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  } catch (error) {
+    console.error("Ошибка при добавлении комментария", error);
+    showToast("Ошибка при добавлении комментария");
+    throw error; // Пробрасываем ошибку для обработки выше
+  }
 };
 
-saveCoworkersRecommendation()
-newComment.value.text = "";
-selectedCoworkerId.value = null;
-collaboratorSearch.value = "";
-isCoworkersModalOpen.value = false;
-await fetchCollaboratorSearch();
-isCoworkersSuccessModalOpen.value = true;
+// Переработанная функция-обработчик отправки
+const submitComment = async (taskId) => {
+  if (!newCommentText.value.trim()) {
+    showToast("Комментарий не может быть пустым");
+    return;
+  }
+
+  try {
+    // 1. Сначала отправляем комментарий
+    await postCommentState(taskId);
+    
+    // 2. Только после успешной отправки обновляем данные
+    await fetchCabinetData();
+    await fetchCommentListData();
+    
+  } catch (error) {
+    console.error("Ошибка в процессе отправки", error);
+  } finally {
+    // 3. Очищаем состояние независимо от результата
+    newCommentText.value = "";
+    isCommentModalOpen.value = false;
+    newCommentModalId.value = null;
+  }
+};
+
+// ... остальной код без изменений ...
