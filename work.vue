@@ -1,34 +1,67 @@
-<q-tab-panels v-model="activeCoworkersTab" animated :keep-alive="false">
-  <q-tab-panel name="recommendation">
-    <!-- Содержимое вкладки формы рекомендации коллег -->
-  </q-tab-panel>
-  <q-tab-panel name="list">
-    <!-- Содержимое вкладки списка рекомендованных коллег -->
-  </q-tab-panel>
-</q-tab-panels>
+<template>
+  <q-dialog v-model="isCoworkersModalOpen">
+    <q-card style="min-width: 800px; padding: 16px;">
 
-const openCoworkersModal = async (tab = 'recommendation') => {
-  isCoworkersModalOpen.value = true;
-  await nextTick();
+      <!-- Вкладки -->
+      <div class="row q-gutter-sm">
+        <button
+          class="tab-button"
+          :class="{ active: activeCoworkersTab === 'recommendation' }"
+          @click="activeCoworkersTab = 'recommendation'"
+        >
+          Рекомендовать коллег
+        </button>
+        <button
+          class="tab-button"
+          :class="{ active: activeCoworkersTab === 'list' }"
+          @click="activeCoworkersTab = 'list'"
+        >
+          Список коллег
+        </button>
+      </div>
 
-  activeCoworkersTab.value = tab;
-  await nextTick();
+      <q-separator class="q-my-md" />
 
-  if (tab === 'recommendation') {
-    await fetchCollaboratorList();
-  } else if (tab === 'list') {
-    await fetchCoworkers();
-  }
+      <!-- Контент вкладок -->
+      <div v-if="activeCoworkersTab === 'recommendation'">
+        <!-- Сюда помещаем форму рекомендации -->
+        <CoworkerRecommendationForm />
+      </div>
 
-  await nextTick();
-};
+      <div v-else-if="activeCoworkersTab === 'list'">
+        <!-- Сюда помещаем список коллег -->
+        <CoworkerList />
+      </div>
+    </q-card>
+  </q-dialog>
+</template>
 
-watch(activeCoworkersTab, async (newTab, oldTab) => {
-  if (!isCoworkersModalOpen.value || newTab === oldTab) return;
+<script setup>
+import { ref, watch } from 'vue'
 
-  if (newTab === 'recommendation') {
-    await fetchCollaboratorList();
-  } else if (newTab === 'list') {
-    await fetchCoworkers();
-  }
-});
+// Модальное окно
+const isCoworkersModalOpen = ref(false)
+const activeCoworkersTab = ref('recommendation')
+
+// Пример функции открытия
+const openCoworkersModal = () => {
+  activeCoworkersTab.value = 'recommendation'
+  isCoworkersModalOpen.value = true
+}
+</script>
+
+<style scoped>
+.tab-button {
+  padding: 8px 16px;
+  background: #f0f0f0;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tab-button.active {
+  background: #00AAFF;
+  color: white;
+  font-weight: bold;
+}
+</style>
