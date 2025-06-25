@@ -185,7 +185,7 @@
                     flat
                     label="Удалить"
                     color="negative"
-                    @click="deleteCoworker(coworkerItem.id)"
+                    @click="openConfirmDeleteModal(coworkerItem.id)"
                   />
                 </div>
               </div>
@@ -212,6 +212,23 @@
       </q-card-actions>
     </q-card>
   </q-dialog>
+
+  <!-- Модальное окно подтверждения удаления -->
+  <q-dialog v-model="isConfirmDeleteModalOpen">
+    <q-card style="min-width: 400px">
+      <q-card-section class="text-h6">
+        Вы уверены, что хотите удалить коллегу, рекомендованного для знакомства?
+      </q-card-section>
+      <q-card-actions align="right">
+        <q-btn label="Закрыть" flat color="primary" @click="isConfirmDeleteModalOpen = false" />
+        <q-btn
+          label="Удалить"
+          color="negative"
+          @click="confirmDeleteCoworker"
+        />
+      </q-card-actions>
+    </q-card>
+  </q-dialog>
 </template>
 
 <script setup>
@@ -225,6 +242,7 @@ const BACKEND_PERSON_URL = '';
 const route = useRoute();
 const isCoworkersModalOpen = ref(false);
 const isCoworkersSuccessModalOpen = ref(false);
+const isConfirmDeleteModalOpen = ref(false); // Для модального окна подтверждения
 const activeTab = ref('recommendation');
 const collaboratorSearch = ref('');
 const selectedCoworkerId = ref(null);
@@ -234,6 +252,7 @@ const coworkersListData = ref([]);
 const coworkersMessage = ref('');
 const newComment = ref({ text: '' });
 const personFullname = ref('');
+const coworkerIdToDelete = ref(null); // Для хранения ID коллеги, которого нужно удалить
 
 const openCoworkers = async (tab = 'recommendation') => {
   isCoworkersModalOpen.value = true;
@@ -242,6 +261,19 @@ const openCoworkers = async (tab = 'recommendation') => {
     await fetchCollaboratorList();
   } else if (tab === 'list') {
     await fetchCoworkers();
+  }
+};
+
+const openConfirmDeleteModal = (id) => {
+  coworkerIdToDelete.value = id;
+  isConfirmDeleteModalOpen.value = true;
+};
+
+const confirmDeleteCoworker = async () => {
+  if (coworkerIdToDelete.value) {
+    await deleteCoworker(coworkerIdToDelete.value);
+    isConfirmDeleteModalOpen.value = false;
+    coworkerIdToDelete.value = null;
   }
 };
 
@@ -416,8 +448,11 @@ const deleteCoworker = async (ID) => {
   }
 };
 
-onMounted(() => {
-  // Загрузка начальных данных при необходимости
+// Загрузка данных для вкладки recommendation при открытии модального окна
+watch(isCoworkersModalOpen, async (isOpen) => {
+  if (isOpen && activeTab.value === 'recommendation') {
+    await fetchCollaboratorList();
+  }
 });
 
 // Отслеживание изменений вкладки для загрузки соответствующих данных
@@ -427,6 +462,10 @@ watch(activeTab, async (newTab) => {
   } else if (newTab === 'list') {
     await fetchCoworkers();
   }
+});
+
+onMounted(() => {
+  // Загрузка начальных данных при необходимости
 });
 </script>
 
