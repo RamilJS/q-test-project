@@ -7,3 +7,8 @@ watch(activeCoworkersTab, async (newTab) => {
     await fetchCoworkers();
   }
 }, { immediate: true });
+
+const openCoworkersModal = () => {
+  activeCoworkersTab.value = 'recommendation'; // сбрасываем каждый раз
+  isCoworkersModalOpen.value = true;
+};
