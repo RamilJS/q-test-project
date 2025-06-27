@@ -1,38 +1,24 @@
-const saveTask = () => {
-  const monthMap = {
-    "Первый месяц работы": "1",
-    "Второй месяц работы": "2",
-    "Третий месяц работы": "3",
-  };
+const recommendAnotherCoworker = async () => {
+  isCoworkersSuccessModalOpen.value = false;
 
-  const rawMonth = selectedMonth.value;
-  const mappedMonth = monthMap[rawMonth];
+  // Устанавливаем нужную вкладку
+  activeCoworkersTab.value = 'recommendation';
 
-  if (!mappedMonth) {
-    showToast("Некорректное название месяца");
-    return;
-  }
+  await nextTick(); // чтобы гарантировать закрытие предыдущего окна
 
-  if (!newTaskText.value.trim() || !newTaskDate.value) {
-    showToast("Заполните все поля");
-    return;
-  }
-
-  // Дополнительная валидация даты
-  const parsedDate = new Date(newTaskDate.value);
-  if (isNaN(parsedDate.getTime())) {
-    showToast("Некорректная дата");
-    return;
-  }
-
-  addNewTask(mappedMonth, newTaskText.value, newTaskDate.value);
-  closeModal();
-  clearModal();
+  // Открываем модалку уже с нужной вкладкой
+  await openCoworkersModal();
 };
 
-const clearModal = () => {
-  newTaskText.value = "";
-  newTaskDate.value = "";
-  selectedMonth.value = "";
-  isModalOpen.value = false;
+
+const openCoworkersModal = async () => {
+  isCoworkersModalOpen.value = true;
+
+  // Не сбрасываем вкладку — она уже выбрана ранее в recommendAnotherCoworker
+
+  if (activeCoworkersTab.value === 'list') {
+    await fetchCoworkers();
+  } else if (activeCoworkersTab.value === 'recommendation') {
+    await fetchCollaboratorList();
+  }
 };
