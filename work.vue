@@ -1,20 +1,38 @@
-<span
-  class="manager-title-item"
-  style="margin-left: 5px; font-size: 12px;"
->
-  {{ formatUserRoles(task.users) }}
-</span>
+const saveTask = () => {
+  const monthMap = {
+    "Первый месяц работы": "1",
+    "Второй месяц работы": "2",
+    "Третий месяц работы": "3",
+  };
 
-const formatUserRoles = (usersString) => {
-  const roles = getUserRoles(usersString);
-  return roles.length > 1 ? roles.join(' / ') : roles[0] || '';
-};
+  const rawMonth = selectedMonth.value;
+  const mappedMonth = monthMap[rawMonth];
 
-const getTooltipText = (task) => {
-  const roles = getUserRoles(task.users);
-  if (roles.length === 0) {
-    return 'Задача сохраняется автоматически';
+  if (!mappedMonth) {
+    showToast("Некорректное название месяца");
+    return;
   }
 
-  return `Данное поле заполняет ${roles.length > 1 ? roles.join(' / ') : roles[0]}`;
+  if (!newTaskText.value.trim() || !newTaskDate.value) {
+    showToast("Заполните все поля");
+    return;
+  }
+
+  // Дополнительная валидация даты
+  const parsedDate = new Date(newTaskDate.value);
+  if (isNaN(parsedDate.getTime())) {
+    showToast("Некорректная дата");
+    return;
+  }
+
+  addNewTask(mappedMonth, newTaskText.value, newTaskDate.value);
+  closeModal();
+  clearModal();
+};
+
+const clearModal = () => {
+  newTaskText.value = "";
+  newTaskDate.value = "";
+  selectedMonth.value = "";
+  isModalOpen.value = false;
 };
