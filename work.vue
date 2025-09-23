@@ -1,18 +1,3 @@
-<q-breadcrumbs-el
-  ref="breadcrumbsTarget"
-  class="breadcrumb-item highlight-target"
-  label="Личный кабинет Адаптации"
-  :to="{ path: '/adaptation' }"
-/>
-
-<div v-if="showGuide" class="guide-overlay">
-  <div class="guide-tooltip" :style="guideTooltipStyle">
-    <p>Если вы хотите вернуться назад, нажмите на «Личный кабинет»</p>
-    <q-btn color="primary" label="ОК" @click="closeGuide" />
-  </div>
-</div>
-
-
 import { ref, onMounted, nextTick } from "vue";
 
 export default {
@@ -34,14 +19,24 @@ export default {
       if (parts.length === 2) return parts.pop().split(";").shift();
     };
 
-    const positionTooltip = () => {
-      const el = breadcrumbsTarget.value?.$el || breadcrumbsTarget.value; // для Quasar компонент
-      if (!el) return;
+    const addHighlight = () => {
+      const el = breadcrumbsTarget.value?.$el || breadcrumbsTarget.value;
+      if (el) el.classList.add("highlight-target");
+    };
 
+    const removeHighlight = () => {
+      const el = breadcrumbsTarget.value?.$el || breadcrumbsTarget.value;
+      if (el) el.classList.remove("highlight-target");
+    };
+
+    const positionTooltip = () => {
+      const el = breadcrumbsTarget.value?.$el || breadcrumbsTarget.value;
+      if (!el) return;
       const rect = el.getBoundingClientRect();
+
       guideTooltipStyle.value = {
-        position: "absolute",
-        top: `${rect.bottom + 8}px`, // немного ниже элемента
+        position: "fixed", // fixed, чтобы не зависеть от scroll контейнеров
+        top: `${rect.bottom + 8}px`,
         left: `${rect.left}px`,
         zIndex: 2200,
       };
@@ -49,6 +44,7 @@ export default {
 
     const startGuide = async () => {
       await nextTick();
+      addHighlight();
       positionTooltip();
       showGuide.value = true;
       guideTimeout = setTimeout(closeGuide, 5000);
@@ -56,6 +52,7 @@ export default {
 
     const closeGuide = () => {
       showGuide.value = false;
+      removeHighlight();
       clearTimeout(guideTimeout);
       setCookie("breadcrumbs_guide_shown", "1", 365);
     };
@@ -79,9 +76,15 @@ export default {
 
 /* Подсветка элемента */
 .highlight-target {
-  position: relative;
-  z-index: 2100;
   box-shadow: 0 0 0 4px rgba(255, 215, 0, 0.9);
   border-radius: 6px;
 }
 
+/* Всплывающая подсказка */
+.guide-tooltip {
+  background: white;
+  color: black;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
