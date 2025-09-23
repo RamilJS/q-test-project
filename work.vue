@@ -92,3 +92,66 @@ export function useGuideHighlight(targetRef, options = {}) {
     message,
   };
 }
+
+
+<template>
+  <div class="breadcrumbs-container q-mt-sm q-gutter-sm row justify-between">
+    <q-breadcrumbs class="q-mt-lg g-ml-lg text-primary">
+      <q-breadcrumbs-el
+        ref="breadcrumbsTarget"
+        label="Личный кабинет Адаптации"
+        :to="{ path: '/adaptation' }"
+      />
+      <q-breadcrumbs-el label="Задачи по изучению информации" />
+    </q-breadcrumbs>
+  </div>
+
+  <!-- Оверлей -->
+  <div v-if="showGuide" class="guide-overlay">
+    <div class="guide-tooltip" :style="guideTooltipStyle">
+      <p>{{ message }}</p>
+      <q-btn color="primary" label="ОК" @click="closeGuide" />
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from "vue";
+import { useGuideHighlight } from "@/composables/useGuideHighlight";
+
+const breadcrumbsTarget = ref(null);
+
+const { showGuide, guideTooltipStyle, closeGuide, message } =
+  useGuideHighlight(breadcrumbsTarget, {
+    cookieKey: "guide_adaptation", // уникальный ключ для этой страницы
+    message: "Если вы хотите вернуться назад, нажмите на «Личный кабинет»",
+    autoCloseMs: 5000,
+  });
+</script>
+
+.guide-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 2000;
+}
+
+/* Подсветка */
+.highlight-target {
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 0 12px black;
+  border-radius: 8px;
+  position: relative;
+  z-index: 2200;
+  background-color: white;
+}
+
+/* Подсказка */
+.guide-tooltip {
+  background: white;
+  color: black;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  max-width: 300px;
+}
+
