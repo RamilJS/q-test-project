@@ -1,28 +1,19 @@
-.guide-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.7); /* затемнение страницы */
-  z-index: 2000;
-  pointer-events: auto; /* оверлей блокирует клики */
-}
+const startGuide = async () => {
+  await nextTick();       // дожидаемся отрисовки Vue
+  addHighlight();         // подсветка элемента
+  positionTooltip();      // вычисляем координаты
+  showGuide.value = true;
 
-/* Подсветка элемента */
-.highlight-target {
-  box-shadow: 0 4px 20px rgba(0,0,0,0.5), 0 0 0 4px black; /* черная рамка + тень */
-  border-radius: 6px;
-  position: relative;
-  z-index: 2200; /* выше оверлея */
-  background-color: white; /* чтобы текст не затемнялся через overlay */
-}
+  guideTimeout = setTimeout(closeGuide, 5000);
+};
 
-/* Всплывающая подсказка */
-.guide-tooltip {
-  background: white;
-  color: black;
-  border-radius: 8px;
-  padding: 16px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-  z-index: 2300;
-  max-width: 300px;
-}
+onMounted(() => {
+  if (!getCookie("breadcrumbs_guide_shown")) {
+    startGuide();
+    window.addEventListener("resize", positionTooltip);
+  }
+});
 
+onUnmounted(() => {
+  window.removeEventListener("resize", positionTooltip);
+});
