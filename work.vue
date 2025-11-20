@@ -1,25 +1,30 @@
-// параметры (подставь свои / бери из Param)
-var personId = OptInt(Param.personId || curUserID, 0);
-var requestTypeId = (Param.requestTypeId || ""); // например "0x63D8B73554856B02"
+iPersonID = Request.AuthUserID;
+requestTypeID = 7194701844403546882;
 
-// строим SQL
-var bSqlStr = new Binary();
+var aReqs = XQuery("
+    for $r in requests
+    where $r/person_id = " + iPersonID + "
+      and $r/request_type_id = " + requestTypeID + "
+    return $r
+");
 
-bSqlStr.AppendStr("SELECT \r\n");
-bSqlStr.AppendStr("  r.id, \r\n");
-bSqlStr.AppendStr("  r.create_date, \r\n");
-bSqlStr.AppendStr("  r.request_type_id, \r\n");
-// правильно: двойные одинарные кавычки вокруг имени custom_elem
-bSqlStr.AppendStr("  r.[data].value('(request/custom_elems/custom_elem[name=''f_vacancy_name'']/value)[1]', 'varchar(max)') AS f_vacancy_name, \r\n");
-bSqlStr.AppendStr("  r.[data].value('(request/custom_elems/custom_elem[name=''f_candidate_function'']/value)[1]', 'varchar(max)') AS f_candidate_function \r\n");
-bSqlStr.AppendStr("FROM requests r \r\n");
-bSqlStr.AppendStr("WHERE r.person_id = " + Int(personId) + " \r\n");
+RESULT = [];
 
-if (requestTypeId != "") {
-  bSqlStr.AppendStr("  AND r.request_type_id = " + SqlLiteral(requestTypeId) + " \r\n");
+for (oElem in aReqs) {
+
+    doc = OpenDoc(UrlFromDocID(oElem.id));
+    root = doc.TopElem;
+
+    vacancyName = root.custom_elems.ObtainChildByKey("f_vacancy_name").value;
+    duties      = root.custom_elems.ObtainChildByKey("f_candidate_function").value;
+
+    RESULT.push({
+        id: String(Int(oElem.id)),
+        disp: vacancyName,
+        d0: vacancyName,
+        d1: String(root.create_date),
+        d2: duties
+    });
 }
 
-bSqlStr.AppendStr("ORDER BY r.create_date DESC \r\n");
 
-// Выполнение
-var aResults = XQuery("sql:" + bSqlStr.GetStr());
