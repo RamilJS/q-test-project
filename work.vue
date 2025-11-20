@@ -7,6 +7,8 @@ var aReqs = XQuery("
       and $r/request_type_id = " + requestTypeID + "
     return $r
 ");
+var aReqs = XQuery("for $r in requests where $r/person_id = " + iPersonID + " and $r/request_type_id = " + requestTypeID + " return $r");
+
 
 RESULT = [];
 
