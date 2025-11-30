@@ -1,37 +1,35 @@
-// iRequestID — ID заявки, который приходит в функцию
-var reqDoc = tools.open_doc(iRequestID).TopElem;
+iEventID = OptInt(7578479455174350432);
 
-// Берём person_id из заявки
+var reqDoc = tools.open_doc(iEventID).TopElem;
 var personId = reqDoc.person_id;
-if (personId == undefined || personId == null || personId == "") {
+
+if (!personId) {
     alert("В заявке нет person_id");
     return;
 }
 
-// Делаем XQuery для поиска руководителя
-var xq = "
-    for $p in persons
-    where $p/id = " + SqlLiteral(personId) + "
-    return $p/func_managers/func_manager[is_native=1]
-";
+// Находим сотрудника
+var xq =
+    "for $c in collaborators " +
+    "where $c/id = " + SqlLiteral(personId) + " " +
+    "return $c";
 
-// Выполняем запрос
-var mgrArr = XQuery(xq);
+var collArr = XQuery(xq);
 
-// Проверяем результат
-if (ArrayCount(mgrArr) == 0) {
-    alert('У сотрудника нет руководителя (is_native=1 не найден)');
+if (ArrayCount(collArr) == 0) {
+    alert("Сотрудник не найден");
     return;
 }
 
-// Берём первого (он единственный)
-var mgr = mgrArr[0];
+var coll = collArr[0];
 
-// Теперь у тебя есть:
-var managerId = mgr.person_id;
-var managerName = mgr.person_fullname;
+// Ищем руководителя внутри func_managers
+var mgr = coll.func_managers.func_manager.GetOptChildByKey("is_native", "1");
 
-// Для проверки выводим в лог
-alert("Manager ID: " + managerId);
-alert("Manager Name: " + managerName);
+if (!mgr) {
+    alert("У сотрудника нет руководителя (is_native=1)");
+    return;
+}
 
+alert("Manager ID: " + mgr.person_id);
+alert("Manager Name: " + mgr.person_fullname);
