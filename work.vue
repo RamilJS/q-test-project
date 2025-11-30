@@ -1,4 +1,16 @@
-/* СТИЛЬ КОНТЕЙНЕРА ТУЛТИПА */
+<style>
+.vtbl_tooltip .vtbl_tooltip_text {
+    display: none; /* скрываем текст подсказки */
+}
+
+.vtbl_tooltip::after {
+    content: '?';
+    font-size: 18px;
+    color: blue;
+    cursor: pointer;
+    margin-left: 5px;
+}
+
 .custom-tooltip {
     position: absolute;
     background: #00AAFF;
@@ -13,10 +25,9 @@
     pointer-events: none;
     transform: translate(-50%, -8px);
     opacity: 0;
-    transition: opacity .15s ease;
+    transition: opacity 0.15s ease;
 }
 
-/* СТРЕЛОЧКА */
 .custom-tooltip::after {
     content: "";
     position: absolute;
@@ -27,28 +38,33 @@
     border-style: solid;
     border-color: #00AAFF transparent transparent transparent;
 }
+</style>
 
 <script>
-
 $(document).ready(function() {
 
     let activeTooltip = null;
 
-    function showTooltip(elem, text) {
-        hideTooltip();
+    function showTooltip(targetElem) {
+        hideTooltip(); // скрываем старый tooltip, если есть
+
+        let textElem = $(targetElem).find('.vtbl_tooltip_text');
+        if (textElem.length === 0) return;
+
+        let text = textElem.text().trim();
+        if (!text) return;
 
         let tooltip = document.createElement("div");
         tooltip.className = "custom-tooltip";
         tooltip.innerText = text;
-
         document.body.appendChild(tooltip);
 
-        let rect = elem.getBoundingClientRect();
+        // позиционируем tooltip над элементом
+        let rect = targetElem.getBoundingClientRect();
+        tooltip.style.left = (rect.left + rect.width / 2 + window.scrollX) + "px";
+        tooltip.style.top = (rect.top - tooltip.offsetHeight - 6 + window.scrollY) + "px";
 
-        tooltip.style.left = (rect.left + rect.width / 2) + "px";
-        tooltip.style.top = (rect.top - 10 + window.scrollY) + "px";
-
-        // небольшая задержка чтобы сработала анимация opacity
+        // плавное появление
         requestAnimationFrame(() => {
             tooltip.style.opacity = 1;
         });
@@ -63,16 +79,12 @@ $(document).ready(function() {
         }
     }
 
-    // Показ
+    // показ тултипа при наведении
     $('body').on('mouseenter', '.vtbl_tooltip', function() {
-        let textElem = $(this).find('.vtbl_tooltip_text');
-        if (textElem.length === 0) return;
-
-        let text = textElem.text().trim();
-        showTooltip(this, text);
+        showTooltip(this);
     });
 
-    // Скрытие
+    // скрытие при уходе мыши
     $('body').on('mouseleave', '.vtbl_tooltip', function() {
         hideTooltip();
     });
