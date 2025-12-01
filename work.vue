@@ -1,45 +1,28 @@
-// --- прочие требования ---
+iPersonID = curUserID;  // текущий пользователь
+requestTypeID = "7194701844403546882";
 
-var d = Trim(getFormField("duties", ""));
-var dh = Trim(getFormField("duties_history", ""));
-var dutiesValue = "";
+sSearchStr = Trim(search);
 
-// 1. Если пользователь вручную ввёл duties — берём его
-if (d != "") {
-    dutiesValue = d;
-}
-// 2. Иначе, если передан duties_history — это ID заявки
-else if (dh != "") {
+bSqlStr = new Binary();
 
-    try {
-        var otherDoc = tools.open_doc(OptInt(dh)).TopElem;
-        dutiesValue = Trim(otherDoc.custom_elems.ObtainChildByKey("f_candidate_function").value);
-    }
-    catch (e) {
-        dutiesValue = ""; // если документ не открылся — пусто
-    }
-}
+bSqlStr.AppendStr("with fcte as (\r\n");
+bSqlStr.AppendStr("    select r.id,\r\n");
+bSqlStr.AppendStr("           r.create_date,\r\n");
+bSqlStr.AppendStr("           r.request_type_id,\r\n");
+bSqlStr.AppendStr("           r.data.value('(*/custom_elems/custom_elem[name=''f_vacancy_name'']/value)[1]', 'varchar(max)') as f_vacancy_name,\r\n");
+bSqlStr.AppendStr("           r.data.value('(*/custom_elems/custom_elem[name=''f_candidate_function'']/value)[1]', 'varchar(max)') as f_candidate_function\r\n");
+bSqlStr.AppendStr("    from requests r\r\n");
+bSqlStr.AppendStr("    where r.person_id = " + OptInt(iPersonID) + "\r\n");
+bSqlStr.AppendStr("      and r.request_type_id = " + OptInt(requestTypeID) + "\r\n");
+bSqlStr.AppendStr(")\r\n");
 
-// 3. Записываем итоговое значение в текущую заявку
-oReqDocTE.custom_elems.ObtainChildByKey("f_candidate_function").value = dutiesValue;
+bSqlStr.AppendStr("select id, create_date, request_type_id\r\n");
+bSqlStr.AppendStr("from fcte\r\n");
 
-
-// --- требования (requirements) по аналогии ---
-var r = Trim(getFormField("requirements", ""));
-var rh = Trim(getFormField("requirements_history", ""));
-var reqValue = "";
-
-if (r != "") {
-    reqValue = r;
-}
-else if (rh != "") {
-    try {
-        var otherDoc2 = tools.open_doc(OptInt(rh)).TopElem;
-        reqValue = Trim(otherDoc2.custom_elems.ObtainChildByKey("f_candidate_quality").value);
-    }
-    catch (e) {
-        reqValue = "";
-    }
+if (sSearchStr != '') {
+    sSearchStr = SqlLiteral('%' + sSearchStr + '%'); // защита от SQL-инъекций
+    bSqlStr.AppendStr("where f_vacancy_name like " + sSearchStr + "\r\n");
+    bSqlStr.AppendStr("   or f_candidate_function like " + sSearchStr + "\r\n");
 }
 
-oReqDocTE.custom_elems.ObtainChildByKey("f_candidate_quality").value = reqValue;
+aTempArray = XQuery("sql:" + bSqlStr.GetStr());
