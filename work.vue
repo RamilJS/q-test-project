@@ -1,27 +1,31 @@
 var subdivisionId = OptInt(oEventDocTE.custom_elems.ObtainChildByKey("f_vacancy_subdivision_id").value);
 
 var oOrgObj = {
-    id: undefined,
-    name: undefined
+    org_id: undefined,
+    org_name: undefined,
+    sub_id: subdivisionId,
+    sub_name: undefined
 };
 
 if (subdivisionId > 0) {
 
-    // 1. Ищем подразделение
+    // 1. Ищем подразделение по ID
     var subArr = XQuery(
         "for $s in subdivisions " +
         "where $s/id = " + subdivisionId + " " +
         "return $s"
     );
 
-    // subArr — это массив, нужно брать subArr[0]
     var sub = ArrayOptFirstElem(subArr);
 
     if (sub != undefined) {
 
+        // ✔ сохраняем название подразделения
+        oOrgObj.sub_name = String(sub.name);
+
         var orgId = OptInt(sub.org_id);
 
-        // 2. Ищем организацию
+        // 2. Ищем организацию, к которой относится это подразделение
         if (orgId > 0) {
 
             var orgArr = XQuery(
@@ -33,8 +37,10 @@ if (subdivisionId > 0) {
             var org = ArrayOptFirstElem(orgArr);
 
             if (org != undefined) {
-                oOrgObj.id = org.id;
-                oOrgObj.name = String(org.name);
+
+                // ✔ сохраняем организацию
+                oOrgObj.org_id = org.id;
+                oOrgObj.org_name = String(org.name);
             }
         }
     }
