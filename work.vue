@@ -1,10 +1,9 @@
-// ID подразделения из заявки
 var subdivisionId = OptInt(oEventDocTE.custom_elems.ObtainChildByKey("f_vacancy_subdivision_id").value);
 
-// Объект результата
-var oOrgObj = new Object();
-oOrgObj.id = undefined;
-oOrgObj.name = undefined;
+var oOrgObj = {
+    id: undefined,
+    name: undefined
+};
 
 if (subdivisionId > 0) {
 
@@ -15,24 +14,27 @@ if (subdivisionId > 0) {
         "return $s"
     );
 
-    if (ArrayCount(subArr) > 0) {
+    // subArr — это массив, нужно брать subArr[0]
+    var sub = ArrayOptFirstElem(subArr);
 
-        var sub = subArr[0];
+    if (sub != undefined) {
 
         var orgId = OptInt(sub.org_id);
 
+        // 2. Ищем организацию
         if (orgId > 0) {
 
-            // 2. Ищем организацию по org_id
             var orgArr = XQuery(
                 "for $o in organizations " +
                 "where $o/id = " + orgId + " " +
                 "return $o"
             );
 
-            if (ArrayCount(orgArr) > 0) {
-                oOrgObj.id = orgArr[0].id;
-                oOrgObj.name = String(orgArr[0].name);
+            var org = ArrayOptFirstElem(orgArr);
+
+            if (org != undefined) {
+                oOrgObj.id = org.id;
+                oOrgObj.name = String(org.name);
             }
         }
     }
