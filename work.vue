@@ -1,45 +1,37 @@
 var subdivisionId = OptInt(oEventDocTE.custom_elems.ObtainChildByKey("f_vacancy_subdivision_id").value);
-var subdivisionNameFromField = Trim(String(oEventDocTE.custom_elems.ObtainChildByKey("f_vacancy_subdivision_name").value));
+var subdivisionName = Trim(String(oEventDocTE.custom_elems.ObtainChildByKey("f_vacancy_subdivision_name").value));
 
-var oOrgObj = { id: undefined, name: undefined };
-var oSubObj = { id: subdivisionId, name: subdivisionNameFromField, full_path: "" };
+var hierarchyFinal = "";
 
-// ---------------------------------------------------------
-// ЕСЛИ subdivisionId пустой → выводим только subdivisionNameFromField
-// ---------------------------------------------------------
-if (subdivisionId == 0 || subdivisionId == undefined) {
+// -------------------------------------------
+// 1. PRIORITY: если subdivisionName есть → используем только его
+// -------------------------------------------
+if (subdivisionName != "") {
+    hierarchyFinal = subdivisionName;
+}
 
-    // просто используем текст из f_vacancy_subdivision_name
-    hierarchyFinal = subdivisionNameFromField;
-
-} else {
-
-    // ---------------------------------------------------------
-    // Иначе выполняем обычную логику поиска подразделения
-    // ---------------------------------------------------------
+// -------------------------------------------
+// 2. Если имени нет, но есть ID — ищем по справочникам
+// -------------------------------------------
+else if (subdivisionId > 0) {
 
     var subArr = XQuery("for $s in subdivisions where $s/id = " + subdivisionId + " return $s");
     var sub = ArrayOptFirstElem(subArr);
 
     if (sub != undefined) {
 
-        oSubObj.name = sub.name;
-
         // --- ищем организацию ---
+        var orgName = "";
         var orgId = OptInt(sub.org_id);
+
         if (orgId > 0) {
             var orgArr = XQuery("for $o in orgs where $o/id = " + orgId + " return $o");
             var org = ArrayOptFirstElem(orgArr);
-
-            if (org != undefined) {
-                oOrgObj.id = org.id;
-                oOrgObj.name = String(org.name);
-            }
+            if (org != undefined)
+                orgName = String(org.name);
         }
 
-        // ---------------------------------------------------------
-        // Иерархия parent_object_id
-        // ---------------------------------------------------------
+        // --- строим иерархию ---
         var hierarchy = [];
         var currentParentId = OptInt(sub.parent_object_id);
 
@@ -55,19 +47,25 @@ if (subdivisionId == 0 || subdivisionId == undefined) {
         }
 
         hierarchy = hierarchy.reverse();
-        oSubObj.full_path = hierarchy.join(" → ");
 
-        // итоговая сборка
-        var hierarchyNames = [];
+        // --- итоговая строка ---
+        var segments = [];
 
-        if (oOrgObj.name != undefined)
-            hierarchyNames.push(oOrgObj.name);
+        if (orgName != "")
+            segments.push(orgName);
 
-        if (oSubObj.full_path != "")
-            hierarchyNames.push(oSubObj.full_path);
+        if (hierarchy.length > 0)
+            segments.push(hierarchy.join(" → "));
 
-        hierarchyNames.push(oSubObj.name);
+        segments.push(String(sub.name));
 
-        hierarchyFinal = hierarchyNames.join(" → ");
+        hierarchyFinal = segments.join(" → ");
     }
 }
+
+// -------------------------------------------
+// 3. Если оба поля пустые → пусто
+// -------------------------------------------
+// hierarchyFinal уже ""
+
+
