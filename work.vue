@@ -1,37 +1,43 @@
-.breadcrumbs-container {
-  width: 100% !important;
-  max-width: 1100px; /* Дефолтная ширина как у карточки для 1373-1599px */
-  margin: 0 auto 20px !important;
-  justify-content: flex-start !important; /* Выравниваем по левому краю */
-  padding-left: 0 !important;
-}
+<template>
+  <!-- Замените q-input type="date" на: -->
+  <q-input
+    v-model="newTaskDate"
+    label="Срок выполнения"
+    outlined
+    required
+    style="max-width: 200px"
+  >
+    <template v-slot:append>
+      <q-icon name="event" class="cursor-pointer">
+        <q-popup-proxy cover transition-show="scale" transition-hide="scale">
+          <q-date 
+            v-model="newTaskDate" 
+            mask="DD.MM.YYYY"
+            :locale="ruLocale"
+          />
+        </q-popup-proxy>
+      </q-icon>
+    </template>
+  </q-input>
+</template>
 
-/* Убираем лишний отступ слева у самих хлебных крошек */
-.q-breadcrumbs.g-ml-lg {
-  margin-left: 0 !important;
-}
+<script>
+import { ref } from 'vue'
 
-/* Синхронизируем ширину с медиа-запросами карточки */
-@media (min-width: 1920px) {
-  .breadcrumbs-container {
-    max-width: 1350px;
+export default {
+  setup() {
+    const newTaskDate = ref("")
+    
+    // Русская локаль для календаря
+    const ruLocale = {
+      days: 'Вс_Пн_Вт_Ср_Чт_Пт_Сб'.split('_'),
+      daysShort: 'Вс_Пн_Вт_Ср_Чт_Пт_Сб'.split('_'),
+      months: 'Январь_Февраль_Март_Апрель_Май_Июнь_Июль_Август_Сентябрь_Октябрь_Ноябрь_Декабрь'.split('_'),
+      monthsShort: 'Янв_Фев_Мар_Апр_Май_Июн_Июл_Авг_Сен_Окт_Ноя_Дек'.split('_'),
+      firstDayOfWeek: 1 // Понедельник
+    }
+    
+    return { newTaskDate, ruLocale }
   }
 }
-
-@media (min-width: 1600px) and (max-width: 1919px) {
-  .breadcrumbs-container {
-    max-width: 1300px;
-  }
-}
-
-@media (min-width: 1373px) and (max-width: 1599px) {
-  .breadcrumbs-container {
-    max-width: 1100px;
-  }
-}
-
-@media (max-width: 1372px) {
-  .breadcrumbs-container {
-    max-width: 940px;
-  }
-}
+</script>
