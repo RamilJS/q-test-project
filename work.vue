@@ -1,3 +1,10 @@
+<q-btn
+  class="add-task-button"
+  :label="task.actualDueDate ? 'Изменить дату' : 'Добавить дату'"
+  color="secondary"
+  @click="openDateModal(month.title, task.id, task.actualDueDate)"
+/>
+
 <q-dialog v-model="isDateModalOpen">
   <q-card class="column" style="min-width: 500px; max-width: 600px">
 
