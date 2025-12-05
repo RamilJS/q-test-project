@@ -1,108 +1,48 @@
-<script setup>
-import { ref } from "vue"
-import axios from "axios"
-import { useRoute } from "vue-router"
+<q-dialog v-model="isDateModalOpen">
+  <q-card class="column" style="min-width: 500px; max-width: 600px">
 
-const BACKEND_POST_URL = "ТВОЙ_URL_ДЛЯ_POST?";
-const wtSecId = "ТВОЙ_SECID?";
+    <div class="row justify-between no-wrap">
+      <span style="margin-top: 20px; margin-left: 20px">
+        {{ newTaskActualDate ? 'Изменить дату фактического выполнения задачи' : 'Добавить дату фактического выполнения задачи' }}
+      </span>
 
-const route = useRoute()
-
-// ---- ПЕРЕМЕННЫЕ БЕЗ ПОСРЕДНИКОВ ----
-const selectedTaskId = ref(null)
-const newTaskActualDate = ref("")
-const selectedDateMonth = ref("")
-const isDateModalOpen = ref(false)
-
-// ---- ОТКРЫТИЕ МОДАЛКИ ----
-const openDateModal = (monthTitle, taskId, actualDate) => {
-  selectedDateMonth.value = monthTitle
-  selectedTaskId.value = taskId
-  newTaskActualDate.value = actualDate || ""   // сразу дата
-  isDateModalOpen.value = true
-}
-
-// ---- СБРОС ----
-const clearDateModal = () => {
-  selectedTaskId.value = null
-  newTaskActualDate.value = ""
-  selectedDateMonth.value = ""
-}
-
-// ---- ПРЯМОЕ СОХРАНЕНИЕ В БЕК ----
-const saveDateTask = async () => {
-  try {
-    const adaptationId = route.params.id;
-
-    const requestBody = {
-      action: "eval_action",
-      remote_action_id: "7490881144209959956",
-      wvars: [
-        { name: "_object_id", value: "" },
-        { name: "_secid", value: wtSecId },
-        { name: "user_id", value: "" },
-        { name: "adaptation_id", value: String(adaptationId) },
-        { name: "role", value: "collaborator" },
-        { name: "action_name", value: "save_date" },
-
-        // --- ВАЖНО: ПРЯМОЕ ПЕРЕДАЧА ID + ДАТА ---
-        { name: "task_id", value: String(selectedTaskId.value) },
-        { name: "actual_date", value: String(newTaskActualDate.value) },
-      ],
-    };
-
-    const formData = new FormData();
-    formData.append("action", JSON.stringify(requestBody));
-
-    const queryString = new URLSearchParams({ secid: wtSecId }).toString();
-
-    const response = await axios.post(
-      `${BACKEND_POST_URL}${queryString}`,
-      formData,
-      { headers: { "Content-Type": "multipart/form-data" } }
-    );
-
-    console.log("Ответ:", response.data);
-
-  } catch (error) {
-    console.error("Ошибка при обновлении даты задачи", error);
-  }
-
-  isDateModalOpen.value = false;
-  clearDateModal();
-};
-</script>
-
-
-<template>
-  <div>
-    <!-- Пример кнопки для открытия модалки -->
-    <!-- month.title, task.id, task.actualDueDate -->
-    <button @click="openDateModal('Январь', 123, '2025-02-03')">
-      Открыть модалку
-    </button>
-
-    <!-- МОДАЛКА -->
-    <div v-if="isDateModalOpen" class="modal">
-      <h3>Выбрана задача: {{ selectedTaskId }}</h3>
-      <h4>Месяц: {{ selectedDateMonth }}</h4>
-
-      <input
-        type="date"
-        v-model="newTaskActualDate"
-      />
-
-      <button @click="saveDateTask">Сохранить</button>
-      <button @click="isDateModalOpen = false">Отмена</button>
+      <q-btn icon="close" flat dense round style="margin: 10px" @click="closeDateModal" />
     </div>
-  </div>
-</template>
 
+    <q-card-section>
+      <div class="q-gutter-md column">
 
-<style scoped>
-.modal {
-  padding: 20px;
-  background: #fff;
-  border: 1px solid #ccc;
-}
-</style>
+        <div class="date-title row">
+          <span>Текущая дата:</span>
+          <span>{{ newTaskActualDate || 'Дата не выбрана' }}</span>
+        </div>
+
+        <q-input
+          v-model="newTaskActualDate"
+          :label="newTaskActualDate ? 'Срок выполнения (изменить)' : 'Срок выполнения (добавить)'"
+          outlined
+          style="max-width: 200px"
+        >
+          <template #append>
+            <q-icon name="event" class="cursor-pointer">
+              <q-popup-proxy cover transition-show="scale" transition-hide="scale">
+                <q-date
+                  v-model="newTaskActualDate"
+                  mask="DD.MM.YYYY"
+                  :locale="ruLocale"
+                />
+              </q-popup-proxy>
+            </q-icon>
+          </template>
+        </q-input>
+
+      </div>
+    </q-card-section>
+
+    <q-card-actions align="right">
+      <q-btn flat label="Отмена" color="grey" @click="closeDateModal" />
+      <q-btn flat label="Сохранить" color="secondary" @click="saveDateTask" />
+    </q-card-actions>
+
+  </q-card>
+</q-dialog>
