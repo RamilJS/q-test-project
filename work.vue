@@ -1,55 +1,34 @@
-<q-btn
-  class="add-task-button"
-  :label="task.actualDueDate ? 'Изменить дату' : 'Добавить дату'"
-  color="secondary"
-  @click="openDateModal(month.title, task.id, task.actualDueDate)"
-/>
+<li class="table-row-item actual-date-cell">
+  <div class="row items-center justify-between no-wrap" style="width: 100%">
+    <span class="actual-date-text">
+      {{ task.actualDueDate || '—' }}
+    </span>
 
-<q-dialog v-model="isDateModalOpen">
-  <q-card class="column" style="min-width: 500px; max-width: 600px">
+    <q-btn
+      class="add-task-button"
+      :label="task.actualDueDate ? 'Изменить' : 'Добавить'"
+      color="secondary"
+      size="sm"
+      dense
+      flat
+      @click="openDateModal(month.title, task.id, task.actualDueDate)"
+    />
+  </div>
+</li>
 
-    <div class="row justify-between no-wrap">
-      <span style="margin-top: 20px; margin-left: 20px">
-        {{ newTaskActualDate ? 'Изменить дату фактического выполнения задачи' : 'Добавить дату фактического выполнения задачи' }}
-      </span>
+.actual-date-cell {
+  display: flex;
+  align-items: center;
+}
 
-      <q-btn icon="close" flat dense round style="margin: 10px" @click="closeDateModal" />
-    </div>
+.actual-date-text {
+  font-size: 14px;
+  color: #333;
+}
 
-    <q-card-section>
-      <div class="q-gutter-md column">
-
-        <div class="date-title row">
-          <span>Текущая дата:</span>
-          <span>{{ newTaskActualDate || 'Дата не выбрана' }}</span>
-        </div>
-
-        <q-input
-          v-model="newTaskActualDate"
-          :label="newTaskActualDate ? 'Срок выполнения (изменить)' : 'Срок выполнения (добавить)'"
-          outlined
-          style="max-width: 200px"
-        >
-          <template #append>
-            <q-icon name="event" class="cursor-pointer">
-              <q-popup-proxy cover transition-show="scale" transition-hide="scale">
-                <q-date
-                  v-model="newTaskActualDate"
-                  mask="DD.MM.YYYY"
-                  :locale="ruLocale"
-                />
-              </q-popup-proxy>
-            </q-icon>
-          </template>
-        </q-input>
-
-      </div>
-    </q-card-section>
-
-    <q-card-actions align="right">
-      <q-btn flat label="Отмена" color="grey" @click="closeDateModal" />
-      <q-btn flat label="Сохранить" color="secondary" @click="saveDateTask" />
-    </q-card-actions>
-
-  </q-card>
-</q-dialog>
+.add-task-button {
+  font-size: 12px !important;
+  padding: 4px 10px !important;
+  min-width: 90px;
+  text-transform: none;
+}
