@@ -1,5 +1,33 @@
+const showPopup = ref(false);
+
+const openDatePopup = () => {
+  showPopup.value = true;
+
+  nextTick(() => {
+    positionQDatePopup();
+  });
+};
+
+const positionQDatePopup = () => {
+  setTimeout(() => {
+    const menu = document.querySelector(".q-menu.q-position-engine");
+    const input = document.querySelector(".my-date-input"); // класс зададим вручную
+
+    if (!menu || !input) return;
+
+    const rect = input.getBoundingClientRect();
+
+    // Выставляем фиксированную позицию
+    menu.style.position = "fixed";
+    menu.style.top = rect.top + "px";
+    menu.style.left = rect.left - menu.offsetWidth - 10 + "px"; 
+    // ^^^ 10px — расстояние между input и calendar
+
+  }, 10);
+};
+
 <q-input
-  ref="dateInput"
+  class="my-date-input"
   v-model="newTaskActualDate"
   label="Дата выполнения"
   outlined
@@ -10,7 +38,7 @@
     <q-icon
       name="event"
       class="cursor-pointer"
-      @click="openPopup"
+      @click="openDatePopup"
     />
   </template>
 </q-input>
@@ -19,40 +47,11 @@
   v-model="showPopup"
   transition-show="scale"
   transition-hide="scale"
-  auto-close
-  ref="popup"
 >
   <q-date
     v-model="newTaskActualDate"
     mask="DD.MM.YYYY"
     :locale="ruLocale"
-    @update:model-value="closePopup"
+    auto-close
   />
 </q-popup-proxy>
-
-const showPopup = ref(false);
-const popup = ref(null);
-
-function openPopup() {
-  showPopup.value = true;
-
-  // ждём рендера popup
-  nextTick(() => {
-    moveCalendarLeft();
-  });
-}
-
-function closePopup() {
-  showPopup.value = false;
-}
-
-// ─────────────────────
-// Сдвигаем q-date влево
-// ─────────────────────
-function moveCalendarLeft() {
-  const el = popup.value?.$el;
-  if (!el) return;
-
-  // Сдвигаем на 250px влево
-  el.style.setProperty("--q-pe-left", "-250px");
-}
