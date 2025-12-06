@@ -10,27 +10,49 @@
     <q-icon
       name="event"
       class="cursor-pointer"
-      @click="showDatePopup = true"
+      @click="openPopup"
     />
   </template>
 </q-input>
 
 <q-popup-proxy
-  v-model="showDatePopup"
-  :anchor="refEl"
+  v-model="showPopup"
   transition-show="scale"
   transition-hide="scale"
   auto-close
+  ref="popup"
 >
   <q-date
     v-model="newTaskActualDate"
     mask="DD.MM.YYYY"
     :locale="ruLocale"
-    @update:model-value="showDatePopup = false"
+    @update:model-value="closePopup"
   />
 </q-popup-proxy>
 
-const showDatePopup = ref(false);
-const dateInput = ref(null);
+const showPopup = ref(false);
+const popup = ref(null);
 
-const refEl = computed(() => dateInput.value?.$el);
+function openPopup() {
+  showPopup.value = true;
+
+  // ждём рендера popup
+  nextTick(() => {
+    moveCalendarLeft();
+  });
+}
+
+function closePopup() {
+  showPopup.value = false;
+}
+
+// ─────────────────────
+// Сдвигаем q-date влево
+// ─────────────────────
+function moveCalendarLeft() {
+  const el = popup.value?.$el;
+  if (!el) return;
+
+  // Сдвигаем на 250px влево
+  el.style.setProperty("--q-pe-left", "-250px");
+}
