@@ -1,49 +1,46 @@
-<!--Модальное окно Предупреждение о задачах, которые нельзя делегировать-->
-<q-dialog v-model="isAppointAssistantClosing">
-  <q-card class="forbidden-delegate">
-    <!-- Кнопка закрытия в правом верхнем углу -->
-    <q-card-section class="q-pa-none">
+<!-- Модальное окно: задачи, которые нельзя делегировать -->
+<q-dialog v-model="isAppointAssistantClosing" persistent>
+  <q-card class="forbidden-delegate q-pa-md" style="width: 600px; max-width: 90vw;">
+    
+    <!-- Верхняя панель с крестиком -->
+    <div class="row justify-end">
       <q-btn
         flat
+        dense
+        round
         icon="close"
         color="primary"
         v-close-popup
-        class="absolute-top-right q-ma-sm"
-        style="z-index: 1;"
       />
+    </div>
+
+    <!-- Заголовок -->
+    <div class="text-h6 q-mb-md">
+      Обратите внимание, что при делегировании остались действия,<br />
+      которые необходимо выполнить непосредственному руководителю, а именно…
+    </div>
+
+    <!-- Список -->
+    <q-card-section class="scroll" style="max-height: 300px;">
+      <q-list bordered separator>
+        <q-item
+          v-for="task in disabledDelegationTasks"
+          :key="task.id"
+        >
+          <q-item-section>{{ task.name }}</q-item-section>
+        </q-item>
+      </q-list>
     </q-card-section>
 
-    <q-card-section class="q-pt-xl">
-      <div class="text-h6">
-        Обратите внимание, что при делегировании остались действия,
-        <br/>
-        которые необходимо выполнить непосредственному руководителю, а именно…
-      </div>
-    </q-card-section>
-
-    <q-card-section
-      class="column"
-      style="
-        justify-content: space-between;
-        padding-bottom: 0;
-        flex-wrap: nowrap;
-      "
-    >
-      <q-card-section class="scroll q-py-sm">
-        <q-list bordered separator>
-          <q-item v-for="task in disabledDelegationTasks" :key="task.id" style="margin-left: 10px;">
-            <q-item-section>{{ task.name }}</q-item-section>
-          </q-item>
-        </q-list>
-      </q-card-section>
-
+    <!-- Нижняя кнопка -->
+    <q-card-actions align="right" class="q-pt-none">
       <q-btn
         flat
         label="Закрыть"
         color="primary"
         v-close-popup
-        style="margin-left: auto;"
       />
-    </q-card-section>
+    </q-card-actions>
+
   </q-card>
 </q-dialog>
