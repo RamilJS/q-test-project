@@ -1,39 +1,49 @@
-<span
-  v-if="material.materialName === 'Перейти к форме рекомендации коллег'"
-  class="process-link cursor-pointer text-primary link-look"
-  @click="openCoworkersModal"
->
-  {{ material.materialName }}
-</span>
+<!--Модальное окно Предупреждение о задачах, которые нельзя делегировать-->
+<q-dialog v-model="isAppointAssistantClosing">
+  <q-card class="forbidden-delegate">
+    <!-- Кнопка закрытия в правом верхнем углу -->
+    <q-card-section class="q-pa-none">
+      <q-btn
+        flat
+        icon="close"
+        color="primary"
+        v-close-popup
+        class="absolute-top-right q-ma-sm"
+        style="z-index: 1;"
+      />
+    </q-card-section>
 
-.link-look {
-  text-decoration: underline;          /* подчёркивание */
-  color: #007bff;                      /* цвет ссылки (или используй var(--q-primary)) */
-  cursor: pointer;                     /* рука */
-}
+    <q-card-section class="q-pt-xl">
+      <div class="text-h6">
+        Обратите внимание, что при делегировании остались действия,
+        <br/>
+        которые необходимо выполнить непосредственному руководителю, а именно…
+      </div>
+    </q-card-section>
 
-.link-look:hover {
-  text-decoration: underline; /* подчёркивание остаётся */
-  opacity: 0.8;               /* лёгкий hover-эффект */
-}
+    <q-card-section
+      class="column"
+      style="
+        justify-content: space-between;
+        padding-bottom: 0;
+        flex-wrap: nowrap;
+      "
+    >
+      <q-card-section class="scroll q-py-sm">
+        <q-list bordered separator>
+          <q-item v-for="task in disabledDelegationTasks" :key="task.id" style="margin-left: 10px;">
+            <q-item-section>{{ task.name }}</q-item-section>
+          </q-item>
+        </q-list>
+      </q-card-section>
 
-.link-look:active {
-  opacity: 0.6;
-}
-
-// или
-.link-look {
-  text-decoration: underline;
-  color: var(--q-primary);
-  cursor: pointer;
-}
-.link-look {
-  text-decoration: underline;
-  cursor: pointer;
-  color: var(--q-primary);
-  font-weight: 500;
-}
-
-.link-look:hover {
-  color: #005bbb; /* чуть темнее — как у реальных ссылок */
-}
+      <q-btn
+        flat
+        label="Закрыть"
+        color="primary"
+        v-close-popup
+        style="margin-left: auto;"
+      />
+    </q-card-section>
+  </q-card>
+</q-dialog>
