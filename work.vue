@@ -1,57 +1,39 @@
-const showPopup = ref(false);
-
-const openDatePopup = () => {
-  showPopup.value = true;
-
-  nextTick(() => {
-    positionQDatePopup();
-  });
-};
-
-const positionQDatePopup = () => {
-  setTimeout(() => {
-    const menu = document.querySelector(".q-menu.q-position-engine");
-    const input = document.querySelector(".my-date-input"); // класс зададим вручную
-
-    if (!menu || !input) return;
-
-    const rect = input.getBoundingClientRect();
-
-    // Выставляем фиксированную позицию
-    menu.style.position = "fixed";
-    menu.style.top = rect.top + "px";
-    menu.style.left = rect.left - menu.offsetWidth - 10 + "px"; 
-    // ^^^ 10px — расстояние между input и calendar
-
-  }, 10);
-};
-
-<q-input
-  class="my-date-input"
-  v-model="newTaskActualDate"
-  label="Дата выполнения"
-  outlined
-  style="max-width: 200px"
-  readonly
+<span
+  v-if="material.materialName === 'Перейти к форме рекомендации коллег'"
+  class="process-link cursor-pointer text-primary link-look"
+  @click="openCoworkersModal"
 >
-  <template #append>
-    <q-icon
-      name="event"
-      class="cursor-pointer"
-      @click="openDatePopup"
-    />
-  </template>
-</q-input>
+  {{ material.materialName }}
+</span>
 
-<q-popup-proxy
-  v-model="showPopup"
-  transition-show="scale"
-  transition-hide="scale"
->
-  <q-date
-    v-model="newTaskActualDate"
-    mask="DD.MM.YYYY"
-    :locale="ruLocale"
-    auto-close
-  />
-</q-popup-proxy>
+.link-look {
+  text-decoration: underline;          /* подчёркивание */
+  color: #007bff;                      /* цвет ссылки (или используй var(--q-primary)) */
+  cursor: pointer;                     /* рука */
+}
+
+.link-look:hover {
+  text-decoration: underline; /* подчёркивание остаётся */
+  opacity: 0.8;               /* лёгкий hover-эффект */
+}
+
+.link-look:active {
+  opacity: 0.6;
+}
+
+// или
+.link-look {
+  text-decoration: underline;
+  color: var(--q-primary);
+  cursor: pointer;
+}
+.link-look {
+  text-decoration: underline;
+  cursor: pointer;
+  color: var(--q-primary);
+  font-weight: 500;
+}
+
+.link-look:hover {
+  color: #005bbb; /* чуть темнее — как у реальных ссылок */
+}
