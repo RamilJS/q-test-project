@@ -1,46 +1,103 @@
-<!-- Модальное окно: задачи, которые нельзя делегировать -->
-<q-dialog v-model="isAppointAssistantClosing" persistent>
-  <q-card class="forbidden-delegate q-pa-md" style="width: 600px; max-width: 90vw;">
-    
-    <!-- Верхняя панель с крестиком -->
-    <div class="row justify-end">
-      <q-btn
-        flat
-        dense
-        round
-        icon="close"
-        color="primary"
-        v-close-popup
-      />
-    </div>
+<script setup>
+import { ref } from "vue";
+import axios from "axios";
 
-    <!-- Заголовок -->
-    <div class="text-h6 q-mb-md">
-      Обратите внимание, что при делегировании остались действия,<br />
-      которые необходимо выполнить непосредственному руководителю, а именно…
-    </div>
+// --- Форма встречи ---
+const newMeetingModalOpen = ref(false);
+const meetingModalId = ref(null);
 
-    <!-- Список -->
-    <q-card-section class="scroll" style="max-height: 300px;">
-      <q-list bordered separator>
-        <q-item
-          v-for="task in disabledDelegationTasks"
-          :key="task.id"
-        >
-          <q-item-section>{{ task.name }}</q-item-section>
-        </q-item>
-      </q-list>
-    </q-card-section>
+const newMeetingTopic = ref("");
+const newMeetingLocation = ref("");
+const newMeetingDateStart = ref("");
+const newMeetingDateEnd = ref("");
+const newMeetingTimeStart = ref("");
+const newMeetingTimeEnd = ref("");
 
-    <!-- Нижняя кнопка -->
-    <q-card-actions align="right" class="q-pt-none">
-      <q-btn
-        flat
-        label="Закрыть"
-        color="primary"
-        v-close-popup
-      />
-    </q-card-actions>
+// --- Сотрудники ---
+const selectedCollaborator = ref(null);
+const collaboratorSearch = ref("");
+const collaboratorDialogOpen = ref(false);
+const collaboratorListData = ref([]);
+const collaboratorPage = ref(1);
 
-  </q-card>
-</q-dialog>
+// --- Emails ---
+const newMeetingEmail = ref([]);
+
+// computed для отображения в input
+const newMeetingEmailDisplay = computed({
+  get() {
+    return newMeetingEmail.value.join("; ");
+  },
+  set(value) {
+    newMeetingEmail.value = value
+      .split(";")
+      .map(e => e.trim())
+      .filter(e => e);
+  },
+});
+
+// --- Функция сброса формы ---
+const resetMeetingForm = () => {
+  newMeetingTopic.value = "";
+  newMeetingLocation.value = "";
+  newMeetingDateStart.value = "";
+  newMeetingDateEnd.value = "";
+  newMeetingTimeStart.value = "";
+  newMeetingTimeEnd.value = "";
+  newMeetingEmail.value = [];
+  selectedCollaborator.value = null;
+};
+
+// --- Отправка новой встречи ---
+const postNewMeeting = async (adaptationId) => {
+  try {
+    const collaborator = selectedCollaborator.value || {};
+
+    const requestBody = {
+      action: "eval_action",
+      remote_action_id: "7490881144209959956",
+      wvars: [
+        { name: "_object_id", value: "" },
+        { name: "_secid", value: wtSecId },
+        { name: "user_id", value: "" },
+        { name: "adaptation_id", value: String(adaptationId) },
+        { name: "role", value: "collaborator" },
+        { name: "action_name", value: "create_event" },
+        { name: "event_id", value: "" },
+        { name: "event_date_start", value: newMeetingDateStart.value },
+        { name: "event_date_finish", value: newMeetingDateEnd.value },
+        { name: "event_time_start", value: newMeetingTimeStart.value },
+        { name: "event_time_finish", value: newMeetingTimeEnd.value },
+        { name: "event_subject_line", value: newMeetingTopic.value },
+        { name: "event_place", value: newMeetingLocation.value },
+        // email отправляем через join(";")
+        {
+          name: "event_recipient_email",
+          value: newMeetingEmail.value.join(";"),
+        },
+      ],
+    };
+
+    const formData = new FormData();
+    formData.append("action", JSON.stringify(requestBody));
+
+    const queryString = new URLSearchParams({ secid: wtSecId }).toString();
+
+    await axios.post(`${BACKEND_POST_URL}${queryString}`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+
+    showToast("Встреча успешно создана");
+  } catch (error) {
+    console.error("Ошибка при создании новой встречи", error);
+    showToast("Ошибка при создании новой встречи");
+  }
+
+  // Очистка формы
+  newMeetingModalOpen.value = false;
+  meetingModalId.value = null;
+  resetMeetingForm();
+  collaboratorSearch.value = "";
+  await fetchUsersData();
+};
+</script>
