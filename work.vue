@@ -1,3 +1,19 @@
+<q-input
+  dense
+  filled
+  v-model="newMeetingEmailDisplay"
+  placeholder="Введите email через ;"
+  class="col"
+/>
+
+<q-btn
+  icon="add"
+  dense
+  flat
+  round
+  @click="collaboratorDialogOpen = true"
+/>
+
 <script setup>
 import { ref } from "vue";
 import axios from "axios";
