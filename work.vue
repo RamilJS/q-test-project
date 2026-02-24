@@ -1,4 +1,4 @@
-// получаем финальную дату из XML
+// получаем финальную дату из XML (строка)
 var finalDateStr = oEventDocTE.custom_elems.ObtainChildByKey("f_final_date").value;
 
 // текущий год
@@ -10,11 +10,11 @@ var showYearResult = false;
 // проверяем, что дата есть и не пустая
 if (finalDateStr != undefined && finalDateStr != null && finalDateStr != "") {
 
-    // преобразуем строку ISO в объект даты Websoft
-    var finalDateObj = DateNewTime(finalDateStr);
+    // Берем первые 4 символа строки — это год
+    var finalYearStr = String(finalDateStr).substr(0,4);
 
-    // получаем год финальной даты
-    var finalYear = Year(finalDateObj);
+    // преобразуем в число
+    var finalYear = Int(finalYearStr);
 
     // показываем поле f_year_result только если год финальной даты НЕ совпадает с текущим
     if (finalYear != currentYear) {
