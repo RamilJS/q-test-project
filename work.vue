@@ -1,30 +1,31 @@
-var finalDateElem = oEventDocTE.custom_elems.ObtainChildByKey("f_final_date");
-var yearResultElem = oEventDocTE.custom_elems.ObtainChildByKey("f_year_result");
+// получаем финальную дату
+var finalDate = oEventDocTE.custom_elems.ObtainChildByKey("f_final_date").value;
 
-var finalDate = finalDateElem != undefined ? finalDateElem.value : undefined;
+// текущий год (это у тебя уже работает)
+var currentYear = Year(Date());
 
-// всегда показываем финальную дату
-RESULT.push({
-    "name": "Финальная дата завершения:",
-    "value": finalDate ? StrDate(finalDate) : "",
-    "id": ArrayCount(RESULT)
-});
+// флаг показа поля
+var showYearResult = false;
 
-
-// проверяем нужно ли показывать year_result
+// проверяем только finalDate
 if (finalDate != undefined && finalDate != null && finalDate != "") {
 
     var finalYear = Year(finalDate);
-    var currentYear = Year(Date());
 
-    if (finalYear != currentYear) {
-
-        RESULT.push({
-            "name": "Ожидаемый результат на конец текущего года:",
-            "value": yearResultElem != undefined ? ("" + yearResultElem.value) : "",
-            "id": ArrayCount(RESULT)
-        });
-
+    // показываем только если год финальной даты НЕ превышает текущий
+    if (finalYear <= currentYear) {
+        showYearResult = true;
     }
+}
+
+
+// добавляем поле только если нужно
+if (showYearResult) {
+
+    RESULT.push({
+        "name": "Ожидаемый результат на конец текущего года (критерии успешности):",
+        "value": String(oEventDocTE.custom_elems.ObtainChildByKey("f_year_result").value),
+        "id": ArrayCount(RESULT)
+    });
 
 }
