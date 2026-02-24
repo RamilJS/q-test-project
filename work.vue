@@ -1,31 +1,32 @@
-// получаем финальную дату
-var finalDate = oEventDocTE.custom_elems.ObtainChildByKey("f_final_date").value;
+// получаем финальную дату из XML
+var finalDateStr = oEventDocTE.custom_elems.ObtainChildByKey("f_final_date").value;
 
-// текущий год (это у тебя уже работает)
+// текущий год
 var currentYear = Year(Date());
 
 // флаг показа поля
 var showYearResult = false;
 
-// проверяем только finalDate
-if (finalDate != undefined && finalDate != null && finalDate != "") {
+// проверяем, что дата есть и не пустая
+if (finalDateStr != undefined && finalDateStr != null && finalDateStr != "") {
 
-    var finalYear = Year(finalDate);
+    // преобразуем строку ISO в объект даты Websoft
+    var finalDateObj = DateNewTime(finalDateStr);
 
-    // показываем только если год финальной даты НЕ превышает текущий
-    if (finalYear <= currentYear) {
+    // получаем год финальной даты
+    var finalYear = Year(finalDateObj);
+
+    // показываем поле f_year_result только если год финальной даты НЕ совпадает с текущим
+    if (finalYear != currentYear) {
         showYearResult = true;
     }
 }
 
-
 // добавляем поле только если нужно
 if (showYearResult) {
-
     RESULT.push({
         "name": "Ожидаемый результат на конец текущего года (критерии успешности):",
         "value": String(oEventDocTE.custom_elems.ObtainChildByKey("f_year_result").value),
         "id": ArrayCount(RESULT)
     });
-
 }
