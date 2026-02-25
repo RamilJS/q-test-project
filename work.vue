@@ -1,45 +1,45 @@
-// --- Сохраняем спонсоров ---
-var sponsorStr = getFormField("sponsorName", "");
+case "sponsorName":
 
-// sponsorStr приходит как:
-// "123456;789012;345678"
+    var sponsorStr = "";
 
-if (sponsorStr != "")
-{
-    var sponsorIds = String(sponsorStr).split(";");
-
-    for (var i = 0; i < ArrayCount(sponsorIds); i++)
+    if (oReqDocTE.persons != undefined)
     {
-        var sponsorId = sponsorIds[i];
+        for (var j = 0; j < oReqDocTE.persons.ChildNum; j++)
+        {
+            var person = oReqDocTE.persons[j];
 
-        if (sponsorId == "")
-            continue;
+            if (person.person_id != undefined)
+            {
+                if (sponsorStr != "")
+                    sponsorStr += ";";
 
-        // открываем collaborator
-        var sponsorDoc = tools.open_doc(sponsorId);
-        if (sponsorDoc == undefined)
-            continue;
-
-        var sponsorTE = sponsorDoc.TopElem;
-
-        // создаём новый узел person
-        var newPerson = oReqDocTE.persons.AddChild();
-
-        newPerson.person_id = sponsorTE.id;
-        newPerson.person_fullname = sponsorTE.fullname;
-
-        newPerson.person_position_id = sponsorTE.position_id;
-        newPerson.person_position_name = sponsorTE.position_name;
-        newPerson.person_position_code = sponsorTE.position_code;
-
-        newPerson.person_org_id = sponsorTE.org_id;
-        newPerson.person_org_name = sponsorTE.org_name;
-        newPerson.person_org_code = sponsorTE.org_code;
-
-        newPerson.person_subdivision_id = sponsorTE.position_parent_id;
-        newPerson.person_subdivision_name = sponsorTE.position_parent_name;
-        newPerson.person_subdivision_code = sponsorTE.position_parent_code;
-
-        newPerson.person_code = sponsorTE.code;
+                sponsorStr += String(person.person_id);
+            }
+        }
     }
-}
+
+    fField.value = sponsorStr;
+
+    break;
+
+
+case "sponsorName":
+
+    var sponsorStr = "";
+
+    if (oReqDocTE.persons != undefined)
+    {
+        for (var j = 0; j < oReqDocTE.persons.length; j++)
+        {
+            var person = oReqDocTE.persons[j];
+
+            if (sponsorStr != "")
+                sponsorStr += ";";
+
+            sponsorStr += String(person.person_id);
+        }
+    }
+
+    fField.value = sponsorStr;
+
+    break;
