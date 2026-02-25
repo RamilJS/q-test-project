@@ -1,45 +1,8 @@
-case "sponsorName":
-
-    var sponsorStr = "";
-
-    if (oReqDocTE.persons != undefined)
+// --- ОЧИЩАЕМ существующих спонсоров ---
+if (oReqDocTE.persons != undefined)
+{
+    while (oReqDocTE.persons.ChildNum > 0)
     {
-        for (var j = 0; j < oReqDocTE.persons.ChildNum; j++)
-        {
-            var person = oReqDocTE.persons[j];
-
-            if (person.person_id != undefined)
-            {
-                if (sponsorStr != "")
-                    sponsorStr += ";";
-
-                sponsorStr += String(person.person_id);
-            }
-        }
+        oReqDocTE.persons.DeleteChild(0);
     }
-
-    fField.value = sponsorStr;
-
-    break;
-
-
-case "sponsorName":
-
-    var sponsorStr = "";
-
-    if (oReqDocTE.persons != undefined)
-    {
-        for (var j = 0; j < oReqDocTE.persons.length; j++)
-        {
-            var person = oReqDocTE.persons[j];
-
-            if (sponsorStr != "")
-                sponsorStr += ";";
-
-            sponsorStr += String(person.person_id);
-        }
-    }
-
-    fField.value = sponsorStr;
-
-    break;
+}
