@@ -1,40 +1,45 @@
-// получаем финальную дату
-var finalDateStr = getFormField("finalDate", "");
-var currentYear = Year(Date());
-var showYearResult = false;
+// --- Сохраняем спонсоров ---
+var sponsorStr = getFormField("sponsorName", "");
 
-if (finalDateStr != undefined && finalDateStr != null && finalDateStr != "") {
+// sponsorStr приходит как:
+// "123456;789012;345678"
 
-    // finalDate приходит как 2027-02-27T00:00:00+00:00
-    var finalYearStr = String(finalDateStr).substr(0,4);
-    var finalYear = Int(finalYearStr);
+if (sponsorStr != "")
+{
+    var sponsorIds = String(sponsorStr).split(";");
 
-    // показываем только если год больше текущего
-    if (finalYear > currentYear) {
-        showYearResult = true;
+    for (var i = 0; i < ArrayCount(sponsorIds); i++)
+    {
+        var sponsorId = sponsorIds[i];
+
+        if (sponsorId == "")
+            continue;
+
+        // открываем collaborator
+        var sponsorDoc = tools.open_doc(sponsorId);
+        if (sponsorDoc == undefined)
+            continue;
+
+        var sponsorTE = sponsorDoc.TopElem;
+
+        // создаём новый узел person
+        var newPerson = oReqDocTE.persons.AddChild();
+
+        newPerson.person_id = sponsorTE.id;
+        newPerson.person_fullname = sponsorTE.fullname;
+
+        newPerson.person_position_id = sponsorTE.position_id;
+        newPerson.person_position_name = sponsorTE.position_name;
+        newPerson.person_position_code = sponsorTE.position_code;
+
+        newPerson.person_org_id = sponsorTE.org_id;
+        newPerson.person_org_name = sponsorTE.org_name;
+        newPerson.person_org_code = sponsorTE.org_code;
+
+        newPerson.person_subdivision_id = sponsorTE.position_parent_id;
+        newPerson.person_subdivision_name = sponsorTE.position_parent_name;
+        newPerson.person_subdivision_code = sponsorTE.position_parent_code;
+
+        newPerson.person_code = sponsorTE.code;
     }
-}
-
-// поле "Ожидаемый результат на финальную дату"
-oForm.form_fields.push({
-    name: "result",
-    label: "Ожидаемый результат на финальную дату завершения (критерии успешности)",
-    type: "text",
-    richtext: true,
-    value: getFormField("result", ""),
-    mandatory: false
-});
-
-// добавляем yearResult ТОЛЬКО если finalDate > текущего года
-if (showYearResult) {
-
-    oForm.form_fields.push({
-        name: "yearResult",
-        label: "Ожидаемый результат на конец текущего года (критерии успешности)",
-        type: "text",
-        richtext: true,
-        value: getFormField("yearResult", ""),
-        mandatory: false
-    });
-
 }
