@@ -1,14 +1,25 @@
-while (ArrayCount(oReqDocTE.persons) > 0)
-{
-    oReqDocTE.persons[0].Delete();
-}
+// формируем строку спонсоров
+var sponsorsDisplay = "";
 
-
-// очищаем существующих
-if (oReqDocTE.persons != undefined)
+if (oEventDocTE.persons != undefined && ArrayCount(oEventDocTE.persons) > 0)
 {
-    for (var i = ArrayCount(oReqDocTE.persons) - 1; i >= 0; i--)
+    var sponsorNames = [];
+
+    for (var i = 0; i < ArrayCount(oEventDocTE.persons); i++)
     {
-        oReqDocTE.persons.DeleteChildByIndex(i);
+        var personElem = oEventDocTE.persons[i];
+
+        if (personElem.person_fullname != undefined && personElem.person_fullname != "")
+        {
+            sponsorNames.push(String(personElem.person_fullname));
+        }
     }
+
+    sponsorsDisplay = sponsorNames.join("; ");
 }
+
+RESULT.push({
+    "name": "Спонсоры",
+    "value": sponsorsDisplay,
+    "id": ArrayCount(RESULT)
+});
