@@ -19,3 +19,16 @@ if (finalDateStr != "")
     visibility: true,
     page: "page_one"
 },
+
+{
+    name: "yearResult",
+    label: "Ожидаемый результат на конец текущего года (критерии успешности)",
+    type: "text",
+    richtext: true,
+    value: getFormField("yearResult", ""),
+    mandatory: false,
+    visibility: [
+        { parent: "yearResultVisibleFlag", value: "1" }
+    ],
+    page: "page_one"
+},
