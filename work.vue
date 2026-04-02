@@ -176,76 +176,160 @@ function createReportString(aCollaboratorIDArray, aAsessmentIDArray, dStartDate,
 }
 
 
-// -------------------- ОСНОВНАЯ ЛОГИКА --------------------
 
-aFormFields = ParseJson(getParam("form_fields", "[]"));
-aFormFieldsDef = ParseJson(getParam("form_fields_default", "[]"));
-sSubmitType = getFormField("__submit_type__", getFormFieldDefault("__submit_type__", "main_data"));
+2 вариант
+function createReportString(aCollaboratorIDArray, aAsessmentIDArray, dStartDate, dFinishDate){
 
-oForm = new Object();
-oForm.command = "display_form";
-oForm.title = "Отчет по тестам";
+    var reportStr = new Binary();
 
-oForm.form_fields = [
-    {
-        name: "select_collaborator_ids",
-        label: "Сотрудники",
-        type: "foreign_elem",
-        multiple: true,
-        catalog: "collaborator"
-    },
-    {
-        name: "select_assessment_ids",
-        label: "Тесты",
-        type: "foreign_elem",
-        multiple: true,
-        catalog: "assessment"
-    },
-    {
-        name: "startDate",
-        label: "С",
-        type: "date",
-        value: StrDate(Date('01.01.1970'), true, false)
-    },
-    {
-        name: "finalDate",
-        label: "По",
-        type: "date",
-        value: StrDate(Date(), true, false)
+    var Ps = new Object();
+    Ps.questions = [];
+    Ps.learnings = [];
+
+    // ---------------- СБОР ДАННЫХ (АНАЛОГ CMD=RUN) ----------------
+
+    for (person_id in aCollaboratorIDArray) {
+        for (ass_id in aAsessmentIDArray) {
+
+            var arr = XQuery(
+                "for $l in test_learnings " +
+                "where $l/person_id = " + person_id +
+                " and $l/assessment_id = " + ass_id +
+                " and $l/start_usage_date >= date('" + StrDate(dStartDate, false) + "')" +
+                " and $l/start_usage_date <= date('" + StrDate(dFinishDate, false) + "')" +
+                " return $l"
+            );
+
+            for (l in arr) {
+
+                var learningDoc = OpenDoc(UrlFromDocID(l.id)).TopElem;
+
+                var obj = new Object();
+
+                obj.person_fullname = l.person_id.ForeignElem.fullname;
+                obj.person_code = l.person_id.ForeignElem.code;
+                obj.person_position_name = l.person_id.ForeignElem.position_name;
+                obj.person_subdivision_name = l.person_id.ForeignElem.subdivision_name;
+                obj.person_id = l.person_id;
+                obj.start_usage_date = l.start_usage_date;
+                obj.state_id = l.state_id;
+                obj.score = l.score;
+                obj.max_score = l.max_score;
+
+                obj.questions = {};
+
+                var fldAnnals = tools.annals_decrypt(learningDoc);
+
+                if (fldAnnals != null) {
+
+                    var history = fldAnnals.au.history;
+
+                    if (ArrayCount(history.objects) > 0) {
+
+                        var sections = history.objects[0].section;
+
+                        for (s in sections) {
+                            for (q in s.question) {
+
+                                // --- список вопросов
+                                if (ArrayOptFind(Ps.questions, "This.id == " + q.id) == undefined) {
+                                    Ps.questions.push({
+                                        id: q.id,
+                                        text: HtmlToPlainText(q.text)
+                                    });
+                                }
+
+                                var curQ = new Object();
+
+                                curQ.quest_type = (q.qtype.OptForeignElem != undefined ? q.qtype.ForeignElem.name : "");
+                                curQ.result = tools_web.is_correct_question(q) ? "Верно" : "Неверно";
+                                curQ.correct_answer = ArrayMerge(q.variant, "HtmlToPlainText(cor_value)", "; ");
+                                curQ.answer = ArrayMerge(q.variant, "HtmlToPlainText(value)", "; ");
+
+                                obj.questions[q.id] = curQ;
+                            }
+                        }
+                    }
+                }
+
+                Ps.learnings.push(obj);
+            }
+        }
     }
-];
 
-switch(sSubmitType){
+    // ---------------- HTML (1 В 1 ИЗ ШАБЛОНА) ----------------
 
-    case "main_data": {
+    reportStr.AppendStr("<html><body><table border='1' cellpadding='2' cellspacing='0'>");
 
-        oForm.buttons = [
-            {name:"submit", submit_type:"create_report", label:"Создать отчет", type:"submit"}
-        ];
+    // HEADER 1
+    reportStr.AppendStr("<tr>");
+    reportStr.AppendStr("<td colspan='8'></td>");
 
-        RESULT = oForm;
-        break;
+    for (q in Ps.questions) {
+        reportStr.AppendStr("<td colspan='4' bgcolor='#FF4433'><b>" + q.text + "</b></td>");
     }
 
-    case "create_report": {
+    reportStr.AppendStr("</tr>");
 
-        var collabs = String(getFormField("select_collaborator_ids", "")).split(";");
-        var tests = String(getFormField("select_assessment_ids", "")).split(";");
+    // HEADER 2
+    reportStr.AppendStr("<tr>");
 
-        var html = createReportString(
-            collabs,
-            tests,
-            Date(getFormField("startDate")),
-            Date(getFormField("finalDate"))
-        );
+    reportStr.AppendStr("<td><b>ФИО</b></td>");
+    reportStr.AppendStr("<td><b>Код</b></td>");
+    reportStr.AppendStr("<td><b>Орг</b></td>");
+    reportStr.AppendStr("<td><b>Подразделение</b></td>");
+    reportStr.AppendStr("<td><b>Должность</b></td>");
+    reportStr.AppendStr("<td><b>Дата</b></td>");
+    reportStr.AppendStr("<td><b>Статус</b></td>");
+    reportStr.AppendStr("<td><b>Баллы</b></td>");
 
-        tools_web.set_user_data("excel_html_" + curUserID, {html: html}, 3600);
-
-        RESULT = {
-            command: "new_window",
-            url: "assessment_excel_export.html"
-        };
-
-        break;
+    for (q in Ps.questions) {
+        reportStr.AppendStr("<td><b>Тип</b></td>");
+        reportStr.AppendStr("<td><b>Результат</b></td>");
+        reportStr.AppendStr("<td><b>Ответ</b></td>");
+        reportStr.AppendStr("<td><b>Правильный</b></td>");
     }
+
+    reportStr.AppendStr("</tr>");
+
+    // DATA
+    for (l in Ps.learnings) {
+
+        reportStr.AppendStr("<tr>");
+
+        var percent = (l.max_score > 0) ? (l.score / l.max_score * 100) : 0;
+
+        reportStr.AppendStr("<td>" + l.person_fullname + "</td>");
+        reportStr.AppendStr("<td>" + l.person_code + "</td>");
+        reportStr.AppendStr("<td>" + l.person_id.ForeignElem.org_name + "</td>");
+        reportStr.AppendStr("<td>" + l.person_subdivision_name + "</td>");
+        reportStr.AppendStr("<td>" + l.person_position_name + "</td>");
+        reportStr.AppendStr("<td>" + StrDate(l.start_usage_date, true, false) + "</td>");
+        reportStr.AppendStr("<td>" + l.state_id.ForeignElem.name + "</td>");
+        reportStr.AppendStr("<td>" + l.score + " (" + StrReal(percent,1) + "%)</td>");
+
+        for (q in Ps.questions) {
+
+            var curQ = l.questions[q.id];
+
+            if (curQ == undefined) {
+                reportStr.AppendStr("<td></td><td></td><td></td><td></td>");
+            } else {
+
+                var color = (curQ.result == "Неверно") ? "#FFCCCC" : "#CCFFCC";
+
+                reportStr.AppendStr("<td>" + curQ.quest_type + "</td>");
+                reportStr.AppendStr("<td bgcolor='" + color + "'>" + curQ.result + "</td>");
+                reportStr.AppendStr("<td>" + curQ.answer + "</td>");
+                reportStr.AppendStr("<td>" + curQ.correct_answer + "</td>");
+            }
+        }
+
+        reportStr.AppendStr("</tr>");
+    }
+
+    reportStr.AppendStr("</table></body></html>");
+
+    return reportStr.GetStr();
 }
+
