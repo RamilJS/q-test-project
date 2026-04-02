@@ -1,3 +1,18 @@
+var oSelect_collaborator_ids = getFormField('select_collaborator_ids', "");
+if (oSelect_collaborator_ids != "") {
+    oSelect_collaborator_ids = oSelect_collaborator_ids.split(";");
+} else {
+    oSelect_collaborator_ids = [];
+}
+
+var oSelect_assessment_ids = getFormField('select_assessment_ids', "");
+if (oSelect_assessment_ids != "") {
+    oSelect_assessment_ids = oSelect_assessment_ids.split(";");
+} else {
+    oSelect_assessment_ids = [];
+}
+
+
 // -------------------- УТИЛИТЫ --------------------
 
 function getParam(sName, sDefault) {
