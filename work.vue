@@ -1,23 +1,20 @@
-var raw_person_id = aCollaboratorIDArray[i];
+function normalizeIds(val) {
+    if (val == undefined || val == null || val == "")
+        return [];
 
-if (raw_person_id == undefined)
-    continue;
+    // если вдруг прилетел объект
+    if (TypeName(val) == "object") {
+        if (val.id != undefined)
+            return [Str(val.id)];
+    }
 
-raw_person_id = Trim(raw_person_id);
+    val = String(val);
 
-if (raw_person_id == "")
-    continue;
+    if (val == "")
+        return [];
 
-var person_id = OptInt(raw_person_id);
+    return val.split(";");
+}
 
-var raw_ass_id = aAssessmentIDArray[j];
-
-if (raw_ass_id == undefined)
-    continue;
-
-raw_ass_id = Trim(raw_ass_id);
-
-if (raw_ass_id == "")
-    continue;
-
-var ass_id = OptInt(raw_ass_id);
+var oSelect_collaborator_ids = normalizeIds(getFormField('select_collaborator_ids', ""));
+var oSelect_assessment_ids = normalizeIds(getFormField('select_assessment_ids', ""));
