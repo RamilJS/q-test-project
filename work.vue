@@ -9,23 +9,20 @@ var arr = XQuery(
 
 alert("Array = " + arr);
 
-// --- Нормализация результата в массив (без ArrayIsArray) ---
+// Нормализуем результат в массив (без использования .length)
 var items = [];
-if (arr != undefined && arr != null) {
-    // Проверка: если это массив (имеет свойство length и не имеет поля id, характерного для узла)
-    if (typeof arr.length === "number" && arr.id === undefined) {
-        items = arr;
-    } else if (arr.id !== undefined) {
-        // Одиночный XML-узел
+if (arr != undefined && arr != null && ArrayCount(arr) > 0) {
+    // Если найден ровно один элемент и у него есть поле id (значит, это узел, а не массив)
+    if (ArrayCount(arr) == 1 && arr.id !== undefined) {
         items = [arr];
     } else {
-        // Пустой результат или иной случай
-        items = [];
+        // Иначе считаем, что arr уже массив (или коллекция, поддерживающая индексацию)
+        items = arr;
     }
 }
 
-// --- Цикл по найденным попыткам ---
-for (var k = 0; k < items.length; k++)
+// Перебираем все найденные попытки
+for (var k = 0; k < ArrayCount(items); k++)
 {
     var l = items[k];
     // ... остальной код без изменений
