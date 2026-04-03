@@ -9,21 +9,17 @@ var arr = XQuery(
 
 alert("Array = " + arr);
 
-// Нормализуем результат в массив (без использования .length)
+// --- Нормализация результата в массив ---
 var items = [];
-if (arr != undefined && arr != null && ArrayCount(arr) > 0) {
-    // Если найден ровно один элемент и у него есть поле id (значит, это узел, а не массив)
-    if (ArrayCount(arr) == 1 && arr.id !== undefined) {
-        items = [arr];
-    } else {
-        // Иначе считаем, что arr уже массив (или коллекция, поддерживающая индексацию)
+if (arr != undefined && arr != null) {
+    if (ArrayCount(arr) > 0 && arr.id === undefined) {
         items = arr;
+    } else if (arr.id !== undefined) {
+        items = [arr];
     }
 }
 
-// Перебираем все найденные попытки
-for (var k = 0; k < ArrayCount(items); k++)
-{
+for (var k = 0; k < ArrayCount(items); k++) {
     var l = items[k];
-    // ... остальной код без изменений
+    // ... всё остальное без изменений
 }
