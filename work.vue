@@ -1,4 +1,3 @@
-
 function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate, dFinishDate)
 {
     alert("старт функции createReportString");
@@ -6,12 +5,12 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
     var aLearnings = [];
     var aQuestions = [];
 
-    for (var i = 0; i < ArrayCount(aCollaboratorIDArray); i++) {
+    for (var i in aCollaboratorIDArray) {
         var raw_person_id = aCollaboratorIDArray[i];
         if (raw_person_id == undefined || Trim(raw_person_id) == "") continue;
         var person_id = raw_person_id;
         
-        for (var j = 0; j < ArrayCount(aAssessmentIDArray); j++) {
+        for (var j in aAssessmentIDArray) {
             var raw_ass_id = aAssessmentIDArray[j];
             if (raw_ass_id == undefined || Trim(raw_ass_id) == "") continue;
             var ass_id = raw_ass_id;
@@ -25,25 +24,29 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
                 " return $l"
             );
             
-            for (var k = 0; k < ArrayCount(arr); k++) {
-                var learning = arr[k];
+            // Перебираем результаты XQuery через for..in (как у вас работало)
+            for (var l in arr) {
+                var learning = l;  // В вашей среде l уже является элементом
                 
-                // Базовый объект
-                var obj = {
-                    person_fullname: learning.person_fullname,
-                    assessment_name: learning.assessment_name,
-                    person_code: (learning.person_id && learning.person_id.ForeignElem) ? learning.person_id.ForeignElem.code : "",
-                    org: learning.person_org_name,
-                    subdivision: learning.person_subdivision_name,
-                    position: learning.person_position_name,
-                    date: learning.start_usage_date,
-                    status: (learning.state_id && learning.state_id.ForeignElem) ? learning.state_id.ForeignElem.name : learning.state_id,
-                    score: learning.score,
-                    max_score: learning.max_score,
-                    questions: {}
-                };
+                // Если вдруг l оказался индексом (для совместимости), возьмём arr[l]
+                if (learning.id == undefined && arr[l] != undefined) {
+                    learning = arr[l];
+                }
                 
-                // Пытаемся получить анналы
+                var obj = new Object();
+                obj.person_fullname = learning.person_fullname;
+                obj.assessment_name = learning.assessment_name;
+                obj.person_code = (learning.person_id && learning.person_id.ForeignElem) ? learning.person_id.ForeignElem.code : "";
+                obj.org = learning.person_org_name;
+                obj.subdivision = learning.person_subdivision_name;
+                obj.position = learning.person_position_name;
+                obj.date = learning.start_usage_date;
+                obj.status = (learning.state_id && learning.state_id.ForeignElem) ? learning.state_id.ForeignElem.name : learning.state_id;
+                obj.score = learning.score;
+                obj.max_score = learning.max_score;
+                obj.questions = {};
+                
+                // Расшифровка анналов
                 try {
                     var doc = OpenDoc(UrlFromDocID(learning.id)).TopElem;
                     var annals = tools.annals_decrypt(doc);
@@ -51,14 +54,14 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
                     if (annals && annals.au && annals.au.history && ArrayCount(annals.au.history.objects) > 0) {
                         var sections = annals.au.history.objects[0].section;
                         if (sections) {
-                            for (var s = 0; s < ArrayCount(sections); s++) {
-                                var questions = sections[s].question;
+                            for (var s in sections) {
+                                var section = sections[s];
+                                var questions = section.question;
                                 if (!questions) continue;
-                                for (var q = 0; q < ArrayCount(questions); q++) {
+                                for (var q in questions) {
                                     var question = questions[q];
                                     var qid = question.PrimaryKey ? String(question.PrimaryKey) : String(question.id);
                                     
-                                    // Добавляем вопрос в общий список
                                     if (ArrayOptFind(aQuestions, "This.id == '" + qid + "'") == undefined) {
                                         aQuestions.push({
                                             id: qid,
@@ -66,13 +69,11 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
                                         });
                                     }
                                     
-                                    // Данные ответа
-                                    var qObj = {};
+                                    var qObj = new Object();
                                     qObj.quest_type = (question.qtype && question.qtype.ForeignElem) ? question.qtype.ForeignElem.name : (question.qtype || "");
                                     var hasWeight = (ArrayOptFind(question.variant, "This.varscore.HasValue") != undefined);
                                     qObj.result = (!hasWeight && tools_web.is_correct_question(question)) ? "верно" : "неверно";
                                     
-                                    // Ответы
                                     switch (question.qtype) {
                                         case "choice":
                                         case "select":
@@ -90,7 +91,7 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
                         }
                     }
                 } catch(e) {
-                    alert("Ошибка при разборе анналов: " + e.message);
+                    alert("Ошибка анналов: " + e.message);
                 }
                 
                 aLearnings.push(obj);
@@ -98,7 +99,7 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
         }
     }
     
-    // Генерация HTML (без изменений, как в предыдущем варианте)
+    // Генерация HTML (оставляем как в предыдущем рабочем варианте)
     var html = new Binary();
     html.AppendStr("<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\" xmlns=\"http://www.w3.org/TR/REC-html40\">" +
         "<head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\"/>" +
@@ -109,11 +110,11 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
     if (ArrayCount(aLearnings) == 0) {
         html.AppendStr("<tr><td colspan='9'>Нет данных за выбранный период</td></tr>");
     } else {
-        // Шапка с вопросами
         if (ArrayCount(aQuestions) > 0) {
             html.AppendStr("<tr><td colspan='9'></td>");
-            for (var qi = 0; qi < ArrayCount(aQuestions); qi++) {
-                html.AppendStr("<td colspan='4' bgcolor='#EA9999'><b>" + aQuestions[qi].text + "</b></td>");
+            for (var qi in aQuestions) {
+                var q = aQuestions[qi];
+                html.AppendStr("<td colspan='4' bgcolor='#EA9999'><b>" + q.text + "</b></td>");
             }
             html.AppendStr("</tr>");
         }
@@ -129,7 +130,7 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
         html.AppendStr("<td bgcolor='#FCE5CD'><b>Статус</b></td>");
         html.AppendStr("<td bgcolor='#FCE5CD'><b>Баллы</b></td>");
         
-        for (var qi = 0; qi < ArrayCount(aQuestions); qi++) {
+        for (var qi in aQuestions) {
             html.AppendStr("<td bgcolor='#FCE5CD'><b>Тип</b></td>");
             html.AppendStr("<td bgcolor='#FCE5CD'><b>Результат</b></td>");
             html.AppendStr("<td bgcolor='#FCE5CD'><b>Полученный ответ</b></td>");
@@ -137,7 +138,7 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
         }
         html.AppendStr("</tr>");
         
-        for (var c = 0; c < ArrayCount(aLearnings); c++) {
+        for (var c in aLearnings) {
             var K = aLearnings[c];
             html.AppendStr("<tr valign='top'>");
             html.AppendStr("<td width='250'>" + (K.person_fullname || "") + "</td>");
@@ -158,7 +159,7 @@ function createReportString(aCollaboratorIDArray, aAssessmentIDArray, dStartDate
             }
             html.AppendStr("<td width='100' align='center'>" + score + "</td>");
             
-            for (var qi = 0; qi < ArrayCount(aQuestions); qi++) {
+            for (var qi in aQuestions) {
                 var qid = aQuestions[qi].id;
                 var qData = K.questions[qid];
                 if (qData == undefined) {
