@@ -4,3 +4,7 @@ if (ArrayCount(history.objects) == 0)
     continue;
 
 var sections = ArrayFirstElem(history.objects).section;
+
+// нормализация
+if (ObjectType(sections) != 'array')
+    sections = [sections];
