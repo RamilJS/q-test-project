@@ -1,6 +1,17 @@
+try {
+    qData = K.questions[qid2];
+} catch(e) {
+    qData = undefined;
+}
+
 for (var qh3 = 0; qh3 < ArrayCount(aQuestions); qh3++) {
     var qid2 = aQuestions[qh3].id;
-    var qData = K.questions.GetOptChildByKey(qid2);   // безопасный доступ
+    var qData;
+    try {
+        qData = K.questions[qid2];
+    } catch(e) {
+        qData = undefined;
+    }
     if (qData == undefined) {
         html.AppendStr("<td colspan='4'> </td>");
     } else {
