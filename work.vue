@@ -1,103 +1,70 @@
-// После получения annals
-var fldAnnals = annals; // tools.annals_decrypt(doc)
-
-if (fldAnnals == null) continue; // или обработать
-
-var _cur_history = fldAnnals.au.history;
-if (ArrayCount(_cur_history.objects) == 0) continue;
-var _cur_sections = ArrayFirstElem(_cur_history.objects).section;
-
-for (var _section in _cur_sections) {
-    var _sectionObj = _cur_sections[_section];
-    if (!_sectionObj.question) continue;
-    for (var _question in _sectionObj.question) {
-        var q = _sectionObj.question[_question];
-        var qid = String(q.PrimaryKey || q.ident || q.id);
-        
-        // Добавление в список вопросов (уникально)
-        if (ArrayOptFind(aQuestions, "This.id == '" + qid + "'") == undefined) {
-            aQuestions.push({
-                id: qid,
-                text: HtmlToPlainText(q.text || "")
-            });
-        }
-        
-        var qObj = new Object();
-        
-        // Тип вопроса
-        var bIsWeight = (ArrayOptFind(q.variant, 'varscore.HasValue') != undefined);
-        qObj.quest_type = (q.qtype && q.qtype.OptForeignElem ? q.qtype.ForeignElem.name : (q.qtype || "")) + (bIsWeight ? " взвешенный" : "");
-        
-        // Результат
-        qObj.result = (!bIsWeight ? (tools_web.is_correct_question(q) ? "верно" : "неверно") : "");
-        
-        // --- Правильный ответ (correct_answer) ---
-        switch (q.qtype) {
-            case "choice":
-            case "select":
-                qObj.correct_answer = ArrayMerge(
-                    ArraySelect(q.variant, "correct == '1'"),
-                    "HtmlToPlainText(text)",
-                    "; "
-                );
-                break;
-            case "range":
-                var _str = "";
-                var _counter = 0;
-                for (var _ans in q.variant) {
-                    _str += (_str == "" ? "" : "; ") + _counter++;
-                }
-                qObj.correct_answer = _str;
-                break;
-            case "numeric":
-                qObj.correct_answer = ArrayMerge(
-                    q.variant,
-                    "ArrayMerge(cond,'operator.ForeignElem.name + Trim(Value)',', ')",
-                    "; "
-                );
-                break;
-            case "text":
-                qObj.correct_answer = ArrayMerge(
-                    q.variant,
-                    "ArrayMerge(cond,'operator=='cn'?'...'+Trim(Value)+'...':Trim(Value)',', ')",
-                    "; "
-                );
-                break;
-            default:
-                qObj.correct_answer = ArrayMerge(
-                    q.variant,
-                    "HtmlToPlainText(cor_value)",
-                    "; "
-                );
-                break;
-        }
-        
-        // --- Ответ пользователя (answer) ---
-        switch (q.qtype) {
-            case "choice":
-            case "select":
-                qObj.answer = ArrayMerge(
-                    ArraySelect(q.variant, "Trim(This) == '1'"),
-                    "HtmlToPlainText(text)",
-                    "; "
-                );
-                break;
-            case "range":
-                qObj.answer = ArrayMerge(
-                    ArraySelect(q.variant, "Trim(value) != ''"),
-                    "HtmlToPlainText(value)",
-                    "; "
-                );
-                break;
-            default:
-                qObj.answer = ArrayMerge(
-                    q.variant,
-                    "HtmlToPlainText(value)",
-                    "; "
-                );
-                break;
-        }
-        
-        obj.questions[qid] = qObj;
+for (var q in questions) {
+    var question = questions[q];
+    var qid = String(question.ident || question.id);
+    
+    // Уникальный список вопросов
+    if (ArrayOptFind(aQuestions, "This.id == '" + qid + "'") == undefined) {
+        aQuestions.push({
+            id: qid,
+            text: HtmlToPlainText(question.text || "")
+        });
     }
+    
+    var qObj = new Object();
+    
+    // --- Тип вопроса ---
+    try {
+        if (question.qtype != undefined && question.qtype.OptForeignElem != undefined)
+            qObj.quest_type = question.qtype.ForeignElem.name;
+        else
+            qObj.quest_type = question.qtype || "";
+    } catch(e) {
+        qObj.quest_type = "";
+        LogEvent("Ramil", "Ошибка типа вопроса: " + e.message);
+    }
+    
+    // --- Результат (верно/неверно) ---
+    try {
+        qObj.result = tools_web.is_correct_question(question) ? "верно" : "неверно";
+    } catch(e) {
+        qObj.result = "";
+        LogEvent("Ramil", "Ошибка результата: " + e.message);
+    }
+    
+    // --- Нормализация вариантов ---
+    var variants = [];
+    if (question.variant != undefined) {
+        if (ObjectType(question.variant) == "array")
+            variants = question.variant;
+        else
+            variants = [question.variant];
+    }
+    
+    // --- Правильный ответ (используем ws_right) ---
+    var correctTexts = [];
+    for (var vi = 0; vi < ArrayCount(variants); vi++) {
+        var v = variants[vi];
+        if (v.ws_right == '1')
+            correctTexts.push(HtmlToPlainText(v.text || ""));
+    }
+    qObj.correct_answer = correctTexts.join("; ");
+    
+    // --- Ответ пользователя (используем value) ---
+    var userTexts = [];
+    for (var vi = 0; vi < ArrayCount(variants); vi++) {
+        var v = variants[vi];
+        if (v.value != undefined && v.value != "")
+            userTexts.push(HtmlToPlainText(v.text || ""));
+    }
+    // Если по value не нашли, пробуем selected
+    if (userTexts.length == 0) {
+        for (var vi = 0; vi < ArrayCount(variants); vi++) {
+            var v = variants[vi];
+            if (v.selected == '1' || v.selected == true)
+                userTexts.push(HtmlToPlainText(v.text || ""));
+        }
+    }
+    qObj.answer = userTexts.join("; ");
+    
+    obj.questions[qid] = qObj;
 }
