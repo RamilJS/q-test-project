@@ -1,34 +1,67 @@
 else
 {
       objectsData = annals.au.history.objects;
-      objectsArr = null;
+      objectsArr = [];
 
-    // Определяем, где лежит список объектов
+    // Определяем массив объектов
     if (ArrayCount(objectsData) > 0) {
-        objectsArr = objectsData;
-    } else if (objectsData.object != undefined) {
-        objectsArr = objectsData.object;
+        for (  oi = 0; oi < ArrayCount(objectsData); oi++) {
+            objectsArr.push(objectsData[oi]);
+        }
+    } else if (objectsData.object != undefined && ArrayCount(objectsData.object) > 0) {
+        for (  oi = 0; oi < ArrayCount(objectsData.object); oi++) {
+            objectsArr.push(objectsData.object[oi]);
+        }
+    } else if (objectsData.section != undefined) {
+        objectsArr.push(objectsData);
     } else {
         alert("Неизвестная структура objects");
-        objectsArr = [];
     }
 
     alert("objectsArr count = " + ArrayCount(objectsArr));
 
-    // Перебираем объекты (for..in вернёт сами объекты)
-    for (  objItem in objectsArr) {
+    for (  oi = 0; oi < ArrayCount(objectsArr); oi++) {
+          objItem = objectsArr[oi];
         if (objItem.section == undefined) continue;
 
           sectionsData = objItem.section;
-        alert("sections count = " + ArrayCount(sectionsData));
+          sectionsArr = [];
 
-        // Перебираем секции
-        for (  sec in sectionsData) {
+        if (ArrayCount(sectionsData) > 0) {
+            for (  si = 0; si < ArrayCount(sectionsData); si++) {
+                sectionsArr.push(sectionsData[si]);
+            }
+        } else if (sectionsData.section != undefined) {
+            for (  si = 0; si < ArrayCount(sectionsData.section); si++) {
+                sectionsArr.push(sectionsData.section[si]);
+            }
+        } else {
+            sectionsArr.push(sectionsData);
+        }
+
+        alert("sections count = " + ArrayCount(sectionsArr));
+
+        for (  si = 0; si < ArrayCount(sectionsArr); si++) {
+              sec = sectionsArr[si];
             if (sec.question == undefined) continue;
 
               questionsData = sec.question;
-            // Перебираем вопросы
-            for (  q in questionsData) {
+              questionsArr = [];
+
+            if (ArrayCount(questionsData) > 0) {
+                for (  qi = 0; qi < ArrayCount(questionsData); qi++) {
+                    questionsArr.push(questionsData[qi]);
+                }
+            } else if (questionsData.question != undefined) {
+                for (  qi = 0; qi < ArrayCount(questionsData.question); qi++) {
+                    questionsArr.push(questionsData.question[qi]);
+                }
+            } else {
+                questionsArr.push(questionsData);
+            }
+
+            for (  qi = 0; qi < ArrayCount(questionsArr); qi++) {
+                  q = questionsArr[qi];
                 alert("question найден: " + (q.ident || q.id));
 
                   qid = String(q.ident || q.id);
@@ -63,8 +96,8 @@ else
                    iants = [];
                 if (q. iant != undefined) {
                     if (ArrayCount(q. iant) > 0) {
-                        for (  v in q. iant) {
-                             iants.push(v);
+                        for (  vi = 0; vi < ArrayCount(q. iant); vi++) {
+                             iants.push(q. iant[vi]);
                         }
                     } else {
                          iants.push(q. iant);
@@ -73,7 +106,8 @@ else
 
                 // Правильный ответ (ws_right)
                   correctTexts = [];
-                for (  v in  iants) {
+                for (  vi = 0; vi < ArrayCount( iants); vi++) {
+                      v =  iants[vi];
                     if (v.ws_right == '1')
                         correctTexts.push(HtmlToPlainText(v.text || ""));
                 }
@@ -81,12 +115,14 @@ else
 
                 // Ответ пользователя (value)
                   userTexts = [];
-                for (  v in  iants) {
+                for (  vi = 0; vi < ArrayCount( iants); vi++) {
+                      v =  iants[vi];
                     if (v.value != undefined && v.value != "")
                         userTexts.push(HtmlToPlainText(v.text || ""));
                 }
                 if (userTexts.length == 0) {
-                    for (  v in  iants) {
+                    for (  vi = 0; vi < ArrayCount( iants); vi++) {
+                          v =  iants[vi];
                         if (v.selected == '1' || v.selected == true)
                             userTexts.push(HtmlToPlainText(v.text || ""));
                     }
