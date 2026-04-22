@@ -1,65 +1,66 @@
-if (annals == null) {
-    alert("annals == null");
-} else if (annals.au == undefined) {
-    alert("annals.au undefined");
-} else if (annals.au.history == undefined) {
-    alert("history undefined");
-} else if (annals.au.history.objects == undefined) {
-    alert("objects undefined");
-} else {
-    var objectsData = annals.au.history.objects;
-    var objectsList = [];
+else
+{
+     objectsData = annals.au.history.objects;
+     objectsList = [];
 
-    // Если objectsData — массив
+    // Приводим objectsData к массиву объектов
     if (ArrayCount(objectsData) > 0) {
-        objectsList = objectsData;
-    }
-    // Если objectsData — объект с полем object (и это массив)
-    else if (objectsData.object != undefined && ArrayCount(objectsData.object) > 0) {
-        objectsList = objectsData.object;
-    }
-    // Если objectsData — одиночный объект (не массив и нет поля object)
-    else if (objectsData.section != undefined) {
-        objectsList = [objectsData];
+        // objectsData уже массив — переложим в список
+        for (objItem in objectsData) {
+            objectsList.push(objItem);
+        }
+    } else if (objectsData.object != undefined && ArrayCount(objectsData.object) > 0) {
+        for (objItem in objectsData.object) {
+            objectsList.push(objItem);
+        }
+    } else if (objectsData.section != undefined) {
+        objectsList.push(objectsData);
     }
 
     alert("objectsList count = " + ArrayCount(objectsList));
 
-    for (var oi = 0; oi < ArrayCount(objectsList); oi++) {
-        var objItem = objectsList[oi];
+    for (objItem in objectsList) {
         if (objItem.section == undefined) continue;
 
-        var sectionsData = objItem.section;
-        var sectionsList = [];
+         sectionsData = objItem.section;
+         sectionsList = [];
+
         if (ArrayCount(sectionsData) > 0) {
-            sectionsList = sectionsData;
+            for (sec in sectionsData) {
+                sectionsList.push(sec);
+            }
         } else if (sectionsData.section != undefined) {
-            sectionsList = sectionsData.section;
+            for (sec in sectionsData.section) {
+                sectionsList.push(sec);
+            }
         } else {
-            sectionsList = [sectionsData];
+            sectionsList.push(sectionsData);
         }
 
         alert("sections count = " + ArrayCount(sectionsList));
 
-        for (var si = 0; si < ArrayCount(sectionsList); si++) {
-            var sec = sectionsList[si];
+        for ( sec in sectionsList) {
             if (sec.question == undefined) continue;
 
-            var questionsData = sec.question;
-            var questionsList = [];
+            questionsData = sec.question;
+            questionsList = [];
+
             if (ArrayCount(questionsData) > 0) {
-                questionsList = questionsData;
+                for ( q in questionsData) {
+                    questionsList.push(q);
+                }
             } else if (questionsData.question != undefined) {
-                questionsList = questionsData.question;
+                for ( q in questionsData.question) {
+                    questionsList.push(q);
+                }
             } else {
-                questionsList = [questionsData];
+                questionsList.push(questionsData);
             }
 
-            for (var qi = 0; qi < ArrayCount(questionsList); qi++) {
-                var q = questionsList[qi];
+            for ( q in questionsList) {
                 alert("question найден: " + (q.ident || q.id));
 
-                var qid = String(q.ident || q.id);
+                 qid = String(q.ident || q.id);
 
                 if (ArrayOptFind(aQuestions, "This.id == '" + qid + "'") == undefined) {
                     aQuestions.push({
@@ -68,7 +69,7 @@ if (annals == null) {
                     });
                 }
 
-                var qObj = new Object();
+                 qObj = new Object();
 
                 // Тип вопроса
                 try {
@@ -88,33 +89,33 @@ if (annals == null) {
                 }
 
                 // Нормализация вариантов
-                var variants = [];
+                 variants = [];
                 if (q.variant != undefined) {
-                    if (ObjectType(q.variant) == "array")
-                        variants = q.variant;
-                    else
-                        variants = [q.variant];
+                    if (ArrayCount(q.variant) > 0) {
+                        for ( v in q.variant) {
+                            variants.push(v);
+                        }
+                    } else {
+                        variants.push(q.variant);
+                    }
                 }
 
                 // Правильный ответ (ws_right)
-                var correctTexts = [];
-                for (var vi = 0; vi < ArrayCount(variants); vi++) {
-                    var v = variants[vi];
+                 correctTexts = [];
+                for ( v in variants) {
                     if (v.ws_right == '1')
                         correctTexts.push(HtmlToPlainText(v.text || ""));
                 }
                 qObj.correct_answer = correctTexts.join("; ");
 
                 // Ответ пользователя (value)
-                var userTexts = [];
-                for (var vi = 0; vi < ArrayCount(variants); vi++) {
-                    var v = variants[vi];
+                 userTexts = [];
+                for ( v in variants) {
                     if (v.value != undefined && v.value != "")
                         userTexts.push(HtmlToPlainText(v.text || ""));
                 }
                 if (userTexts.length == 0) {
-                    for (var vi = 0; vi < ArrayCount(variants); vi++) {
-                        var v = variants[vi];
+                    for ( v in variants) {
                         if (v.selected == '1' || v.selected == true)
                             userTexts.push(HtmlToPlainText(v.text || ""));
                     }
