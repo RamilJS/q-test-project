@@ -1,18 +1,16 @@
 <q-separator class="q-my-md" />
 
 <div class="calendar-widget q-px-md q-pb-md">
-  <template>
+
   <div class="event-calendar">
 
     <q-date
       v-model="selectedDate"
-      minimal
       flat
+      bordered
       color="primary"
-      text-color="white"
-      event-color="white"
-      :events="eventDates"
       mask="YYYY-MM-DD"
+      :events="eventDates"
     />
 
     <div class="events-block q-mt-md">
@@ -29,15 +27,18 @@
         <q-item
           v-for="event in selectedEvents"
           :key="event.id"
+          class="text-white"
         >
           <q-item-section>
+
             <q-item-label>
               {{ event.title }}
             </q-item-label>
 
-            <q-item-label caption>
+            <q-item-label caption class="text-grey-3">
               {{ event.time }}
             </q-item-label>
+
           </q-item-section>
         </q-item>
 
@@ -46,16 +47,13 @@
     </div>
 
   </div>
-</template>
+
 </div>
 
 <q-separator class="q-my-md" />
 
 
-<script setup>
-import { ref, computed } from 'vue'
-
-const selectedDate = ref('2026-05-08')
+const selectedDate = ref('2026-05-12')
 
 const events = ref([
   {
@@ -66,15 +64,15 @@ const events = ref([
   },
   {
     id: 2,
-    date: '2026-05-07',
-    title: 'Обучение',
-    time: '11:00'
+    date: '2026-05-06',
+    title: 'Планёрка',
+    time: '16:30'
   },
   {
     id: 3,
     date: '2026-05-15',
-    title: 'Совещание',
-    time: '16:30'
+    title: 'Обучение',
+    time: '11:00'
   }
 ])
 
@@ -87,13 +85,23 @@ const selectedEvents = computed(() =>
     e => e.date === selectedDate.value
   )
 )
-</script>
 
+return {
+  ...
+  selectedDate,
+  events,
+  eventDates,
+  selectedEvents
+}
+
+.calendar-widget {
+  margin-top: 16px;
+}
 
 .event-calendar {
+  background: #1da1f2;
   border-radius: 12px;
   overflow: hidden;
-  background: #1da1f2;
 }
 
 .event-calendar .q-date {
@@ -101,22 +109,31 @@ const selectedEvents = computed(() =>
   color: white;
 }
 
-.event-calendar .q-date__header {
-  background: #1da1f2;
+.event-calendar .q-date__navigation {
   color: white;
 }
 
-.event-calendar .q-date__calendar-item--event {
-  border: 2px solid rgba(255,255,255,0.7);
+.event-calendar .q-date__calendar-weekdays {
+  background: white;
+  color: #0c205a;
+  font-weight: 700;
+}
+
+.event-calendar .q-date__calendar-item div {
+  color: white;
+}
+
+.event-calendar .q-date__today {
+  border: 2px solid white;
   border-radius: 50%;
 }
 
 .events-block {
   background: #1da1f2;
   color: white;
-  min-height: 80px;
-  padding: 16px;
+  padding: 12px;
   border-top: 1px solid rgba(255,255,255,0.2);
+  min-height: 80px;
 }
 
 .no-events {
