@@ -10,19 +10,7 @@ const calendarEvents = computed(() => {
       ? event.start_date.split("T")[0]
       : "",
 
-    time: `${new Date(event.start_date).toLocaleTimeString(
-      "ru-RU",
-      {
-        hour: "2-digit",
-        minute: "2-digit",
-      }
-    )} - ${new Date(event.finish_date).toLocaleTimeString(
-      "ru-RU",
-      {
-        hour: "2-digit",
-        minute: "2-digit",
-      }
-    )}`,
+    time: `${event.start_date.slice(11, 16)} - ${event.finish_date.slice(11, 16)}`,
 
     link: event.link,
 
