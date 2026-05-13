@@ -1,3 +1,7 @@
+const selectedEvents = computed(() => {
+  return eventsMap.value[selectedDate.value] || []
+})
+
 <!-- КАЛЕНДАРЬ -->
 <div class="calendar-widget q-px-md q-pb-md">
 
