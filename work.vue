@@ -1,28 +1,37 @@
-<template #day="scope">
-  <div @click="console.log('scope.date:', scope.date)">
-    {{ scope.day }}
-  </div>
-</template>
-
-<template #day="scope">
-  <div class="full-width full-height flex flex-center">
-    <q-btn
-      flat round dense size="sm"
-      :label="scope.day"
-      class="calendar-day-btn"
-      :class="{
-        'event-day': hasEvents(scope.date.replaceAll('/', '-')),  // ← фикс
-      }"
-      @click="onDateClick(scope.date.replaceAll('/', '-'))"       // ← фикс
-    >
-      <q-tooltip
-        v-if="getEventsByDate(scope.date.replaceAll('/', '-')).length"  // ← фикс
-        ...
+<!-- КАЛЕНДАРЬ -->
+<q-date
+  v-model="selectedDate"
+  flat
+  bordered
+  mask="YYYY-MM-DD"
+  color="primary"
+  class="custom-calendar"
+  @update:model-value="onDateClick"   <!-- ← вот сюда -->
+>
+  <template #day="scope">
+    <div class="calendar-day-wrapper">
+      <div
+        class="calendar-day"
+        :class="{
+          'event-day': hasEvents(scope.date),
+          'selected-event-day': selectedDate === scope.date
+        }"
       >
+        {{ scope.day }}
+        <div v-if="hasEvents(scope.date)" class="event-dot" />
+      </div>
 
-        .event-day {
-  background: rgba(255, 255, 255, 0.25) !important;
-  border: 2px solid white !important;
-  border-radius: 50% !important;
-  font-weight: 700;
-}
+      <q-tooltip ...>
+        ...
+      </q-tooltip>
+    </div>
+  </template>
+</q-date>
+
+const onDateClick = (date) => {
+  console.log('clicked date:', date); // теперь должно выводиться
+  const events = getEventsByDate(date);
+  if (events.length === 1) {
+    goToEvent(events[0].link);
+  }
+};
