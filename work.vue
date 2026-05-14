@@ -1,37 +1,20 @@
-<!-- КАЛЕНДАРЬ -->
-<q-date
-  v-model="selectedDate"
-  flat
-  bordered
-  mask="YYYY-MM-DD"
-  color="primary"
-  class="custom-calendar"
-  @update:model-value="onDateClick"   <!-- ← вот сюда -->
->
-  <template #day="scope">
-    <div class="calendar-day-wrapper">
-      <div
-        class="calendar-day"
-        :class="{
-          'event-day': hasEvents(scope.date),
-          'selected-event-day': selectedDate === scope.date
-        }"
-      >
-        {{ scope.day }}
-        <div v-if="hasEvents(scope.date)" class="event-dot" />
-      </div>
-
-      <q-tooltip ...>
-        ...
-      </q-tooltip>
-    </div>
-  </template>
-</q-date>
-
 const onDateClick = (date) => {
-  console.log('clicked date:', date); // теперь должно выводиться
-  const events = getEventsByDate(date);
-  if (events.length === 1) {
-    goToEvent(events[0].link);
+  console.log('clicked date:', date);
+  console.log('eventsMap keys:', Object.keys(eventsMap.value));
+  console.log('events for this date:', getEventsByDate(date));
+};
+
+const fetchDatePickerInfo = async () => {
+  try {
+    const response = await axios.post(
+      url,
+      new URLSearchParams(params).toString()
+    );
+    datePicker.value = response.data.results;
+    console.log('raw results:', response.data.results);        // что пришло с сервера
+    console.log('calendarEvents:', calendarEvents.value);      // после маппинга
+    console.log('eventsMap:', eventsMap.value);                // итоговая карта
+  } catch (error) {
+    console.error("Ошибка загрузки данных календаря", error);
   }
 };
