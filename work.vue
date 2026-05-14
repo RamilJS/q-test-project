@@ -72,8 +72,8 @@
           v-if="tooltip.visible"
           class="calendar-tooltip"
           :style="{
-            top: tooltip.y + 'px',
-            left: tooltip.x + 'px'
+            left: tooltip.x + 'px',
+            top: tooltip.y + 'px'
           }"
         >
           <div
@@ -149,6 +149,7 @@ EVENTS
 
 const calendarEvents = computed(() => {
   return datePicker.value.map((event) => {
+
     const startDate =
       event.start_date || "";
 
@@ -183,9 +184,11 @@ EVENT MAP
 */
 
 const eventsMap = computed(() => {
+
   const map = {};
 
   calendarEvents.value.forEach((event) => {
+
     if (!map[event.date]) {
       map[event.date] = [];
     }
@@ -198,16 +201,18 @@ const eventsMap = computed(() => {
 
 /*
 =========================================================
-IMPORTANT !!!
-QDATE EVENTS NEED YYYY/MM/DD
-NOT YYYY-MM-DD
+QDATE EVENTS FORMAT
+IMPORTANT: YYYY/MM/DD
 =========================================================
 */
 
 const eventDates = computed(() => {
-  return Object.keys(eventsMap.value).map(
-    (date) => date.replaceAll("-", "/")
-  );
+
+  return Object.keys(eventsMap.value)
+    .map((date) => {
+
+      return date.replaceAll("-", "/");
+    });
 });
 
 /*
@@ -217,6 +222,7 @@ SELECTED EVENTS
 */
 
 const selectedEvents = computed(() => {
+
   return (
     eventsMap.value[
       selectedDate.value
@@ -225,7 +231,10 @@ const selectedEvents = computed(() => {
 });
 
 const getEventsByDate = (date) => {
-  return eventsMap.value[date] || [];
+
+  return (
+    eventsMap.value[date] || []
+  );
 };
 
 /*
@@ -235,13 +244,20 @@ CLICK DATE
 */
 
 const onDateClick = (date) => {
+
   selectedDate.value = date;
 
   const events =
     getEventsByDate(date);
 
-  // если одно событие -> переход
+  /*
+  =======================================================
+  AUTO OPEN IF ONLY ONE EVENT
+  =======================================================
+  */
+
   if (events.length === 1) {
+
     goToEvent(events[0].link);
   }
 };
@@ -253,6 +269,7 @@ GO TO EVENT
 */
 
 const goToEvent = (link) => {
+
   if (!link) return;
 
   window.location.href = link;
@@ -260,7 +277,7 @@ const goToEvent = (link) => {
 
 /*
 =========================================================
-FETCH EVENTS
+FETCH
 =========================================================
 */
 
@@ -270,9 +287,12 @@ const BACKEND_URL =
 
 const fetchDatePickerInfo =
   async () => {
+
     try {
+
       const response =
         await axios.post(
+
           BACKEND_URL,
 
           new URLSearchParams({
@@ -288,7 +308,9 @@ const fetchDatePickerInfo =
 
       bindTooltips();
     }
+
     catch (error) {
+
       console.error(
         "Ошибка загрузки календаря",
         error
@@ -298,11 +320,12 @@ const fetchDatePickerInfo =
 
 /*
 =========================================================
-TOOLTIPS + HIGHLIGHT
+TOOLTIPS + BORDERS
 =========================================================
 */
 
 const bindTooltips = async () => {
+
   await nextTick();
 
   const dayButtons =
@@ -316,7 +339,24 @@ const bindTooltips = async () => {
 
     /*
     =====================================================
-    GET DAY NUMBER
+    REMOVE PREVIOUS STATE
+    =====================================================
+    */
+
+    dayEl.classList.remove(
+      "event-day"
+    );
+
+    dayEl.removeAttribute(
+      "title"
+    );
+
+    dayEl.onmouseover = null;
+    dayEl.onmouseout = null;
+
+    /*
+    =====================================================
+    GET DAY
     =====================================================
     */
 
@@ -350,6 +390,16 @@ const bindTooltips = async () => {
 
     /*
     =====================================================
+    ADD BORDER
+    =====================================================
+    */
+
+    dayEl.classList.add(
+      "event-day"
+    );
+
+    /*
+    =====================================================
     NATIVE TOOLTIP
     =====================================================
     */
@@ -367,42 +417,30 @@ const bindTooltips = async () => {
 
     /*
     =====================================================
-    CUSTOM HIGHLIGHT
+    TOOLTIP SHOW
     =====================================================
     */
 
-    dayEl.classList.add(
-      "event-day"
-    );
+    dayEl.onmouseover = () => {
 
-    /*
-    =====================================================
-    CLEAN OLD LISTENERS
-    =====================================================
-    */
-
-    dayEl.onmouseenter = null;
-    dayEl.onmouseleave = null;
-
-    /*
-    =====================================================
-    SHOW TOOLTIP
-    =====================================================
-    */
-
-    dayEl.onmouseenter = () => {
       const rect =
         dayEl.getBoundingClientRect();
 
+      const wrapperRect =
+        calendarWrapper.value.getBoundingClientRect();
+
       tooltip.value = {
+
         visible: true,
 
         x:
-          rect.left +
+          rect.left -
+          wrapperRect.left +
           rect.width / 2,
 
         y:
-          rect.top - 10,
+          rect.top -
+          wrapperRect.top - 12,
 
         events
       };
@@ -410,11 +448,12 @@ const bindTooltips = async () => {
 
     /*
     =====================================================
-    HIDE TOOLTIP
+    TOOLTIP HIDE
     =====================================================
     */
 
-    dayEl.onmouseleave = () => {
+    dayEl.onmouseout = () => {
+
       tooltip.value.visible = false;
     };
   });
@@ -422,7 +461,7 @@ const bindTooltips = async () => {
 
 /*
 =========================================================
-MONTH CHANGE
+MONTH NAVIGATION
 =========================================================
 */
 
@@ -430,6 +469,7 @@ const onNavigation = async ({
   month,
   year
 }) => {
+
   currentMonth.value = month;
   currentYear.value = year;
 
@@ -445,6 +485,7 @@ MOUNT
 */
 
 onMounted(async () => {
+
   await fetchDatePickerInfo();
 });
 </script>
@@ -455,11 +496,13 @@ onMounted(async () => {
 }
 
 .event-calendar {
-  background: linear-gradient(
-    180deg,
-    #1da1f2 0%,
-    #1687d9 100%
-  );
+
+  background:
+    linear-gradient(
+      180deg,
+      #1da1f2 0%,
+      #1687d9 100%
+    );
 
   border-radius: 18px;
 
@@ -479,6 +522,7 @@ EVENTS
 */
 
 .events-block {
+
   padding: 16px;
 
   background:
@@ -491,6 +535,7 @@ EVENTS
 }
 
 .events-title {
+
   color: white;
 
   font-size: 16px;
@@ -501,6 +546,7 @@ EVENTS
 }
 
 .no-events {
+
   text-align: center;
 
   color:
@@ -510,6 +556,7 @@ EVENTS
 }
 
 .event-item {
+
   border-radius: 12px;
 
   margin-bottom: 6px;
@@ -517,6 +564,7 @@ EVENTS
 
 .event-item
   :deep(.q-item__label) {
+
   color: white;
 }
 
@@ -527,10 +575,14 @@ CALENDAR
 */
 
 .calendar-wrapper {
+
   position: relative;
+
+  overflow: visible;
 }
 
 .custom-calendar {
+
   background: transparent;
 
   color: white;
@@ -540,6 +592,7 @@ CALENDAR
 
 .custom-calendar
   :deep(.q-date__header) {
+
   background: transparent;
 
   color: white;
@@ -547,11 +600,13 @@ CALENDAR
 
 .custom-calendar
   :deep(.q-date__navigation) {
+
   color: white;
 }
 
 .custom-calendar
   :deep(.q-date__calendar-weekdays) {
+
   background:
     rgba(255,255,255,0.12);
 
@@ -562,12 +617,13 @@ CALENDAR
 
 /*
 =========================================================
-EVENT DOT FROM QUASAR
+QUASAR EVENT DOT
 =========================================================
 */
 
 .custom-calendar
   :deep(.q-date__event) {
+
   width: 8px !important;
 
   height: 8px !important;
@@ -577,41 +633,62 @@ EVENT DOT FROM QUASAR
 
 /*
 =========================================================
-CUSTOM EVENT BORDER
+EVENT DAY BORDER
 =========================================================
 */
 
 .custom-calendar
-  :deep(.event-day) {
-  position: relative !important;
+  :deep(.event-day .q-btn__content) {
+
+  width: 34px !important;
+  height: 34px !important;
 
   border:
-    2px solid white !important;
-
-  border-radius: 50% !important;
-}
-
-.custom-calendar
-  :deep(.event-day::after) {
-  content: "";
-
-  position: absolute;
-
-  bottom: 2px;
-  left: 50%;
-
-  transform:
-    translateX(-50%);
-
-  width: 6px;
-  height: 6px;
+    2px solid rgba(255,255,255,0.95);
 
   border-radius: 50%;
 
-  background: #ffd54f;
+  transition: all 0.2s ease;
+}
+
+/*
+=========================================================
+HOVER
+=========================================================
+*/
+
+.custom-calendar
+  :deep(.event-day:hover .q-btn__content) {
+
+  background:
+    rgba(255,255,255,0.12);
+}
+
+/*
+=========================================================
+DO NOT BREAK ACTIVE DAY
+=========================================================
+*/
+
+.custom-calendar
+  :deep(.q-date__calendar-item--active .q-btn__content) {
+
+  border: none !important;
+}
+
+/*
+=========================================================
+TODAY STYLE
+=========================================================
+*/
+
+.custom-calendar
+  :deep(.q-date__today) {
 
   box-shadow:
-    0 0 8px rgba(255,213,79,0.8);
+    inset 0 0 0 2px white;
+
+  border-radius: 50%;
 }
 
 /*
@@ -621,12 +698,13 @@ TOOLTIP
 */
 
 .calendar-tooltip {
-  position: fixed;
+
+  position: absolute;
 
   transform:
     translate(-50%, -100%);
 
-  z-index: 99999;
+  z-index: 999999;
 
   min-width: 220px;
   max-width: 260px;
@@ -649,6 +727,7 @@ TOOLTIP
 }
 
 .tooltip-event:not(:last-child) {
+
   margin-bottom: 10px;
 
   padding-bottom: 10px;
