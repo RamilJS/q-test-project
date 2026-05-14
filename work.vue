@@ -2,15 +2,12 @@
   <q-separator class="q-my-md" />
   <div class="calendar-widget q-px-md q-pb-md">
     <div class="event-calendar">
-
       <!-- СОБЫТИЯ -->
       <div class="events-block">
         <div class="events-title">События</div>
-
         <div v-if="selectedEvents.length === 0" class="no-events">
           На выбранную дату событий нет
         </div>
-
         <q-list v-else dense>
           <q-item
             v-for="event in selectedEvents"
@@ -35,7 +32,7 @@
         </q-list>
       </div>
 
-      <!-- КАЛЕНДАРЬ -->
+      <!-- КАЛЕНДАРЬ (без кастомного слота #day) -->
       <q-date
         v-model="selectedDate"
         flat
@@ -43,18 +40,16 @@
         mask="YYYY-MM-DD"
         color="primary"
         class="custom-calendar"
-        :events="eventDates"
-        :event-color="eventColor"
-        @update:model-value="onDateClick"
+        :options="dateOptions"
+        @update:model-value="onDateSelected"
       />
-
     </div>
   </div>
   <q-separator class="q-my-md" />
 </template>
 
 <script>
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch, nextTick } from "vue";
 import axios from "axios";
 
 export default {
@@ -63,6 +58,7 @@ export default {
     const selectedDate = ref(new Date().toISOString().split("T")[0]);
     const datePicker = ref([]);
 
+    // Преобразование событий из API
     const calendarEvents = computed(() => {
       return datePicker.value.map((event) => {
         const startDate = event.start_date || "";
@@ -82,6 +78,7 @@ export default {
       });
     });
 
+    // Группировка событий по датам
     const eventsMap = computed(() => {
       const map = {};
       calendarEvents.value.forEach((event) => {
@@ -91,48 +88,101 @@ export default {
       return map;
     });
 
+    // Массив дат, на которые есть события
     const eventDates = computed(() => Object.keys(eventsMap.value));
 
-    const eventColor = (date) => {
-      return eventsMap.value[date] ? "#ffd54f" : "";
-    };
-
+    // Получить события по дате
     const getEventsByDate = (date) => eventsMap.value[date] || [];
 
+    // Проверка, есть ли события на дату
     const hasEvents = (date) => getEventsByDate(date).length > 0;
 
-    const onDateClick = (date) => {
-      selectedDate.value = date;
+    // options для q-date: добавляем класс event-day на даты с событиями
+    const dateOptions = (date) => {
+      // date приходит в формате 'YYYY/MM/DD'
+      const formatted = date.split("/").join("-");
+      return hasEvents(formatted) ? "event-day" : "";
+    };
+
+    // Выбранные события для текущей даты
+    const selectedEvents = computed(() => eventsMap.value[selectedDate.value] || []);
+
+    // Переход по ссылке события
+    const goToEvent = (link) => {
+      window.location.href = link;
+    };
+
+    // Обработчик выбора даты (клик по дню)
+    const onDateSelected = (date) => {
       const events = getEventsByDate(date);
       if (events.length === 1) {
         goToEvent(events[0].link);
       }
     };
 
-    const goToEvent = (link) => {
-      window.location.href = link;
-    };
-
-    const selectedEvents = computed(
-      () => eventsMap.value[selectedDate.value] || []
-    );
-
+    // Загрузка данных с сервера
     const fetchDatePickerInfo = async () => {
       try {
-        const response = await axios.post(
-          BACKEND_URL,
-          new URLSearchParams({
-            collection_code: "VTBLGetEventCalendarEvents",
-          }).toString()
-        );
+        const url = BACKEND_URL; // должен быть определён глобально или импортирован
+        const params = {
+          collection_code: "VTBLGetEventCalendarEvents",
+        };
+        const response = await axios.post(url, new URLSearchParams(params).toString());
         datePicker.value = response.data.results;
       } catch (error) {
         console.error("Ошибка загрузки данных календаря", error);
       }
     };
 
+    // ---- Добавляем нативные тултипы (title) для дней с событиями ----
+    // Функция обновления title у ячеек календаря
+    const updateNativeTooltips = () => {
+      // Ищем все ячейки дней внутри .custom-calendar
+      const dayCells = document.querySelectorAll(".custom-calendar .q-date__calendar-item");
+      dayCells.forEach((cell) => {
+        // Получаем дату из data-атрибута, который q-date устанавливает на ячейку
+        const dateAttr = cell.getAttribute("data-date");
+        if (dateAttr) {
+          // формат data-date: YYYY/MM/DD
+          const dateStr = dateAttr.split("/").join("-");
+          const events = getEventsByDate(dateStr);
+          if (events.length) {
+            // Формируем текст для title
+            const tooltipText = events
+              .map((e) => `${e.title} (${e.time})`)
+              .join("\n");
+            cell.setAttribute("title", tooltipText);
+          } else {
+            cell.removeAttribute("title");
+          }
+        }
+      });
+    };
+
+    // Следим за изменением списка событий или переключением месяца и обновляем тултипы
+    watch(
+      [calendarEvents, () => selectedDate.value],
+      async () => {
+        await nextTick();
+        updateNativeTooltips();
+      },
+      { deep: true, immediate: true }
+    );
+
+    // Также обновляем при любом перерендере календаря (смена месяца)
+    const observer = new MutationObserver(() => {
+      updateNativeTooltips();
+    });
+
     onMounted(async () => {
       await fetchDatePickerInfo();
+      await nextTick();
+      updateNativeTooltips();
+      // Наблюдаем за изменениями DOM внутри календаря (смена месяца, перерисовка)
+      const calendarEl = document.querySelector(".custom-calendar");
+      if (calendarEl) {
+        observer.observe(calendarEl, { childList: true, subtree: true });
+      }
     });
 
     return {
@@ -141,12 +191,12 @@ export default {
       calendarEvents,
       eventsMap,
       eventDates,
-      eventColor,
       selectedEvents,
       getEventsByDate,
       hasEvents,
-      onDateClick,
+      onDateSelected,
       goToEvent,
+      dateOptions,
     };
   },
 };
@@ -166,12 +216,12 @@ export default {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
 }
 
-/* ── События ── */
 .events-block {
-  padding: 16px 16px 10px;
+  padding: 16px;
   background: rgba(255, 255, 255, 0.08);
   border-bottom: 1px solid rgba(255, 255, 255, 0.15);
   min-height: 120px;
+  padding-bottom: 10px;
 }
 
 .events-title {
@@ -203,7 +253,7 @@ export default {
   color: white;
 }
 
-/* ── Календарь ── */
+/* ========== КАЛЕНДАРЬ ========== */
 .custom-calendar {
   background: transparent;
   color: white;
@@ -225,39 +275,45 @@ export default {
   font-weight: 700;
 }
 
-/* Цвет цифр дней */
-.custom-calendar :deep(.q-date__calendar-item .q-btn) {
-  color: white;
+/* Стили для дня с событиями */
+.custom-calendar :deep(.q-date__calendar-item .event-day) {
+  position: relative;
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  border-radius: 50%;
+  background: transparent !important;
+  color: white !important;
 }
 
-/* Сегодня */
-.custom-calendar :deep(.q-date__today .q-btn) {
+/* Точка-маркер под числом */
+.custom-calendar :deep(.event-day::after) {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffd54f;
+  box-shadow: 0 0 8px rgba(255, 213, 79, 0.8);
+}
+
+/* Выбранная дата */
+.custom-calendar :deep(.q-date__calendar-item .q-btn--active) {
+  background: white !important;
+  color: #1da1f2 !important;
+  font-weight: 700;
+}
+
+/* Сегодняшняя дата */
+.custom-calendar :deep(.q-date__today) {
   box-shadow: inset 0 0 0 2px white;
   border-radius: 50%;
 }
 
-/* Выбранная дата */
-.custom-calendar :deep(.q-date__calendar-item--selected .q-btn) {
-  background: white !important;
-  color: #1da1f2 !important;
-  border-radius: 50%;
-}
-
-/* ── Дни с событиями — кружок и точка ── */
-
-/* Кружок вокруг дня с событием */
-.custom-calendar :deep(.q-date__event + .q-btn),
-.custom-calendar :deep(.q-btn + .q-date__event) {
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  border-radius: 50%;
-}
-
-/* Точка под днём с событием */
-.custom-calendar :deep(.q-date__event) {
-  background: #ffd54f !important;
-  box-shadow: 0 0 8px rgba(255, 213, 79, 0.8);
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+/* Ховер на дне */
+.custom-calendar :deep(.q-date__calendar-item .q-btn:hover) {
+  background: rgba(255, 255, 255, 0.15);
+  transform: scale(1.05);
 }
 </style>
