@@ -4,7 +4,7 @@
   <div class="calendar-widget q-px-md q-pb-md">
     <div class="event-calendar">
 
-      <!-- СОБЫТИЯ -->
+      <!-- EVENTS -->
       <div class="events-block">
         <div class="events-title">
           События
@@ -43,8 +43,11 @@
         </q-list>
       </div>
 
-      <!-- КАЛЕНДАРЬ -->
-      <div class="calendar-wrapper">
+      <!-- CALENDAR -->
+      <div
+        ref="calendarWrapper"
+        class="calendar-wrapper"
+      >
         <q-date
           v-model="selectedDate"
           flat
@@ -55,13 +58,13 @@
           :events="eventDates"
           event-color="amber"
           @update:model-value="onDateClick"
+          @navigation="onNavigation"
         />
 
         <!-- TOOLTIP -->
-        <!-- Без slot #day -->
         <div
           v-if="tooltip.visible"
-          class="calendar-tooltip-fixed"
+          class="calendar-tooltip"
           :style="{
             top: tooltip.y + 'px',
             left: tooltip.x + 'px'
@@ -93,344 +96,258 @@
   <q-separator class="q-my-md" />
 </template>
 
-<script>
+<script setup>
 import {
   ref,
   computed,
   onMounted,
-  onBeforeUnmount,
   nextTick
 } from "vue";
 
 import axios from "axios";
 
-export default {
-  name: "MyLayout",
+const selectedDate = ref(
+  new Date().toISOString().split("T")[0]
+);
 
-  setup() {
-    const selectedDate = ref(
-      new Date().toISOString().split("T")[0]
-    );
+const datePicker = ref([]);
 
-    const datePicker = ref([]);
+const calendarWrapper = ref(null);
 
-    const tooltip = ref({
-      visible: false,
-      x: 0,
-      y: 0,
-      events: []
-    });
+const currentMonth = ref(null);
+const currentYear = ref(null);
 
-    /*
-    =========================================================
-    EVENTS
-    =========================================================
-    */
+const tooltip = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  events: []
+});
 
-    const calendarEvents = computed(() => {
-      return datePicker.value.map((event) => {
-        const startDate = event.start_date || "";
-        const finishDate = event.finish_date || "";
+/*
+========================================================
+EVENTS
+========================================================
+*/
 
-        return {
-          id: event.id,
-          title: event.name,
-          date: startDate
-            ? startDate.split("T")[0]
-            : "",
-
-          time:
-            startDate && finishDate
-              ? `${startDate.slice(11, 16)} - ${finishDate.slice(11, 16)}`
-              : "",
-
-          link: event.link,
-          status: event.status_name,
-          image: event.image_url
-        };
-      });
-    });
-
-    const eventsMap = computed(() => {
-      const map = {};
-
-      calendarEvents.value.forEach((event) => {
-        if (!map[event.date]) {
-          map[event.date] = [];
-        }
-
-        map[event.date].push(event);
-      });
-
-      return map;
-    });
-
-    /*
-    =========================================================
-    DATES WITH EVENTS
-    =========================================================
-    */
-
-    const eventDates = computed(() => {
-      return Object.keys(eventsMap.value);
-    });
-
-    const getEventsByDate = (date) => {
-      return eventsMap.value[date] || [];
-    };
-
-    const hasEvents = (date) => {
-      return getEventsByDate(date).length > 0;
-    };
-
-    /*
-    =========================================================
-    SELECTED EVENTS
-    =========================================================
-    */
-
-    const selectedEvents = computed(() => {
-      return eventsMap.value[selectedDate.value] || [];
-    });
-
-    /*
-    =========================================================
-    CLICK DATE
-    =========================================================
-    */
-
-    const onDateClick = (date) => {
-      selectedDate.value = date;
-
-      const events = getEventsByDate(date);
-
-      if (!events.length) {
-        return;
-      }
-
-      // если событие одно -> переход
-      if (events.length === 1) {
-        goToEvent(events[0].link);
-      }
-    };
-
-    /*
-    =========================================================
-    GO TO EVENT
-    =========================================================
-    */
-
-    const goToEvent = (link) => {
-      if (!link) return;
-
-      window.location.href = link;
-    };
-
-    /*
-    =========================================================
-    FETCH
-    =========================================================
-    */
-
-    const fetchDatePickerInfo = async () => {
-      try {
-        const url = BACKEND_URL;
-
-        const params = {
-          collection_code: "VTBLGetEventCalendarEvents"
-        };
-
-        const response = await axios.post(
-          url,
-          new URLSearchParams(params).toString()
-        );
-
-        datePicker.value = response.data.results || [];
-
-        await nextTick();
-
-        bindCalendarTooltips();
-      }
-      catch (error) {
-        console.error(
-          "Ошибка загрузки данных календаря",
-          error
-        );
-      }
-    };
-
-    /*
-    =========================================================
-    TOOLTIPS WITHOUT SLOT
-    =========================================================
-    */
-
-    const hideTooltip = () => {
-      tooltip.value.visible = false;
-    };
-
-    const showTooltip = (event, date) => {
-      const events = getEventsByDate(date);
-
-      if (!events.length) {
-        return;
-      }
-
-      const rect = event.target.getBoundingClientRect();
-
-      tooltip.value = {
-        visible: true,
-        x: rect.left + rect.width / 2,
-        y: rect.top - 10,
-        events
-      };
-    };
-
-    const bindCalendarTooltips = () => {
-      nextTick(() => {
-        const dayButtons = document.querySelectorAll(
-          ".custom-calendar .q-date__calendar-item div"
-        );
-
-        dayButtons.forEach((el) => {
-          const text = el.textContent?.trim();
-
-          if (!text || isNaN(Number(text))) {
-            return;
-          }
-
-          const currentMonth =
-            document.querySelector(
-              ".custom-calendar .q-date__header-title-label"
-            )?.textContent || "";
-
-          const currentYear = new Date().getFullYear();
-
-          const date = buildDateFromCalendar(
-            currentMonth,
-            currentYear,
-            text
-          );
-
-          if (!date || !hasEvents(date)) {
-            return;
-          }
-
-          // визуально выделяем
-          el.classList.add("calendar-event-day");
-
-          // стандартный tooltip
-          const events = getEventsByDate(date);
-
-          el.setAttribute(
-            "title",
-            events
-              .map((e) => `${e.title} (${e.time})`)
-              .join("\n")
-          );
-
-          // custom hover tooltip
-          el.addEventListener("mouseenter", (e) => {
-            showTooltip(e, date);
-          });
-
-          el.addEventListener("mouseleave", () => {
-            hideTooltip();
-          });
-        });
-      });
-    };
-
-    /*
-    =========================================================
-    BUILD DATE
-    =========================================================
-    */
-
-    const buildDateFromCalendar = (
-      monthLabel,
-      year,
-      day
-    ) => {
-      const months = {
-        January: "01",
-        February: "02",
-        March: "03",
-        April: "04",
-        May: "05",
-        June: "06",
-        July: "07",
-        August: "08",
-        September: "09",
-        October: "10",
-        November: "11",
-        December: "12",
-
-        Январь: "01",
-        Февраль: "02",
-        Март: "03",
-        Апрель: "04",
-        Май: "05",
-        Июнь: "06",
-        Июль: "07",
-        Август: "08",
-        Сентябрь: "09",
-        Октябрь: "10",
-        Ноябрь: "11",
-        Декабрь: "12"
-      };
-
-      const month = Object.keys(months).find((m) =>
-        monthLabel.includes(m)
-      );
-
-      if (!month) {
-        return null;
-      }
-
-      return `${year}-${months[month]}-${String(day).padStart(2, "0")}`;
-    };
-
-    /*
-    =========================================================
-    MOUNT
-    =========================================================
-    */
-
-    onMounted(async () => {
-      await fetchDatePickerInfo();
-
-      // rebinding after month switch
-      const observer = new MutationObserver(() => {
-        bindCalendarTooltips();
-      });
-
-      const calendar = document.querySelector(
-        ".custom-calendar"
-      );
-
-      if (calendar) {
-        observer.observe(calendar, {
-          childList: true,
-          subtree: true
-        });
-      }
-
-      onBeforeUnmount(() => {
-        observer.disconnect();
-      });
-    });
+const calendarEvents = computed(() => {
+  return datePicker.value.map((event) => {
+    const startDate = event.start_date || "";
+    const finishDate = event.finish_date || "";
 
     return {
-      selectedDate,
-      selectedEvents,
-      tooltip,
-      eventDates,
-      onDateClick,
-      goToEvent
+      id: event.id,
+
+      title: event.name,
+
+      date: startDate
+        ? startDate.split("T")[0]
+        : "",
+
+      time:
+        startDate && finishDate
+          ? `${startDate.slice(11, 16)} - ${finishDate.slice(11, 16)}`
+          : "",
+
+      link: event.link,
+
+      status: event.status_name
     };
+  });
+});
+
+const eventsMap = computed(() => {
+  const map = {};
+
+  calendarEvents.value.forEach((event) => {
+    if (!map[event.date]) {
+      map[event.date] = [];
+    }
+
+    map[event.date].push(event);
+  });
+
+  return map;
+});
+
+const eventDates = computed(() => {
+  return Object.keys(eventsMap.value);
+});
+
+const selectedEvents = computed(() => {
+  return eventsMap.value[selectedDate.value] || [];
+});
+
+const getEventsByDate = (date) => {
+  return eventsMap.value[date] || [];
+};
+
+/*
+========================================================
+DATE CLICK
+========================================================
+*/
+
+const onDateClick = (date) => {
+  selectedDate.value = date;
+
+  const events = getEventsByDate(date);
+
+  if (events.length === 1) {
+    goToEvent(events[0].link);
   }
 };
+
+/*
+========================================================
+GO TO EVENT
+========================================================
+*/
+
+const goToEvent = (link) => {
+  if (!link) return;
+
+  window.location.href = link;
+};
+
+/*
+========================================================
+FETCH
+========================================================
+*/
+
+const fetchDatePickerInfo = async () => {
+  try {
+    const response = await axios.post(
+      BACKEND_URL,
+      new URLSearchParams({
+        collection_code:
+          "VTBLGetEventCalendarEvents"
+      }).toString()
+    );
+
+    datePicker.value =
+      response.data.results || [];
+
+    await nextTick();
+
+    bindTooltips();
+  }
+  catch (error) {
+    console.error(
+      "Ошибка загрузки календаря",
+      error
+    );
+  }
+};
+
+/*
+========================================================
+TOOLTIPS
+========================================================
+*/
+
+const bindTooltips = async () => {
+  await nextTick();
+
+  const days = calendarWrapper.value?.querySelectorAll(
+    ".q-date__calendar-item"
+  );
+
+  if (!days) return;
+
+  days.forEach((dayEl) => {
+    const dayText =
+      dayEl.innerText?.trim();
+
+    const day = Number(dayText);
+
+    if (!day) return;
+
+    const month = String(currentMonth.value)
+      .padStart(2, "0");
+
+    const date =
+      `${currentYear.value}-${month}-${String(day).padStart(2, "0")}`;
+
+    const events = getEventsByDate(date);
+
+    if (!events.length) return;
+
+    // native tooltip
+    dayEl.setAttribute(
+      "title",
+      events
+        .map(
+          (e) =>
+            `${e.title} (${e.time})`
+        )
+        .join("\n")
+    );
+
+    dayEl.addEventListener(
+      "mouseenter",
+      (e) => {
+        const rect =
+          e.target.getBoundingClientRect();
+
+        tooltip.value = {
+          visible: true,
+
+          x:
+            rect.left +
+            rect.width / 2,
+
+          y:
+            rect.top - 12,
+
+          events
+        };
+      }
+    );
+
+    dayEl.addEventListener(
+      "mouseleave",
+      () => {
+        tooltip.value.visible = false;
+      }
+    );
+  });
+};
+
+/*
+========================================================
+MONTH NAVIGATION
+========================================================
+*/
+
+const onNavigation = async ({
+  month,
+  year
+}) => {
+  currentMonth.value = month;
+  currentYear.value = year;
+
+  await bindTooltips();
+};
+
+/*
+========================================================
+MOUNT
+========================================================
+*/
+
+onMounted(async () => {
+  const now = new Date();
+
+  currentMonth.value =
+    now.getMonth() + 1;
+
+  currentYear.value =
+    now.getFullYear();
+
+  await fetchDatePickerInfo();
+});
 </script>
 
 <style scoped>
@@ -451,7 +368,8 @@ export default {
   display: flex;
   flex-direction: column;
 
-  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+  box-shadow:
+    0 10px 30px rgba(0,0,0,0.15);
 }
 
 .events-block {
@@ -459,10 +377,10 @@ export default {
 
   background: rgba(255,255,255,0.08);
 
-  border-bottom: 1px solid rgba(255,255,255,0.15);
+  border-bottom:
+    1px solid rgba(255,255,255,0.15);
 
   min-height: 120px;
-  padding-bottom: 10px;
 }
 
 .events-title {
@@ -476,21 +394,11 @@ export default {
   text-align: center;
   color: rgba(255,255,255,0.75);
   padding: 20px 0;
-  font-size: 14px;
 }
 
 .event-item {
   border-radius: 12px;
   margin-bottom: 6px;
-
-  transition:
-    background 0.2s ease,
-    transform 0.2s ease;
-}
-
-.event-item:hover {
-  background: rgba(255,255,255,0.12);
-  transform: translateY(-1px);
 }
 
 .event-item :deep(.q-item__label) {
@@ -498,9 +406,9 @@ export default {
 }
 
 /*
-=========================================================
+========================================================
 CALENDAR
-=========================================================
+========================================================
 */
 
 .calendar-wrapper {
@@ -529,60 +437,33 @@ CALENDAR
 }
 
 /*
-=========================================================
-EVENT DAY
-=========================================================
+========================================================
+EVENT DATES
+========================================================
 */
 
-.custom-calendar :deep(.calendar-event-day) {
-  position: relative;
+/* ВАЖНО:
+   events + event-color в Quasar
+   автоматически рисуют точки */
 
-  border: 2px solid rgba(255,255,255,0.95);
-  border-radius: 50%;
-
-  transition: all 0.2s ease;
-}
-
-.custom-calendar :deep(.calendar-event-day:hover) {
-  transform: scale(1.08);
-  background: rgba(255,255,255,0.12);
-}
-
-.custom-calendar :deep(.calendar-event-day::after) {
-  content: "";
-
-  position: absolute;
-
-  width: 6px;
-  height: 6px;
-
-  border-radius: 50%;
-
-  background: #ffd54f;
-
-  bottom: 2px;
-  left: 50%;
-
-  transform: translateX(-50%);
-
-  box-shadow: 0 0 8px rgba(255,213,79,0.8);
-}
-
-.custom-calendar :deep(.q-date__today) {
-  box-shadow: inset 0 0 0 2px white;
+.custom-calendar
+  :deep(.q-date__event) {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
 }
 
 /*
-=========================================================
+========================================================
 TOOLTIP
-=========================================================
+========================================================
 */
 
-.calendar-tooltip-fixed {
+.calendar-tooltip {
   position: fixed;
 
-  transform: translate(-50%, -100%);
+  transform:
+    translate(-50%, -100%);
 
   z-index: 99999;
 
@@ -593,11 +474,10 @@ TOOLTIP
 
   border-radius: 12px;
 
-  background: rgba(35,35,35,0.96);
+  background:
+    rgba(35,35,35,0.96);
 
   color: white;
-
-  backdrop-filter: blur(12px);
 
   box-shadow:
     0 8px 24px rgba(0,0,0,0.25);
@@ -609,6 +489,7 @@ TOOLTIP
   margin-bottom: 10px;
   padding-bottom: 10px;
 
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom:
+    1px solid rgba(255,255,255,0.1);
 }
 </style>
