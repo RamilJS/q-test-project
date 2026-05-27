@@ -1,5 +1,5 @@
-const timestamp =
-  dayEl.getAttribute("data-day");
+ЗАМЕНИ ВЕСЬ ЭТОТ БЛОК:
+const timestamp = dayEl.getAttribute("data-day");
 
 if (!timestamp) return;
 
@@ -9,25 +9,22 @@ if (
   )
 ) return;
 
-/*
-=========================================================
-NORMALIZE DATE
-=========================================================
-*/
-
 const date =
   timestamp.replaceAll("/", "-");
+ВОТ НА ЭТО:
 
-  И ЕЩЁ
+const parentDay = dayEl.closest(".q-date__calendar-item");
 
-У тебя сейчас:
+if (!parentDay) return;
 
-dayEl.classList.remove("event-day");
+const timestamp = parentDay.getAttribute("data-day");
 
-НО ты НЕ чистишь старые event handlers корректно.
+if (!timestamp) return;
 
-ДОБАВЬ В bindTooltips()
+const date = timestamp.replaceAll("/", "-");
 
-В САМОМ НАЧАЛЕ:
 
-tooltip.value.visible = false;
+ЗАМЕНИ:
+currentMonth.value = month + 1;
+НА:
+currentMonth.value = month;
