@@ -48,3 +48,19 @@ const getCurrentMonthYearFromDOM = () => {
   
   return { month, year };
 };
+
+
+
+
+
+const onNavigation = async ({ month, year }) => {
+  // month от 0 до 11, переводим в 1..12 (для синхронизации переменных, если они где-то ещё нужны)
+  currentMonth.value = month + 1;
+  currentYear.value = year;
+  
+  // Ждём, пока Quasar перерисует DOM
+  await nextTick();
+  requestAnimationFrame(() => {
+    bindTooltips();
+  });
+};
