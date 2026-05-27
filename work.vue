@@ -1,15 +1,33 @@
-const onNavigation = ({ month, year }) => {
+const timestamp =
+  dayEl.getAttribute("data-day");
 
-  currentMonth.value = month + 1;
-  currentYear.value = year;
+if (!timestamp) return;
 
-  requestAnimationFrame(() => {
+if (
+  !timestamp.startsWith(
+    `${currentYear.value}/`
+  )
+) return;
 
-    requestAnimationFrame(() => {
+/*
+=========================================================
+NORMALIZE DATE
+=========================================================
+*/
 
-      bindTooltips();
+const date =
+  timestamp.replaceAll("/", "-");
 
-    });
+  И ЕЩЁ
 
-  });
-};
+У тебя сейчас:
+
+dayEl.classList.remove("event-day");
+
+НО ты НЕ чистишь старые event handlers корректно.
+
+ДОБАВЬ В bindTooltips()
+
+В САМОМ НАЧАЛЕ:
+
+tooltip.value.visible = false;
