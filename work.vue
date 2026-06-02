@@ -1,3 +1,17 @@
+.custom-calendar :deep(.q-date__event) {
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 50%;
+  bottom: 4px;
+}
+
+.custom-calendar :deep(.bg-primary) {
+  background: rgba(255,255,255,0.18) !important;
+  border: 2px solid white;
+  color: white !important;
+  border-radius: 50%;
+}
+
 <template>
   <q-separator class="q-my-md" />
 
