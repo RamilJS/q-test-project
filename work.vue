@@ -1,16 +1,13 @@
+const eventDates = computed(() => {
 
-<q-date
-  v-model="selectedDate"
-  flat
-  bordered
-  minimal
-  mask="YYYY-MM-DD"
-  color="primary"
-  class="custom-calendar"
+  return Object.keys(eventsMap.value)
+    .map(date => date.replaceAll("-", "/"));
 
-  :events="eventDates"
+});
 
-  :event-color="getEventColor"
+const getEventColor = (date) => {
 
-  @update:model-value="onDateClick"
-/>
+  return "white";
+
+};
+
