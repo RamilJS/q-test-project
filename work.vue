@@ -1,7 +1,9 @@
-<q-date v-model="selectedDate">
+<q-date
+  v-model="selectedDate"
+>
   <template #day="scope">
-    <div style="background:red;color:white">
-      {{ scope.day }}
+    <div>
+      TEST
     </div>
   </template>
 </q-date>
