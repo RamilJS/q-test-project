@@ -1,28 +1,20 @@
-<q-item
-  v-for="event in selectedEvents"
-  :key="event.id"
-  clickable
-  v-ripple
-  class="event-item"
-  @click="goToEvent(event.link)"
->
-  <q-item-section>
-    <q-item-label class="text-weight-medium">
-      {{ event.title }}
-    </q-item-label>
+.event-item {
+  border-radius: 12px;
+  transition: background .2s ease,
+              transform .2s ease,
+              box-shadow .2s ease;
+}
 
-    <q-item-label caption class="text-grey-3">
-      {{ event.time }}
-    </q-item-label>
-  </q-item-section>
+.event-item:hover {
+  background: rgba(255,255,255,.12);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0,0,0,.25);
+}
 
-  <q-item-section side>
-    <q-icon
-      name="fa-solid fa-circle-arrow-right"
-      size="24px"
-      color="white"
-    />
-  </q-item-section>
+.event-item .q-icon {
+  transition: transform .2s ease;
+}
 
-  <q-tooltip>Перейти к мероприятию</q-tooltip>
-</q-item>
+.event-item:hover .q-icon {
+  transform: translateX(5px);
+}
