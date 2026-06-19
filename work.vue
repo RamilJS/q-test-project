@@ -1,6 +1,16 @@
-LogEvent("start_adaptation", "Param.cities = " + Param.cities);
-LogEvent("start_adaptation", "sCities = " + sCities);
-LogEvent("start_adaptation", "ArrayCount = " + ArrayCount(aCities));
-LogEvent("start_adaptation", "Array = " + ArrayMerge(aCities, "This", "|"));
-LogEvent("start_adaptation", "StartPack = " + ArrayCount(StartPack));
-LogEvent("start_adaptation", "2.0 employees = " + ArrayCount(aPersonIdsArray));
+if (ArrayCount(aCities) > 0) {
+
+    bSqlStr.AppendStr("and c.data.value(");
+
+    bSqlStr.AppendStr("'(*/custom_elems/custom_elem[name=''sity'']/value)[1]'");
+
+    bSqlStr.AppendStr(",'varchar(max)')");
+
+    bSqlStr.AppendStr(" in ('");
+
+    bSqlStr.AppendStr(ArrayMerge(aCities, "This", "', '"));
+
+    bSqlStr.AppendStr("')");
+
+    bSqlStr.AppendStr("\r\n");
+}
