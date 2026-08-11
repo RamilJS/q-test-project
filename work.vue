@@ -1,4 +1,3 @@
-
 else {
     aResponsibleMailArray.push({
         responsible_person_id: Int(oRequestDoc.TopElem.custom_elems.ObtainChildByKey("f_main_collaborator").value),
