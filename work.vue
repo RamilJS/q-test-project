@@ -1,9 +1,11 @@
-alert("test3 start");
+alert("test4 start");
 try
 {
-    var sql_str = "SELECT cs.id\r\n";
+    var sql_str = "SELECT cs.id, cs.position_name\r\n";
     sql_str += "FROM collaborators cs\r\n";
     sql_str += "WHERE cs.is_dismiss = 0\r\n";
+    sql_str += "  AND cs.position_name IS NOT NULL\r\n";
+    sql_str += "  AND LTRIM(RTRIM(cs.position_name)) != ''\r\n";
 
     var tArr = XQuery("sql:" + sql_str);
 
@@ -11,11 +13,12 @@ try
     for (elem in tArr)
     {
         cnt = cnt + 1;
-        if (cnt <= 3) { alert("elem.id = " + elem.id); }
+        if (cnt <= 3) { alert("elem.id=" + elem.id + " pos=" + elem.position_name); }
     }
-    alert("OK test3: cnt=" + cnt);
+    alert("OK test4: cnt=" + cnt);
+    alert("test4 tArr.length = " + tArr.length);
 }
-catch (e3)
+catch (e4)
 {
-    alert("FAIL test3: " + e3);
+    alert("FAIL test4: " + e4);
 }
