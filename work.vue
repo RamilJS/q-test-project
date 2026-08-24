@@ -60,3 +60,9 @@ where c.is_dismiss = 0
       from position_common pc
       where pc.name = ltrim(rtrim(c.position_name))
   );
+
+
+  select column_name, data_type
+from information_schema.columns
+where table_name = 'position_common'
+order by ordinal_position;
