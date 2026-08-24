@@ -1,8 +1,6 @@
 DEBUG = false;
 LOG_NAME = "agent";
 CUR_OBJECT_ID = 0;
-NPN_DEBUG_LIMIT = 3;
-npnDebugCount = 0;
 // ОБЛАСТЬ ФУНКЦИЙ
 EnableLog('ramil-agent-debug', true);
 function alert(_string) {
@@ -15,124 +13,78 @@ function LogAlert(typeLog, message)
 }
 function TrimSpaces(value)
 {
-    var start, end, result, verbose;
-    verbose = npnDebugCount <= NPN_DEBUG_LIMIT;
-    if (verbose) { alert("TS start value=[" + value + "]"); }
-
-    try
+    var start, end, result, i;
+    start = 0;
+    while (start < value.length && value.charAt(start) == " ")
     {
-        start = 0;
-        while (start < value.length && value.charAt(start) == " ")
-        {
-            start = start + 1;
-        }
-        if (verbose) { alert("TS step1 OK start=" + start); }
+        start = start + 1;
     }
-    catch (t1)
+    end = value.length;
+    while (end > start && value.charAt(end - 1) == " ")
     {
-        alert("TS FAIL step1 (leading loop): " + t1);
-        return value;
+        end = end - 1;
     }
-
-    try
+    result = "";
+    for (i = start; i < end; i++)
     {
-        end = value.length;
-        while (end > start && value.charAt(end - 1) == " ")
-        {
-            end = end - 1;
-        }
-        if (verbose) { alert("TS step2 OK end=" + end); }
+        result = result + value.charAt(i);
     }
-    catch (t2)
-    {
-        alert("TS FAIL step2 (trailing loop): " + t2);
-        return value;
-    }
-
-    try
-    {
-        result = value.substring(start, end);
-        if (verbose) { alert("TS step3 OK result=[" + result + "]"); }
-        return result;
-    }
-    catch (t3)
-    {
-        alert("TS FAIL step3 (substring): " + t3);
-        return value;
-    }
+    return result;
 }
 function NormalizePositionName(rawName)
 {
-    var value, parts, normalizedName, i, safeRawName, verbose;
-    verbose = npnDebugCount <= NPN_DEBUG_LIMIT;
-    npnDebugCount = npnDebugCount + 1;
-    if (verbose) { alert("NPN start rawName=[" + rawName + "]"); }
-
-    try
+    var safeRawName, value, parts, normalizedName, i;
+    safeRawName = "" + rawName;
+    if (safeRawName == "undefined")
     {
-        safeRawName = "" + rawName;
-        if (safeRawName == "undefined")
-        {
-            safeRawName = "";
-        }
-        if (safeRawName == "null")
-        {
-            safeRawName = "";
-        }
-        if (verbose) { alert("NPN step1 OK safeRawName=[" + safeRawName + "]"); }
+        safeRawName = "";
     }
-    catch (e1)
+    if (safeRawName == "null")
     {
-        alert("NPN FAIL step1 (string convert): " + e1);
-        return "";
+        safeRawName = "";
     }
-
-    try
-    {
-        value = TrimSpaces(safeRawName);
-        if (verbose) { alert("NPN step2 OK value=[" + value + "]"); }
-    }
-    catch (e2)
-    {
-        alert("NPN FAIL step2 (TrimSpaces call): " + e2);
-        return "";
-    }
-
-    try
-    {
-        parts = value.split(" ");
-        if (verbose) { alert("NPN step3 OK parts.length=" + parts.length); }
-    }
-    catch (e3)
-    {
-        alert("NPN FAIL step3 (split): " + e3);
-        return "";
-    }
-
+    value = TrimSpaces(safeRawName);
+    parts = value.split(" ");
     normalizedName = "";
     for (i = 0; i < parts.length; i++)
     {
-        try
+        if (parts[i] != "")
         {
-            if (parts[i] != "")
+            if (normalizedName == "")
             {
-                if (normalizedName == "")
-                {
-                    normalizedName = parts[i];
-                }
-                else
-                {
-                    normalizedName = normalizedName + " " + parts[i];
-                }
+                normalizedName = parts[i];
+            }
+            else
+            {
+                normalizedName = normalizedName + " " + parts[i];
             }
         }
-        catch (e4)
+    }
+    return normalizedName;
+}
+function ArrayContainsString(values, target)
+{
+    var i;
+    for (i = 0; i < values.length; i++)
+    {
+        if (values[i] == target)
         {
-            alert("NPN FAIL step4 (loop) i=" + i + ": " + e4);
+            return true;
         }
     }
-    if (verbose) { alert("NPN result=[" + normalizedName + "]"); }
-    return normalizedName;
+    return false;
+}
+function FindPositionIdByName(commonPositionPairs, name)
+{
+    var i;
+    for (i = 0; i < commonPositionPairs.length; i++)
+    {
+        if (commonPositionPairs[i].name == name)
+        {
+            return commonPositionPairs[i].id;
+        }
+    }
+    return null;
 }
 function GetActiveCollaboratorPositions()
 {
@@ -179,17 +131,17 @@ function GetExistingCommonPositionNames()
     alert("GetExistingCommonPositionNames(). КОНЕЦ");
     return commonPositionRows;
 }
-function BuildCommonPositionIdsByName(commonPositionRows)
+function BuildCommonPositionPairs(commonPositionRows)
 {
-    var commonPositionIdsByName, i, row, normalizedName;
-    commonPositionIdsByName = {};
+    var pairs, i, row, normalizedName;
+    pairs = [];
     for (i = 0; i < commonPositionRows.length; i++)
     {
         row = commonPositionRows[i];
         normalizedName = NormalizePositionName(row.name);
-        commonPositionIdsByName[normalizedName] = row.id;
+        pairs.push({ name: normalizedName, id: row.id });
     }
-    return commonPositionIdsByName;
+    return pairs;
 }
 function CreateCommonPosition(name)
 {
@@ -203,32 +155,31 @@ function CreateCommonPosition(name)
     alert("CreateCommonPosition(). КОНЕЦ");
     return commonPosition;
 }
-function EnsureCommonPositionsExist(positionNames, existingCommonPositionIdsByName)
+function EnsureCommonPositionsExist(positionNames, commonPositionPairs)
 {
     LogAlert(1, "EnsureCommonPositionsExist(). НАЧАЛО");
     alert("EnsureCommonPositionsExist(). НАЧАЛО");
-    var commonPositionIdsByName, i, name, commonPosition;
-    commonPositionIdsByName = existingCommonPositionIdsByName;
+    var i, name, commonPosition;
     for (i = 0; i < positionNames.length; i++)
     {
         name = positionNames[i];
-        if (!commonPositionIdsByName[name])
+        if (FindPositionIdByName(commonPositionPairs, name) == null)
         {
             commonPosition = CreateCommonPosition(name);
-            commonPositionIdsByName[name] = commonPosition.id;
+            commonPositionPairs.push({ name: name, id: commonPosition.id });
         }
     }
     LogAlert(1, "EnsureCommonPositionsExist(). КОНЕЦ");
     alert("EnsureCommonPositionsExist(). КОНЕЦ");
-    return commonPositionIdsByName;
+    return commonPositionPairs;
 }
-function AssignCommonPositionToEmployee(collaboratorRow, commonPositionIdsByName)
+function AssignCommonPositionToEmployee(collaboratorRow, commonPositionPairs)
 {
     LogAlert(1, "AssignCommonPositionToEmployee(). НАЧАЛО");
     alert("AssignCommonPositionToEmployee(). НАЧАЛО: id=" + collaboratorRow.id);
     var normalizedName, commonPositionId;
     normalizedName = NormalizePositionName(collaboratorRow.position_name);
-    commonPositionId = commonPositionIdsByName[normalizedName];
+    commonPositionId = FindPositionIdByName(commonPositionPairs, normalizedName);
     // TODO: заменить на реальное сохранение объекта "Сотрудник" (collaborators),
     // поле-связь пока называется предположительно position_common_id
     SaveObject("collaborator", collaboratorRow.id, { position_common_id: commonPositionId });
@@ -241,18 +192,16 @@ function Run()
     alert("Run(). НАЧАЛО");
     try
     {
-        var collaboratorRows, positionNamesSeen, positionNames, i, normalizedName, existingCommonPositionIdsByName, commonPositionIdsByName, collaboratorRow;
+        var collaboratorRows, positionNames, i, normalizedName, commonPositionPairs, collaboratorRow;
         collaboratorRows = GetActiveCollaboratorPositions();
-        positionNamesSeen = {};
         positionNames = [];
         for (i = 0; i < collaboratorRows.length; i++)
         {
             try
             {
                 normalizedName = NormalizePositionName(collaboratorRows[i].position_name);
-                if (normalizedName != "" && !positionNamesSeen[normalizedName])
+                if (normalizedName != "" && !ArrayContainsString(positionNames, normalizedName))
                 {
-                    positionNamesSeen[normalizedName] = true;
                     positionNames.push(normalizedName);
                 }
             }
@@ -263,14 +212,14 @@ function Run()
             }
         }
         alert("Run(). Уникальных названий должностей: " + positionNames.length);
-        existingCommonPositionIdsByName = BuildCommonPositionIdsByName(GetExistingCommonPositionNames());
-        commonPositionIdsByName = EnsureCommonPositionsExist(positionNames, existingCommonPositionIdsByName);
+        commonPositionPairs = BuildCommonPositionPairs(GetExistingCommonPositionNames());
+        commonPositionPairs = EnsureCommonPositionsExist(positionNames, commonPositionPairs);
         for (i = 0; i < collaboratorRows.length; i++)
         {
             collaboratorRow = collaboratorRows[i];
             try
             {
-                AssignCommonPositionToEmployee(collaboratorRow, commonPositionIdsByName);
+                AssignCommonPositionToEmployee(collaboratorRow, commonPositionPairs);
             }
             catch (employeeError)
             {
