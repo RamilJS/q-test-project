@@ -8,74 +8,50 @@
 -- ждём пример), а не прямой SQL. SQL/XQuery в агенте используется только
 -- для того, чтобы НАЙТИ кандидатов.
 --
--- Обновлено по реальной XML-выгрузке сотрудника (root tag <collaborator>):
---   is_dismiss = 0        -- подтверждено: это и есть "действующий сотрудник"
---   position_name          -- подтверждено: лежит прямо на записи сотрудника,
---                              отдельный join на справочник должностей не нужен
---   hire_date               -- подтверждено имя поля даты приёма
+-- Схема подтверждена запросами к sys.tables/sys.columns/information_schema:
+--   collaborators (мн.ч.) -- плоская проекция объекта "Сотрудник" с обычными
+--                             колонками. "collaborator" (ед.ч.) -- сырое
+--                             XML-хранилище (id/created/modified/ftime/data),
+--                             для наших запросов не годится.
+--   is_dismiss             -- bit, 0 = действующий сотрудник
+--   position_name          -- varchar, название фактической должности,
+--                             лежит прямо на collaborators, отдельный join
+--                             на справочник должностей не нужен
+--   hire_date               -- дата приёма в компанию
+--   position_date           -- дата вступления в ТЕКУЩУЮ должность (кандидат
+--                             на "дату начала" в расчёте срока по матрице --
+--                             уточнить у бизнеса, что именно имелось в виду)
+--   position_commons (мн.ч.) -- плоская проекция "Типовая должность",
+--                             название должности -- поле name (varchar)
 --
--- ВСЁ ЕЩЁ предположение (не в XML сотрудника, нужна доп. проверка):
---   имя таблицы            -- collaborator (по тегу) или collaborators
---                              (по аналогии с orgs/subdivisions) -- см. шаг 0
---   position_common_id      -- поле-связь на collaborator для типовой
---                              должности -- ещё не существует, HREDU-174
---                              и HREDU-176/184 его создают
+-- ВАЖНО: поля "связь с типовой должностью" на collaborators пока НЕТ вообще
+-- (ни под этим, ни под похожим именем) -- его создание "с нуля" через
+-- админку это отдельный подготовительный шаг перед тем, как агент
+-- сможет что-либо туда писать. Условие по нему ниже закомментировано.
 -- =====================================================================
 
 
--- ШАГ 0 (опционально). Найти реальное имя таблицы сотрудников,
--- если "collaborator"/"collaborators" не совпадёт.
-
-select t.name as table_name
-from sys.tables t
-where t.name like '%collaborator%'
-   or t.name like '%position%'
-order by t.name;
-
-
--- ШАГ 1. Уникальные названия должностей у действующих сотрудников,
--- у которых ещё не проставлена типовая должность.
--- Это ровно то, что должна вернуть выборка внутри агента (GetActiveEmployeesWithoutCommonPosition).
+-- ШАГ 1. Уникальные названия должностей у действующих сотрудников.
+-- Пока без фильтра "без типовой должности" -- поля-связи ещё не существует.
 
 select distinct
     ltrim(rtrim(c.position_name)) as position_name
-from collaborator c
+from collaborators c
 where c.is_dismiss = 0
-  and c.position_common_id is null       -- TODO: появится вместе с HREDU-174/184
+  -- and c.position_common_id is null   -- TODO: раскомментировать, когда поле будет создано
   and c.position_name is not null
   and ltrim(rtrim(c.position_name)) != '';
 
 
 -- ШАГ 2. Из них -- те названия, для которых типовой должности ещё нет.
--- Тоже просто чтение -- список для того, чтобы агент решил, для каких
--- названий создавать новую типовую должность через CreateObject().
 
 select distinct
     ltrim(rtrim(c.position_name)) as position_name
-from collaborator c
+from collaborators c
 where c.is_dismiss = 0
-  and c.position_common_id is null
+  and ltrim(rtrim(c.position_name)) != ''
   and not exists (
       select 1
-      from position_common pc
+      from position_commons pc
       where pc.name = ltrim(rtrim(c.position_name))
   );
-
-
-  select column_name, data_type
-from information_schema.columns
-where table_name = 'position_common'
-order by ordinal_position;
-
-
-select t.name as table_name, c.name as column_name, ty.name as data_type
-from sys.tables t
-join sys.columns c on c.object_id = t.object_id
-join sys.types ty on ty.user_type_id = c.user_type_id
-where t.name in ('collaborator', 'collaborators', 'cc_collaborator', 'cc_collaborators')
-order by t.name, c.column_id;
-
-select column_name, data_type
-from information_schema.columns
-where table_name = 'position_commons'
-order by ordinal_position;
