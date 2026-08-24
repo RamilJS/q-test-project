@@ -1,13 +1,21 @@
-alert("start");
+alert("test3 start");
 try
 {
-    var r = XQuery("sql:select 1 as x");
-    alert("OK: typeof=" + typeof r + " value=" + r);
+    var sql_str = "SELECT cs.id\r\n";
+    sql_str += "FROM collaborators cs\r\n";
+    sql_str += "WHERE cs.is_dismiss = 0\r\n";
+
+    var tArr = XQuery("sql:" + sql_str);
+
+    var cnt = 0;
+    for (elem in tArr)
+    {
+        cnt = cnt + 1;
+        if (cnt <= 3) { alert("elem.id = " + elem.id); }
+    }
+    alert("OK test3: cnt=" + cnt);
 }
-catch (e)
+catch (e3)
 {
-    alert("FAIL: " + e);
-    var k, keys = "";
-    for (k in e) { keys += k + "=" + e[k] + "; "; }
-    alert("keys ошибки: " + keys);
+    alert("FAIL test3: " + e3);
 }
