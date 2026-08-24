@@ -1,42 +1,116 @@
 // =====================================================================
 // HREDU-174. Агент создания и проставления типовых должностей
 // -----------------------------------------------------------------------
+// v3 - SQL-часть подтверждена в SSMS тимлидом, интегрирована в агент.
+//
+// ЧТО УЖЕ РЕАЛЬНОЕ (не заглушка):
+//   - LogAlert() -- через tools.call_code_library_method/vtbl_common_lib
+//   - GetActiveCollaboratorPositions() и GetExistingCommonPositionNames() --
+//     настоящие SQL-запросы (только SELECT) через Binary()/AppendStr()/
+//     XQuery("sql:"+...), по образцу примера тимлида. Таблицы и поля
+//     подтверждены запросами к sys.tables/sys.columns:
+//       collaborators.is_dismiss, collaborators.position_name,
+//       position_commons.name
+//
+// ЧТО ВСЁ ЕЩЁ TODO (и почему):
+//   1. CreateCommonPosition() / AssignCommonPositionToEmployee() --
+//      это запись данных. Пользователь явно запретил делать это через
+//      прямой SQL DML -- создание/сохранение объектов должно идти через
+//      платформенный объектный API (CreateObject/SaveObject или как он
+//      реально называется). Примера такого вызова мне пока не присылали
+//      (только для чтения через XQuery) -- нужен пример из любого
+//      агента/библиотеки, которая реально создаёт или сохраняет объект.
+//   2. На collaborators до сих пор НЕТ поля-связи с типовой должностью
+//      (проверено sys.columns) -- его создание через админку это
+//      отдельный подготовительный шаг перед тем, как AssignCommonPosition
+//      ToEmployee() вообще сможет что-то сохранить. Пока имя поля -- TODO
+//      "position_common_id" по аналогии с наименованием в других тикетах.
+//
+// ОТКРЫТЫЕ БИЗНЕС-ВОПРОСЫ (решить с тимлидом/бизнесом, не блокируют код):
+//   - Разночтения вроде "Администратор БД" / "Администратор баз данных",
+//     "Бизнес-менеджер" / "Бизнес менеджер" -- по букве ТЗ считаются
+//     РАЗНЫМИ типовыми должностями (агент их не сливает). Опечатки вроде
+//     "Cпециалист" с латинской C, "Ведуший специалист" -- туда же.
+//   - Тестовые/служебные записи ("Директор для теста", "Сотрудник 1-6" и
+//     т.п.) агент тоже превратит в типовые должности -- ничего не фильтрует.
+// =====================================================================
 
 // ==================== ОБЛАСТЬ КОНСТАНТ ====================
 
-DEBUG = false;                       // Включает подробные логи для дебага. На проде и в репо — всегда false
+DEBUG = false;                       // Включает подробные логи для дебага. На проде и в репо - всегда false
 LOG_NAME = "agent";                  // Системный лог агентов, отдельный лог не создаём
 CUR_OBJECT_ID = 0;                   // TODO: заменить на реальный ID агента (админка -> объект -> Сервис -> Копировать ID документа)
 
 // ==================== ОБЛАСТЬ ФУНКЦИЙ ====================
 
-// Выводит сообщение в логи.
-// @param {string} typeLog      -   Уровень логов. 1 - [DEBUG], 2 - [INFO], 3 - [WARN], 4 - [ERROR].
-// @param {string} message      -   Сообщение для логов
-// @returns {void}
-
+/*
+ * Выводит сообщение в логи.
+ * @param {string} typeLog      -   Уровень логов. 1 - [DEBUG], 2 - [INFO], 3 - [WARN], 4 - [ERROR].
+ * @param {string} message      -   Сообщение для логов
+ * @returns {void}
+ */
 function LogAlert(typeLog, message)
 {
     tools.call_code_library_method("vtbl_common_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
 }
 
-// Убирает лишние пробелы по краям и схлопывает повторы пробелов внутри названия.
-// @param {string} rawName      -   Исходное название должности
-// @returns {string}
+/*
+ * Обрезает пробелы по краям строки. Без regex и без String.trim() --
+ * похоже, платформа их не поддерживает (была ошибка JS Syntax Error
+ * именно на regex-литерале /\s+/g), поэтому только базовые charAt/substring.
+ * @param {string} value        -   Исходная строка
+ * @returns {string}
+ */
+function TrimSpaces(value)
+{
+    var start, end;
 
+    start = 0;
+    while (start < value.length && value.charAt(start) === " ")
+    {
+        start = start + 1;
+    }
+
+    end = value.length;
+    while (end > start && value.charAt(end - 1) === " ")
+    {
+        end = end - 1;
+    }
+
+    return value.substring(start, end);
+}
+
+/*
+ * Убирает лишние пробелы по краям и схлопывает повторы пробелов внутри названия.
+ * Без regex -- разбивает по пробелу (split принимает строку-разделитель,
+ * это не regex) и собирает обратно через одинарный пробел.
+ * @param {string} rawName      -   Исходное название должности
+ * @returns {string}
+ */
 function NormalizePositionName(rawName)
 {
-    var normalizedName;
+    var value, parts, normalizedName, i;
 
-    normalizedName = (rawName || "").trim().replace(/\s+/g, " ");
+    value = TrimSpaces(rawName || "");
+    parts = value.split(" ");
+    normalizedName = "";
+
+    for (i = 0; i < parts.length; i++)
+    {
+        if (parts[i] !== "")
+        {
+            normalizedName = normalizedName === "" ? parts[i] : normalizedName + " " + parts[i];
+        }
+    }
 
     return normalizedName;
 }
 
-// Возвращает id и название должности всех действующих сотрудников.
-// Реальный SQL, только чтение (SELECT) -- подтверждён в SSMS.
-// @returns {object[]}
-
+/*
+ * Возвращает id и название должности всех действующих сотрудников.
+ * Реальный SQL, только чтение (SELECT) -- подтверждён в SSMS.
+ * @returns {object[]}
+ */
 function GetActiveCollaboratorPositions()
 {
     LogAlert(1, "GetActiveCollaboratorPositions(). НАЧАЛО");
@@ -56,11 +130,11 @@ function GetActiveCollaboratorPositions()
     return rows;
 }
 
-
-// Возвращает названия всех уже существующих типовых должностей.
-// Реальный SQL, только чтение (SELECT) -- подтверждён в SSMS.
-// @returns {object[]}
-
+/*
+ * Возвращает названия всех уже существующих типовых должностей.
+ * Реальный SQL, только чтение (SELECT) -- подтверждён в SSMS.
+ * @returns {object[]}
+ */
 function GetExistingCommonPositionNames()
 {
     LogAlert(1, "GetExistingCommonPositionNames(). НАЧАЛО");
@@ -77,10 +151,11 @@ function GetExistingCommonPositionNames()
     return rows;
 }
 
-// Строит соответствие "нормализованное название -> ID" из строк position_commons.
-// @param {object[]} commonPositionRows  -   Строки из GetExistingCommonPositionNames()
-// @returns {object}
-
+/*
+ * Строит соответствие "нормализованное название -> ID" из строк position_commons.
+ * @param {object[]} commonPositionRows  -   Строки из GetExistingCommonPositionNames()
+ * @returns {object}
+ */
 function BuildCommonPositionIdsByName(commonPositionRows)
 {
     var commonPositionIdsByName, i, row, normalizedName;
@@ -97,13 +172,14 @@ function BuildCommonPositionIdsByName(commonPositionRows)
     return commonPositionIdsByName;
 }
 
-// Создаёт новую типовую должность с указанным названием.
-// TODO: платформенный объектный API для СОЗДАНИЯ объекта пока не подтверждён
-// (были только примеры чтения через XQuery). Раскрыть API из примера
-// агента/библиотеки, которая реально пишет данные, и заменить заглушку.
-// @param {string} name         -   Название типовой должности
-// @returns {object}
-
+/*
+ * Создаёт новую типовую должность с указанным названием.
+ * TODO: платформенный объектный API для СОЗДАНИЯ объекта пока не подтверждён
+ * (были только примеры чтения через XQuery). Раскрыть API из примера
+ * агента/библиотеки, которая реально пишет данные, и заменить заглушку.
+ * @param {string} name         -   Название типовой должности
+ * @returns {object}
+ */
 function CreateCommonPosition(name)
 {
     LogAlert(1, "CreateCommonPosition(). НАЧАЛО");
@@ -117,13 +193,13 @@ function CreateCommonPosition(name)
     return commonPosition;
 }
 
-
-// Гарантирует, что для каждого названия должности существует типовая должность,
-// и возвращает соответствие "название -> ID типовой должности".
-// @param {string[]} positionNames              -   Уникальные названия должностей сотрудников
-// @param {object} existingCommonPositionIdsByName  -   Уже существующие типовые должности
-// @returns {object}
- 
+/*
+ * Гарантирует, что для каждого названия должности существует типовая должность,
+ * и возвращает соответствие "название -> ID типовой должности".
+ * @param {string[]} positionNames              -   Уникальные названия должностей сотрудников
+ * @param {object} existingCommonPositionIdsByName  -   Уже существующие типовые должности
+ * @returns {object}
+ */
 function EnsureCommonPositionsExist(positionNames, existingCommonPositionIdsByName)
 {
     LogAlert(1, "EnsureCommonPositionsExist(). НАЧАЛО");
@@ -146,15 +222,15 @@ function EnsureCommonPositionsExist(positionNames, existingCommonPositionIdsByNa
     return commonPositionIdsByName;
 }
 
-//
-// Проставляет сотруднику ссылку на типовую должность по названию его должности.
-// TODO: платформенный объектный API для СОХРАНЕНИЯ объекта пока не подтверждён.
-// TODO: поля-связи с типовой должностью на collaborators пока не существует физически --
-// его создание через админку это отдельный шаг до того, как это заработает.
-// @param {object} collaboratorRow          -   Строка из GetActiveCollaboratorPositions() {id, position_name}
-// @param {object} commonPositionIdsByName  -   Соответствие "название -> ID типовой должности"
-// @returns {void}
-
+/*
+ * Проставляет сотруднику ссылку на типовую должность по названию его должности.
+ * TODO: платформенный объектный API для СОХРАНЕНИЯ объекта пока не подтверждён.
+ * TODO: поля-связи с типовой должностью на collaborators пока не существует физически --
+ * его создание через админку это отдельный шаг до того, как это заработает.
+ * @param {object} collaboratorRow          -   Строка из GetActiveCollaboratorPositions() {id, position_name}
+ * @param {object} commonPositionIdsByName  -   Соответствие "название -> ID типовой должности"
+ * @returns {void}
+ */
 function AssignCommonPositionToEmployee(collaboratorRow, commonPositionIdsByName)
 {
     LogAlert(1, "AssignCommonPositionToEmployee(). НАЧАЛО");
@@ -170,9 +246,10 @@ function AssignCommonPositionToEmployee(collaboratorRow, commonPositionIdsByName
     LogAlert(1, "AssignCommonPositionToEmployee(). КОНЕЦ");
 }
 
-// Точка входа агента.
-// @returns {void}
-
+/*
+ * Точка входа агента.
+ * @returns {void}
+ */
 function Run()
 {
     LogAlert(2, "Run(). НАЧАЛО");
