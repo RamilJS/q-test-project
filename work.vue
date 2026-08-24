@@ -17,7 +17,7 @@ function TrimSpaces(value)
 {
     var start, end, result, verbose;
     verbose = npnDebugCount <= NPN_DEBUG_LIMIT;
-    if (verbose) { alert("TS start value=[" + value + "] typeof=" + typeof value); }
+    if (verbose) { alert("TS start value=[" + value + "]"); }
 
     try
     {
@@ -66,16 +66,24 @@ function NormalizePositionName(rawName)
     var value, parts, normalizedName, i, safeRawName, verbose;
     verbose = npnDebugCount <= NPN_DEBUG_LIMIT;
     npnDebugCount = npnDebugCount + 1;
-    if (verbose) { alert("NPN start rawName=[" + rawName + "] typeof=" + typeof rawName); }
+    if (verbose) { alert("NPN start rawName=[" + rawName + "]"); }
 
     try
     {
-        safeRawName = rawName || "";
+        safeRawName = "" + rawName;
+        if (safeRawName == "undefined")
+        {
+            safeRawName = "";
+        }
+        if (safeRawName == "null")
+        {
+            safeRawName = "";
+        }
         if (verbose) { alert("NPN step1 OK safeRawName=[" + safeRawName + "]"); }
     }
     catch (e1)
     {
-        alert("NPN FAIL step1 (rawName||''): " + e1);
+        alert("NPN FAIL step1 (string convert): " + e1);
         return "";
     }
 
