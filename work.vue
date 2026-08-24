@@ -1,16 +1,19 @@
 DEBUG = false;
 LOG_NAME = "agent";
-CUR_OBJECT_ID = 0;
+CUR_OBJECT_ID = oData.id;
+
 // ОБЛАСТЬ ФУНКЦИЙ
 EnableLog('ramil-agent-debug', true);
 function alert(_string) {
     LogEvent('ramil-agent-debug', _string);
     return _string;
 }
+
 function LogAlert(typeLog, message)
 {
     tools.call_code_library_method("vtbl_common_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
 }
+
 function TrimSpaces(value)
 {
     var start, end;
@@ -26,6 +29,7 @@ function TrimSpaces(value)
     }
     return value.substring(start, end);
 }
+      
 function NormalizePositionName(rawName)
 {
     var value, parts, normalizedName, i;
@@ -36,11 +40,19 @@ function NormalizePositionName(rawName)
     {
         if (parts[i] !== "")
         {
-            normalizedName = normalizedName === "" ? parts[i] : normalizedName + " " + parts[i];
+            if (normalizedName === "")
+            {
+                normalizedName = parts[i];
+            }
+            else
+            {
+                normalizedName = normalizedName + " " + parts[i];
+            }
         }
     }
     return normalizedName;
 }
+      
 function GetActiveCollaboratorPositions()
 {
     LogAlert(1, "GetActiveCollaboratorPositions(). НАЧАЛО");
@@ -154,11 +166,19 @@ function Run()
         positionNames = [];
         for (i = 0; i < collaboratorRows.length; i++)
         {
-            normalizedName = NormalizePositionName(collaboratorRows[i].position_name);
-            if (normalizedName !== "" && !positionNamesSeen[normalizedName])
+            try
             {
-                positionNamesSeen[normalizedName] = true;
-                positionNames.push(normalizedName);
+                normalizedName = NormalizePositionName(collaboratorRows[i].position_name);
+                if (normalizedName !== "" && !positionNamesSeen[normalizedName])
+                {
+                    positionNamesSeen[normalizedName] = true;
+                    positionNames.push(normalizedName);
+                }
+            }
+            catch (normalizeError)
+            {
+                LogAlert(3, "Run(). Не удалось нормализовать должность сотрудника ID=" + collaboratorRows[i].id + " [" + collaboratorRows[i].position_name + "]: " + normalizeError.message);
+                alert("Run(). Не удалось нормализовать должность сотрудника ID=" + collaboratorRows[i].id + " [" + collaboratorRows[i].position_name + "]: " + normalizeError);
             }
         }
         alert("Run(). Уникальных названий должностей: " + positionNames.length);
