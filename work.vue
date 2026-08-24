@@ -66,3 +66,16 @@ where c.is_dismiss = 0
 from information_schema.columns
 where table_name = 'position_common'
 order by ordinal_position;
+
+
+select t.name as table_name, c.name as column_name, ty.name as data_type
+from sys.tables t
+join sys.columns c on c.object_id = t.object_id
+join sys.types ty on ty.user_type_id = c.user_type_id
+where t.name in ('collaborator', 'collaborators', 'cc_collaborator', 'cc_collaborators')
+order by t.name, c.column_id;
+
+select column_name, data_type
+from information_schema.columns
+where table_name = 'position_commons'
+order by ordinal_position;
