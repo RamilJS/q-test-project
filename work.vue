@@ -8,7 +8,6 @@ function alert(_string) {
     LogEvent('ramil-agent-debug', _string);
     return _string;
 }
-
 function LogAlert(typeLog, message)
 {
     tools.call_code_library_method("vtbl_common_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
@@ -18,12 +17,12 @@ function TrimSpaces(value)
 {
     var start, end;
     start = 0;
-    while (start < value.length && value.charAt(start) === " ")
+    while (start < value.length && value.charAt(start) == " ")
     {
         start = start + 1;
     }
     end = value.length;
-    while (end > start && value.charAt(end - 1) === " ")
+    while (end > start && value.charAt(end - 1) == " ")
     {
         end = end - 1;
     }
@@ -38,9 +37,9 @@ function NormalizePositionName(rawName)
     normalizedName = "";
     for (i = 0; i < parts.length; i++)
     {
-        if (parts[i] !== "")
+        if (parts[i] != "")
         {
-            if (normalizedName === "")
+            if (normalizedName == "")
             {
                 normalizedName = parts[i];
             }
@@ -169,7 +168,7 @@ function Run()
             try
             {
                 normalizedName = NormalizePositionName(collaboratorRows[i].position_name);
-                if (normalizedName !== "" && !positionNamesSeen[normalizedName])
+                if (normalizedName != "" && !positionNamesSeen[normalizedName])
                 {
                     positionNamesSeen[normalizedName] = true;
                     positionNames.push(normalizedName);
