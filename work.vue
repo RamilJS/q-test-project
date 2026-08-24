@@ -1,7 +1,8 @@
 DEBUG = false;
 LOG_NAME = "agent";
-CUR_OBJECT_ID = oData.id;
-
+CUR_OBJECT_ID = 0;
+NPN_DEBUG_LIMIT = 3;
+npnDebugCount = 0;
 // ОБЛАСТЬ ФУНКЦИЙ
 EnableLog('ramil-agent-debug', true);
 function alert(_string) {
@@ -12,46 +13,119 @@ function LogAlert(typeLog, message)
 {
     tools.call_code_library_method("vtbl_common_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
 }
-
 function TrimSpaces(value)
 {
-    var start, end;
-    start = 0;
-    while (start < value.length && value.charAt(start) == " ")
+    var start, end, result, verbose;
+    verbose = npnDebugCount <= NPN_DEBUG_LIMIT;
+    if (verbose) { alert("TS start value=[" + value + "] typeof=" + typeof value); }
+
+    try
     {
-        start = start + 1;
+        start = 0;
+        while (start < value.length && value.charAt(start) == " ")
+        {
+            start = start + 1;
+        }
+        if (verbose) { alert("TS step1 OK start=" + start); }
     }
-    end = value.length;
-    while (end > start && value.charAt(end - 1) == " ")
+    catch (t1)
     {
-        end = end - 1;
+        alert("TS FAIL step1 (leading loop): " + t1);
+        return value;
     }
-    return value.substring(start, end);
+
+    try
+    {
+        end = value.length;
+        while (end > start && value.charAt(end - 1) == " ")
+        {
+            end = end - 1;
+        }
+        if (verbose) { alert("TS step2 OK end=" + end); }
+    }
+    catch (t2)
+    {
+        alert("TS FAIL step2 (trailing loop): " + t2);
+        return value;
+    }
+
+    try
+    {
+        result = value.substring(start, end);
+        if (verbose) { alert("TS step3 OK result=[" + result + "]"); }
+        return result;
+    }
+    catch (t3)
+    {
+        alert("TS FAIL step3 (substring): " + t3);
+        return value;
+    }
 }
-      
 function NormalizePositionName(rawName)
 {
-    var value, parts, normalizedName, i;
-    value = TrimSpaces(rawName || "");
-    parts = value.split(" ");
+    var value, parts, normalizedName, i, safeRawName, verbose;
+    verbose = npnDebugCount <= NPN_DEBUG_LIMIT;
+    npnDebugCount = npnDebugCount + 1;
+    if (verbose) { alert("NPN start rawName=[" + rawName + "] typeof=" + typeof rawName); }
+
+    try
+    {
+        safeRawName = rawName || "";
+        if (verbose) { alert("NPN step1 OK safeRawName=[" + safeRawName + "]"); }
+    }
+    catch (e1)
+    {
+        alert("NPN FAIL step1 (rawName||''): " + e1);
+        return "";
+    }
+
+    try
+    {
+        value = TrimSpaces(safeRawName);
+        if (verbose) { alert("NPN step2 OK value=[" + value + "]"); }
+    }
+    catch (e2)
+    {
+        alert("NPN FAIL step2 (TrimSpaces call): " + e2);
+        return "";
+    }
+
+    try
+    {
+        parts = value.split(" ");
+        if (verbose) { alert("NPN step3 OK parts.length=" + parts.length); }
+    }
+    catch (e3)
+    {
+        alert("NPN FAIL step3 (split): " + e3);
+        return "";
+    }
+
     normalizedName = "";
     for (i = 0; i < parts.length; i++)
     {
-        if (parts[i] != "")
+        try
         {
-            if (normalizedName == "")
+            if (parts[i] != "")
             {
-                normalizedName = parts[i];
-            }
-            else
-            {
-                normalizedName = normalizedName + " " + parts[i];
+                if (normalizedName == "")
+                {
+                    normalizedName = parts[i];
+                }
+                else
+                {
+                    normalizedName = normalizedName + " " + parts[i];
+                }
             }
         }
+        catch (e4)
+        {
+            alert("NPN FAIL step4 (loop) i=" + i + ": " + e4);
+        }
     }
+    if (verbose) { alert("NPN result=[" + normalizedName + "]"); }
     return normalizedName;
 }
-      
 function GetActiveCollaboratorPositions()
 {
     LogAlert(1, "GetActiveCollaboratorPositions(). НАЧАЛО");
