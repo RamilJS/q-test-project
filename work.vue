@@ -1,24 +1,15 @@
 function GetActiveCollaboratorPositions()
 {
     LogAlert(1, "GetActiveCollaboratorPositions(). НАЧАЛО");
-    var bSqlStr, rows, sqlText;
+    var sqlText, rows;
 
-    try { bSqlStr = new Binary(); alert("OK: new Binary()"); }
-    catch (e1) { alert("FAIL: new Binary() -- " + e1); return []; }
-
-    try
-    {
-        bSqlStr.AppendStr("select id, position_name\r\n");
-        bSqlStr.AppendStr("from collaborators\r\n");
-        bSqlStr.AppendStr("where is_dismiss = 0\r\n");
-        bSqlStr.AppendStr("  and position_name is not null\r\n");
-        bSqlStr.AppendStr("  and ltrim(rtrim(position_name)) != ''\r\n");
-        alert("OK: AppendStr x5");
-    }
-    catch (e2) { alert("FAIL: AppendStr -- " + e2); return []; }
-
-    try { sqlText = bSqlStr.GetStr(); alert("OK: GetStr() = " + sqlText); }
-    catch (e3) { alert("FAIL: GetStr() -- " + e3); return []; }
+    sqlText = "";
+    sqlText = sqlText + "select id, position_name\r\n";
+    sqlText = sqlText + "from collaborators\r\n";
+    sqlText = sqlText + "where is_dismiss = 0\r\n";
+    sqlText = sqlText + "  and position_name is not null\r\n";
+    sqlText = sqlText + "  and ltrim(rtrim(position_name)) != ''\r\n";
+    alert("sqlText = " + sqlText);
 
     try { rows = XQuery("sql:" + sqlText); alert("OK: XQuery() typeof=" + typeof rows); }
     catch (e4) { alert("FAIL: XQuery() -- " + e4); return []; }
