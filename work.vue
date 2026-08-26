@@ -1,18 +1,15 @@
-
-// HREDU-174. Откат: удаление кастомного поля f_position_common_id у сотрудников.
-// Требования тимлида изменились -- связь с типовой должностью должна храниться
-// не на collaborator (в custom_elems), а на position (в штатном поле position_common_id).
-// Этот скрипт нужен один раз, чтобы убрать то, что было проставлено по старой схеме.
+// HREDU-174. Агент создания и проставления типовых должностей.
+// Связь хранится на объекте position (штатное поле position_common_id),
 
 //-------------------------------------------------------------------------
 //              Область констант
 //-------------------------------------------------------------------------
 
 DEBUG = false;              // Включает подробные логи уровня 1 [DEBUG] -- на проде и в репозитории должно быть false
-LOG_NAME = "agent";         // Системный лог для агентов сервера
+LOG_NAME = "agent";         // Системный лог для агентов сервера (отдельный server_agent не заводим)
 CUR_OBJECT_ID = oData.id;   // ID текущего документа агента
-TEST_TOP_N = 0;             // Ограничение выборки сотрудников для тестового прогона. 0 = без ограничения
-PROGRESS_LOG_STEP = 100;    // Через сколько обработанных сотрудников писать в лог прогресс выполнения
+TEST_TOP_N = 0;             // Ограничение выборки должностей для тестового прогона. 0 = без ограничения (боевой режим)
+PROGRESS_LOG_STEP = 100;    // Через сколько обработанных должностей писать в лог прогресс выполнения
 
 //-------------------------------------------------------------------------
 //              Область функций
@@ -30,58 +27,225 @@ function LogAlert(typeLog, message)
 }
 
 /*
- * Читает из БД тех же действующих сотрудников, на которых ранее (по старой схеме)
- * проставлялось custom_elems.f_position_common_id. Если TEST_TOP_N > 0, ограничивает
- * выборку первыми N записями (для тестового прогона).
- * @returns {Object[]}     -   Массив строк { id, position_name }.
+ * Приводит "сырое" название должности к нормализованному виду для сравнения и дедупликации:
+ * подставляет пустую строку вместо undefined/null, обрезает пробелы по краям и схлопывает
+ * повторы пробелов/табов/переносов строк внутри строки.
+ * @param {string} rawName     -   Исходное название должности (может быть undefined/null).
+ * @returns {string}
  */
-function GetActiveCollaboratorPositions()
+function NormalizePositionName(rawName)
 {
-    LogAlert(1, "GetActiveCollaboratorPositions(). НАЧАЛО");
-    var topClause, sqlText, rawRows, collaboratorRows, row;
+    LogAlert(1, "NormalizePositionName(). НАЧАЛО");
+    var safeRawName, normalizedName;
+    safeRawName = "" + rawName;
+    if (safeRawName == "undefined")
+    {
+        safeRawName = "";
+    }
+    if (safeRawName == "null")
+    {
+        safeRawName = "";
+    }
+    normalizedName = Trim(UnifySpaces(safeRawName));
+    LogAlert(1, "NormalizePositionName(). КОНЕЦ");
+    return normalizedName;
+}
+
+/*
+ * Проверяет, содержится ли указанное значение в массиве строк.
+ * @param {string[]} values    -   Массив строк для поиска.
+ * @param {string} target      -   Искомое значение.
+ * @returns {boolean}
+ */
+function ArrayContainsString(values, target)
+{
+    LogAlert(1, "ArrayContainsString(). НАЧАЛО");
+    var i, result;
+    result = false;
+    for (i = 0; i < values.length; i++)
+    {
+        if (values[i] == target)
+        {
+            result = true;
+        }
+    }
+    LogAlert(1, "ArrayContainsString(). КОНЕЦ");
+    return result;
+}
+
+/*
+ * Ищет ID типовой должности по нормализованному названию в списке пар { name, id }.
+ * @param {Object[]} commonPositionPairs   -   Список пар { name, id } типовых должностей.
+ * @param {string} name                    -   Нормализованное название должности.
+ * @returns {?number}                      -   ID типовой должности либо null, если не найдена.
+ */
+function FindPositionIdByName(commonPositionPairs, name)
+{
+    LogAlert(1, "FindPositionIdByName(). НАЧАЛО");
+    var i, result;
+    result = null;
+    for (i = 0; i < commonPositionPairs.length; i++)
+    {
+        if (commonPositionPairs[i].name == name)
+        {
+            result = commonPositionPairs[i].id;
+        }
+    }
+    LogAlert(1, "FindPositionIdByName(). КОНЕЦ");
+    return result;
+}
+
+/*
+ * Строит список пар { name, id } из строк справочника типовых должностей,
+ * нормализуя название каждой типовой должности.
+ * @param {Object[]} commonPositionRows    -   Строки { id, name } из position_commons.
+ * @returns {Object[]}                     -   Список пар { name, id }.
+ */
+function BuildCommonPositionPairs(commonPositionRows)
+{
+    LogAlert(1, "BuildCommonPositionPairs(). НАЧАЛО");
+    var pairs, i, row, normalizedName;
+    pairs = [];
+    for (i = 0; i < commonPositionRows.length; i++)
+    {
+        row = commonPositionRows[i];
+        normalizedName = NormalizePositionName(row.name);
+        pairs.push({ name: normalizedName, id: row.id });
+    }
+    LogAlert(1, "BuildCommonPositionPairs(). КОНЕЦ");
+    return pairs;
+}
+
+/*
+ * Читает из БД должности (position), реально занятые действующими (не уволенными)
+ * сотрудниками -- по одной строке на уникальную пару (position_id, position_name).
+ * Если TEST_TOP_N > 0, ограничивает выборку первыми N записями (для тестового прогона).
+ * ПРЕДПОЛОЖЕНИЕ (проверить при первом прогоне): cs.position_id -- реальная
+ * колонка представления collaborators, как и cs.position_name/cs.is_dismiss.
+ * @returns {Object[]}     -   Массив строк { position_id, position_name }.
+ */
+function GetActivePositionsInUse()
+{
+    LogAlert(1, "GetActivePositionsInUse(). НАЧАЛО");
+    var topClause, sqlText, rawRows, positionRows, row;
     topClause = "";
     if (TEST_TOP_N > 0)
     {
         topClause = "top " + TEST_TOP_N + " ";
     }
     sqlText = "";
-    sqlText = sqlText + "select " + topClause + "cs.id, cs.position_name\r\n";
+    sqlText = sqlText + "select distinct " + topClause + "cs.position_id, cs.position_name\r\n";
     sqlText = sqlText + "from collaborators cs\r\n";
     sqlText = sqlText + "where cs.is_dismiss = 0\r\n";
     sqlText = sqlText + "  and cs.position_name is not null\r\n";
     sqlText = sqlText + "  and ltrim(rtrim(cs.position_name)) != ''\r\n";
     rawRows = XQuery("sql:" + sqlText);
-    collaboratorRows = [];
+    positionRows = [];
     for (row in rawRows)
     {
-        collaboratorRows.push(row);
+        positionRows.push(row);
     }
-    LogAlert(1, "GetActiveCollaboratorPositions(). Найдено сотрудников: " + collaboratorRows.length);
-    LogAlert(1, "GetActiveCollaboratorPositions(). КОНЕЦ");
-    return collaboratorRows;
+    LogAlert(1, "GetActivePositionsInUse(). Найдено должностей: " + positionRows.length);
+    LogAlert(1, "GetActivePositionsInUse(). КОНЕЦ");
+    return positionRows;
 }
 
 /*
- * Удаляет у сотрудника кастомное поле f_position_common_id, если оно есть
- * (по образцу, присланному тимлидом). Ничего не делает, если поля нет.
- * BindToDb() не вызывается -- документ уже открыт через tools.open_doc()
- * и уже привязан к БД.
- * @param {Object} collaboratorRow     -   Строка { id, position_name } сотрудника.
+ * Читает из БД все существующие типовые должности (справочник position_commons).
+ * @returns {Object[]}     -   Массив строк { id, name }.
+ */
+function GetExistingCommonPositionNames()
+{
+    LogAlert(1, "GetExistingCommonPositionNames(). НАЧАЛО");
+    var sqlText, rawRows, commonPositionRows, row;
+    sqlText = "";
+    sqlText = sqlText + "select pc.id, pc.name\r\n";
+    sqlText = sqlText + "from position_commons pc\r\n";
+    rawRows = XQuery("sql:" + sqlText);
+    commonPositionRows = [];
+    for (row in rawRows)
+    {
+        commonPositionRows.push(row);
+    }
+    LogAlert(1, "GetExistingCommonPositionNames(). Найдено типовых должностей: " + commonPositionRows.length);
+    LogAlert(1, "GetExistingCommonPositionNames(). КОНЕЦ");
+    return commonPositionRows;
+}
+
+/*
+ * Создаёт новую типовую должность (объект position_common) с указанным названием.
+ * @param {string} name     -   Нормализованное название новой типовой должности.
+ * @returns {Object}        -   TopElem созданного документа (содержит id).
+ */
+function CreateCommonPosition(name)
+{
+    LogAlert(1, "CreateCommonPosition(). НАЧАЛО");
+    var oNewDoc, oNewDocTE;
+    oNewDoc = tools.new_doc_by_name("position_common");
+    oNewDocTE = oNewDoc.TopElem;
+    oNewDocTE.name = name;
+    oNewDoc.BindToDb(DefaultDb);
+    oNewDoc.Save();
+    LogAlert(1, "CreateCommonPosition(). Создана типовая должность: " + name);
+    LogAlert(1, "CreateCommonPosition(). КОНЕЦ");
+    return oNewDocTE;
+}
+
+/*
+ * Проверяет список нормализованных названий должностей и создаёт недостающие
+ * типовые должности в справочнике position_commons.
+ * @param {string[]} positionNames         -   Уникальные нормализованные названия должностей.
+ * @param {Object[]} commonPositionPairs   -   Текущий список пар { name, id } типовых должностей.
+ * @returns {Object[]}                     -   Обновлённый список пар { name, id } (с учётом созданных).
+ */
+function EnsureCommonPositionsExist(positionNames, commonPositionPairs)
+{
+    LogAlert(1, "EnsureCommonPositionsExist(). НАЧАЛО");
+    var i, name, commonPosition;
+    for (i = 0; i < positionNames.length; i++)
+    {
+        name = positionNames[i];
+        if (FindPositionIdByName(commonPositionPairs, name) == null)
+        {
+            commonPosition = CreateCommonPosition(name);
+            commonPositionPairs.push({ name: name, id: commonPosition.id });
+        }
+    }
+    LogAlert(1, "EnsureCommonPositionsExist(). КОНЕЦ");
+    return commonPositionPairs;
+}
+
+/*
+ * Проставляет должности (position) ссылку на её типовую должность -- в штатное
+ * поле position_common_id (поле уже существует на объекте position, заводить
+ * его через админку не требуется).
+ * @param {Object} positionRow              -   Строка { position_id, position_name }.
+ * @param {Object[]} commonPositionPairs    -   Список пар { name, id } типовых должностей.
  * @returns {void}
  */
-function RemoveCommonPositionCustomElem(collaboratorRow)
+function AssignCommonPositionToPosition(positionRow, commonPositionPairs)
 {
-    LogAlert(1, "RemoveCommonPositionCustomElem(). НАЧАЛО");
-    var oDoc;
-    oDoc = tools.open_doc(collaboratorRow.id);
-    oDoc.TopElem.custom_elems.DeleteChildren("This.name=='f_position_common_id'");
-    oDoc.Save();
-    LogAlert(1, "RemoveCommonPositionCustomElem(). КОНЕЦ");
+    LogAlert(1, "AssignCommonPositionToPosition(). НАЧАЛО");
+    var normalizedName, commonPositionId, oDoc;
+    normalizedName = NormalizePositionName(positionRow.position_name);
+    commonPositionId = FindPositionIdByName(commonPositionPairs, normalizedName);
+    if (commonPositionId == null)
+    {
+        LogAlert(3, "AssignCommonPositionToPosition(). Не найден commonPositionId для должности ID=" + positionRow.position_id + " [" + normalizedName + "], пропуск");
+    }
+    else
+    {
+        oDoc = tools.open_doc(positionRow.position_id);
+        oDoc.TopElem.position_common_id = commonPositionId;
+        oDoc.Save();
+    }
+    LogAlert(1, "AssignCommonPositionToPosition(). КОНЕЦ");
 }
 
 /*
- * Точка входа агента. Проходит по действующим сотрудникам и удаляет у каждого
- * кастомное поле f_position_common_id, если оно было проставлено ранее.
+ * Точка входа агента. Читает должности, реально занятые действующими сотрудниками,
+ * дополняет справочник типовых должностей недостающими записями и проставляет
+ * каждой должности ссылку на её типовую должность.
  * @returns {void}
  */
 function Run()
@@ -89,27 +253,45 @@ function Run()
     LogAlert(2, "Run(). НАЧАЛО");
     try
     {
-        var collaboratorRows, i, collaboratorRow, processedCount;
-        collaboratorRows = GetActiveCollaboratorPositions();
-        processedCount = 0;
-        for (i = 0; i < collaboratorRows.length; i++)
+        var positionRows, positionNames, i, normalizedName, commonPositionPairs, positionRow, processedCount;
+        positionRows = GetActivePositionsInUse();
+        positionNames = [];
+        for (i = 0; i < positionRows.length; i++)
         {
-            collaboratorRow = collaboratorRows[i];
             try
             {
-                RemoveCommonPositionCustomElem(collaboratorRow);
+                normalizedName = NormalizePositionName(positionRows[i].position_name);
+                if (normalizedName != "" && !ArrayContainsString(positionNames, normalizedName))
+                {
+                    positionNames.push(normalizedName);
+                }
             }
-            catch (employeeError)
+            catch (normalizeError)
             {
-                LogAlert(3, "Run(). Не удалось удалить f_position_common_id у сотрудника ID=" + collaboratorRow.id + ": " + employeeError.message);
+                LogAlert(3, "Run(). Не удалось нормализовать должность ID=" + positionRows[i].position_id + " [" + positionRows[i].position_name + "]: " + normalizeError.message);
+            }
+        }
+        commonPositionPairs = BuildCommonPositionPairs(GetExistingCommonPositionNames());
+        commonPositionPairs = EnsureCommonPositionsExist(positionNames, commonPositionPairs);
+        processedCount = 0;
+        for (i = 0; i < positionRows.length; i++)
+        {
+            positionRow = positionRows[i];
+            try
+            {
+                AssignCommonPositionToPosition(positionRow, commonPositionPairs);
+            }
+            catch (positionError)
+            {
+                LogAlert(3, "Run(). Не удалось проставить типовую должность для позиции ID=" + positionRow.position_id + ": " + positionError.message);
             }
             processedCount = processedCount + 1;
             if (processedCount % PROGRESS_LOG_STEP == 0)
             {
-                LogAlert(2, "Run(). Прогресс: обработано " + processedCount + " из " + collaboratorRows.length);
+                LogAlert(2, "Run(). Прогресс: обработано " + processedCount + " из " + positionRows.length);
             }
         }
-        LogAlert(2, "Run(). Обработка завершена: всего сотрудников " + collaboratorRows.length);
+        LogAlert(2, "Run(). Обработка завершена: всего должностей " + positionRows.length + ", уникальных названий " + positionNames.length);
     }
     catch (error)
     {
