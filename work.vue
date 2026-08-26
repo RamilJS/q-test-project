@@ -1,5 +1,6 @@
 // HREDU-174. Агент создания и проставления типовых должностей.
 // Связь хранится на объекте position (штатное поле position_common_id),
+// а не на collaborator -- см. правку требований от тимлида.
 
 //-------------------------------------------------------------------------
 //              Область констант
@@ -238,6 +239,10 @@ function AssignCommonPositionToPosition(positionRow, commonPositionPairs)
         oDoc = tools.open_doc(positionRow.position_id);
         oDoc.TopElem.position_common_id = commonPositionId;
         oDoc.Save();
+        if (TEST_TOP_N > 0)
+        {
+            LogAlert(2, "AssignCommonPositionToPosition(). ТЕСТ: position_id=" + positionRow.position_id + " [" + normalizedName + "] -> position_common_id=" + commonPositionId);
+        }
     }
     LogAlert(1, "AssignCommonPositionToPosition(). КОНЕЦ");
 }
