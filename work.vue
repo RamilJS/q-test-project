@@ -38,7 +38,12 @@ function Run()
     SafeXQuery("XQuery('cc_mir_codes')", "cc_mir_codes");
 
     // 2) Подозреваемая новая коллекция.
-    SafeXQuery("XQuery('collaborator_mircodes')", "collaborator_mircodes");
+    // ВАЖНО: реальное имя каталога -- cc_collaborator_mircodes (с префиксом cc_,
+    // во множественном числе), а не collaborator_mircodes -- моя предыдущая
+    // версия скрипта проверяла не то имя. Похоже, это тот же паттерн, что и с
+    // cc_mir_codes: object_name типа документа остаётся без cc_ (единственное
+    // число), а имя XQuery-каталога -- с префиксом cc_ и во множественном числе.
+    SafeXQuery("XQuery('cc_collaborator_mircodes')", "cc_collaborator_mircodes");
 
     // 3) Проверка самого типа документа отдельно от коллекции: существует ли
     // он вообще под именем collaborator_mircode и что реально в нём лежит.
