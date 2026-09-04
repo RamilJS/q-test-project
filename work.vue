@@ -1,35 +1,48 @@
-// HREDU-181. Восток_полный_список -- удалённое действие для выборки данных отчёта.
-// Черновик: БЕЗ фильтра по видимости (подчинённость/HR) -- пока отдаёт всех активных
-// сотрудников, без фильтра по position_common_id/mir_code_id самой матрицы.
+// =====================================================================
+// HREDU-181. ТЕСТОВЫЙ ПРОГОН выборки "Восток_полный_список" -- НЕ боевой файл.
 //
-// Параметр удалённого действия: matrix_id -- id одной из записей cc_learning_matrice.
+// Это копия логики из HREDU-181_vostok_polny_spisok_draft.js с двумя отличиями,
+// нужными только для ручного теста (по образцу того, как гоняли
+// HREDU-181_diagnostic_learning_matrice_names.js):
+//   1. matrix_id захардкожен (id тестовой матрицы "Матрица тест" из диагностики,
+//      см. TEST_MATRIX_ID ниже) -- в реальном remote_action он приходит через
+//      PARAMETERS, а PARAMETERS тут, скорее всего, не существует.
+//   2. LogAlert() здесь печатает через alert() вместо tools.call_code_library_method(
+//      "vtbl_log_lib", ...) -- чтобы не зависеть от настоящих LOG_NAME/CUR_OBJECT_ID
+//      (у этого файла их просто нет, он не зарегистрирован как документ в админке) и
+//      видеть вывод тем же способом, что и в прошлой диагностике.
 //
+// Когда логика в HREDU-181_vostok_polny_spisok_draft.js поменяется -- этот файл
+// нужно обновить вручную, синхронизации между файлами нет.
+//
+// После теста: если всё ок -- работаем дальше с боевым файлом
+// (HREDU-181_vostok_polny_spisok_draft.js), этот тестовый можно удалить/не переносить
+// в репозиторий.
+// =====================================================================
 
-//-------------------------------------------------------------------------
-//              Область констант
-//-------------------------------------------------------------------------
-
-DEBUG = false;              // Включает подробные логи уровня 1 [DEBUG] -- на проде и в репозитории должно быть false
-LOG_NAME = "agent";         // TODO: уточнить после создания документа в админке -- пока по аналогии с серверными агентами
-CUR_OBJECT_ID = 0;          // TODO: заполнить ID документа remote_action после его создания в админке
-
-//-------------------------------------------------------------------------
-//              Область функций
-//-------------------------------------------------------------------------
+var TEST_MATRIX_ID = 7681616865394751377; // id записи cc_learning_matrice "Матрица тест" (из диагностики 04.09.2026)
 
 /*
- * Управляет логированием. Уровни: 1-[DEBUG], 2-[INFO], 3-[WARN], 4-[ERROR].
- * @param {number} typeLog     -   Уровень логов.
+ * ТЕСТОВАЯ версия LogAlert -- печатает через alert() вместо реального журнала логов.
+ * @param {number} typeLog     -   Уровень логов: 1-DEBUG, 2-INFO, 3-WARN, 4-ERROR.
  * @param {string} message     -   Сообщение для логов.
  * @returns {void}
  */
 function LogAlert(typeLog, message)
 {
-    tools.call_code_library_method("vtbl_log_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
+    var prefix;
+    prefix = "[?]";
+    if (typeLog == 1) { prefix = "[DEBUG]"; }
+    else if (typeLog == 2) { prefix = "[INFO]"; }
+    else if (typeLog == 3) { prefix = "[WARN]"; }
+    else if (typeLog == 4) { prefix = "[ERROR]"; }
+    alert(prefix + " " + message);
 }
 
 /*
  * Читает параметр удалённого действия, при отсутствии возвращает значение по умолчанию.
+ * Не используется в тестовом прогоне (matrix_id захардкожен), оставлена для полноты
+ * копии логики из боевого файла.
  * @param {string} paramName        -   Имя параметра (см. PARAMETERS).
  * @param {string} defaultValue     -   Значение по умолчанию.
  * @returns {string}
@@ -46,7 +59,7 @@ function GetParam(paramName, defaultValue)
 }
 
 /*
- * Находит все записи cc_learning_matrice с указанным названием (см. открытый вопрос №1 в шапке файла).
+ * Находит все записи cc_learning_matrice с указанным названием.
  * @param {string} matrixName   -   Название матрицы.
  * @returns {Object[]}          -   Массив документов cc_learning_matrice.
  */
@@ -77,7 +90,7 @@ function GetMatrixElementRows(matrixIds)
 
 /*
  * Собирает уникальный список ID программ (education_method) -- и с самой матрицы,
- * и с её элементов (см. открытый вопрос №2 в шапке файла).
+ * и с её элементов.
  * @param {Object[]} matrixRows     -   Документы cc_learning_matrice.
  * @param {Object[]} elementRows    -   Документы cc_learning_matrice_element.
  * @returns {number[]}
@@ -124,8 +137,7 @@ function GetProgramColumns(programIds)
 }
 
 /*
- * Читает всех действующих сотрудников. ПОКА без фильтра по подчинённости/HR и без
- * фильтра по position_common_id/mir_code_id матрицы -- см. открытый вопрос №3 в шапке файла.
+ * Читает всех действующих сотрудников.
  * @returns {Object[]}
  */
 function GetActiveCollaboratorRows()
@@ -139,8 +151,7 @@ function GetActiveCollaboratorRows()
 }
 
 /*
- * Достаёт макрорегион (custom_elem f_2ewj) по всем действующим сотрудникам одним SQL-запросом
- * (по образцу живого настраиваемого отчёта "Отчет проверки незаполненых полей для матриц обучения").
+ * Достаёт макрорегион (custom_elem f_2ewj) по всем действующим сотрудникам одним SQL-запросом.
  * @returns {Object[]}      -   Массив { id, macroregion }.
  */
 function GetMacroregionRows()
@@ -160,8 +171,7 @@ function GetMacroregionRows()
 }
 
 /*
- * Находит минимальную дату прохождения (start_date мероприятия) по каждому сотруднику
- * и программе. Без фильтра по статусу мероприятия -- по указанию тимлида, не усложняем.
+ * Находит минимальную дату прохождения (start_date мероприятия) по каждому сотруднику и программе.
  * @param {number[]} programIds     -   ID программ (education_method).
  * @returns {Object[]}              -   Массив { collaborator_id, education_method_id, first_date }.
  */
@@ -187,7 +197,7 @@ function GetCompletionDateRows(programIds)
  * @param {Object[]} dateRows       -   Результат GetCompletionDateRows().
  * @param {number} collaboratorID   -   ID сотрудника.
  * @param {number} programID        -   ID программы.
- * @returns {string}                -   Дата в виде строки или "" если не найдена.
+ * @returns {string}
  */
 function FindCompletionDate(dateRows, collaboratorID, programID)
 {
@@ -211,7 +221,7 @@ function FindMacroregion(macroRows, collaboratorID)
 
 /*
  * Собирает одну строку отчёта для сотрудника: 4 обязательных поля + дата по каждой программе.
- * @param {Object} collaborator     -   Документ сотрудника (из GetActiveCollaboratorRows()).
+ * @param {Object} collaborator     -   Документ сотрудника.
  * @param {Object[]} macroRows      -   Результат GetMacroregionRows().
  * @param {Object[]} dateRows       -   Результат GetCompletionDateRows().
  * @param {number[]} programIds     -   ID программ (education_method).
@@ -235,11 +245,8 @@ function BuildReportRow(collaborator, macroRows, dateRows, programIds)
 }
 
 /*
- * Резолвит выбранную матрицу (matrix_id) в список ID программ обучения: находит все
- * записи cc_learning_matrice с тем же названием и объединяет программы с них и их
- * элементов (см. открытые вопросы №1-2 в шапке файла). Бросает исключение, если матрица
- * или её программы не найдены.
- * @param {number} matrixId     -   ID записи cc_learning_matrice, выбранной пользователем.
+ * Резолвит выбранную матрицу (matrix_id) в список ID программ обучения.
+ * @param {number} matrixId     -   ID записи cc_learning_matrice.
  * @returns {number[]}          -   ID программ (education_method).
  */
 function ResolveProgramIds(matrixId)
@@ -269,15 +276,38 @@ function ResolveProgramIds(matrixId)
 }
 
 /*
- * Точка входа удалённого действия. Собирает данные отчёта "Восток_полный_список" по
- * выбранной матрице обучения: список программ-колонок и строки сотрудников с датами
- * прохождения. ПОКА без фильтра по видимости (подчинённость/HR) и без фильтра сотрудников
- * по position_common_id/mir_code_id матрицы -- см. открытые вопросы в шапке файла.
+ * Печатает итоговый RESULT через alert() -- колонки и первые несколько строк,
+ * чтобы можно было визуально свериться с ожидаемыми данными.
+ * @param {Object} result       -   RESULT из Run().
+ * @returns {void}
+ */
+function DumpResult(result)
+{
+    var i, col, row, datesLine, pid;
+    LogAlert(2, "DumpResult(). Колонок: " + ArrayCount(result.columns) + ", строк: " + ArrayCount(result.rows));
+    for (i = 0; i < ArrayCount(result.columns); i++)
+    {
+        col = result.columns[i];
+        LogAlert(2, "  column[" + i + "]: id=" + col.id + " title=" + col.title);
+    }
+    for (i = 0; i < ArrayCount(result.rows) && i < 5; i++)
+    {
+        row = result.rows[i];
+        LogAlert(2, "  row[" + i + "]: " + row.fullname + " | " + row.position_name + " | " + row.subdivision_name + " | макрорегион=" + row.macroregion);
+    }
+    if (ArrayCount(result.rows) > 5)
+    {
+        LogAlert(2, "  ... и ещё " + (ArrayCount(result.rows) - 5) + " строк(и), показаны только первые 5");
+    }
+}
+
+/*
+ * ТЕСТОВЫЙ прогон: matrix_id захардкожен в TEST_MATRIX_ID, результат печатается через alert().
  * @returns {void}
  */
 function Run()
 {
-    LogAlert(2, "Run(). НАЧАЛО");
+    LogAlert(2, "Run(). НАЧАЛО (ТЕСТОВЫЙ ПРОГОН, matrixId захардкожен)");
     var matrixId, programIds, collaboratorRows, macroRows, dateRows, i;
 
     ERROR = 0;
@@ -288,13 +318,8 @@ function Run()
 
     try
     {
-        matrixId = OptInt(GetParam("matrix_id", "0"), 0);
+        matrixId = TEST_MATRIX_ID;
         LogAlert(1, "Run(). matrixId=" + matrixId);
-
-        if (matrixId == 0)
-        {
-            throw ("Не передан matrix_id -- выбранная пользователем матрица обучения");
-        }
 
         programIds = ResolveProgramIds(matrixId);
 
@@ -309,6 +334,7 @@ function Run()
         }
 
         LogAlert(2, "Run(). Готово. Сотрудников: " + ArrayCount(RESULT.rows) + ", программ: " + ArrayCount(programIds));
+        DumpResult(RESULT);
     }
     catch (_ex)
     {
@@ -316,11 +342,8 @@ function Run()
         MESSAGE = ExtractUserError(_ex);
         LogAlert(4, "Run(). ОШИБКА: " + MESSAGE);
     }
+    LogAlert(2, "Run(). ERROR=" + ERROR + " MESSAGE=" + MESSAGE);
     LogAlert(2, "Run(). КОНЕЦ");
 }
-
-//-------------------------------------------------------------------------
-//              Область основного кода
-//-------------------------------------------------------------------------
 
 Run();
