@@ -1,24 +1,4 @@
-// =====================================================================
-// HREDU-181. ТЕСТОВЫЙ ПРОГОН выборки "Восток_полный_список" -- НЕ боевой файл.
-//
-// Это копия логики из HREDU-181_vostok_polny_spisok_draft.js с двумя отличиями,
-// нужными только для ручного теста (по образцу того, как гоняли
-// HREDU-181_diagnostic_learning_matrice_names.js):
-//   1. matrix_id захардкожен (id тестовой матрицы "Матрица тест" из диагностики,
-//      см. TEST_MATRIX_ID ниже) -- в реальном remote_action он приходит через
-//      PARAMETERS, а PARAMETERS тут, скорее всего, не существует.
-//   2. LogAlert() здесь печатает через alert() вместо tools.call_code_library_method(
-//      "vtbl_log_lib", ...) -- чтобы не зависеть от настоящих LOG_NAME/CUR_OBJECT_ID
-//      (у этого файла их просто нет, он не зарегистрирован как документ в админке) и
-//      видеть вывод тем же способом, что и в прошлой диагностике.
-//
-// Когда логика в HREDU-181_vostok_polny_spisok_draft.js поменяется -- этот файл
-// нужно обновить вручную, синхронизации между файлами нет.
-//
-// После теста: если всё ок -- работаем дальше с боевым файлом
-// (HREDU-181_vostok_polny_spisok_draft.js), этот тестовый можно удалить/не переносить
-// в репозиторий.
-// =====================================================================
+
 
 var TEST_MATRIX_ID = 7681616865394751377; // id записи cc_learning_matrice "Матрица тест" (из диагностики 04.09.2026)
 
@@ -277,28 +257,73 @@ function ResolveProgramIds(matrixId)
 }
 
 /*
- * Печатает итоговый RESULT через alert() -- колонки и первые несколько строк,
- * чтобы можно было визуально свериться с ожидаемыми данными.
+ * Печатает одну строку RESULT.rows целиком, включая дату по каждой колонке-программе.
+ * @param {Object} result       -   RESULT из Run().
+ * @param {number} rowIndex     -   Индекс строки в result.rows.
+ * @param {string} label        -   Префикс для строки лога.
+ * @returns {void}
+ */
+function DumpReportRow(result, rowIndex, label)
+{
+    var row, j, col, dateValue;
+    row = result.rows[rowIndex];
+    LogAlert(2, "  " + label + "[" + rowIndex + "]: " + row.fullname + " | " + row.position_name + " | " + row.subdivision_name + " | макрорегион=" + row.macroregion);
+    for (j = 0; j < ArrayCount(result.columns); j++)
+    {
+        col = result.columns[j];
+        dateValue = row.dates.GetProperty(col.id);
+        LogAlert(2, "      [" + col.title + "] = " + dateValue);
+    }
+}
+
+/*
+ * Печатает итоговый RESULT через alert() -- колонки, первые несколько строк подряд,
+ * и отдельно -- первые несколько строк, где хотя бы одна дата реально заполнена
+ * (чтобы визуально свериться, что даты подтягиваются к нужным сотрудникам).
  * @param {Object} result       -   RESULT из Run().
  * @returns {void}
  */
 function DumpResult(result)
 {
-    var i, col, row, datesLine, pid;
+    var i, j, col, row, dateValue, foundWithDate, printedCount;
+
     LogAlert(2, "DumpResult(). Колонок: " + ArrayCount(result.columns) + ", строк: " + ArrayCount(result.rows));
     for (i = 0; i < ArrayCount(result.columns); i++)
     {
         col = result.columns[i];
         LogAlert(2, "  column[" + i + "]: id=" + col.id + " title=" + col.title);
     }
+
+    LogAlert(2, "DumpResult(). Первые 5 строк подряд:");
     for (i = 0; i < ArrayCount(result.rows) && i < 5; i++)
     {
-        row = result.rows[i];
-        LogAlert(2, "  row[" + i + "]: " + row.fullname + " | " + row.position_name + " | " + row.subdivision_name + " | макрорегион=" + row.macroregion);
+        DumpReportRow(result, i, "row");
     }
-    if (ArrayCount(result.rows) > 5)
+
+    LogAlert(2, "DumpResult(). Строки с заполненной датой (до 5):");
+    printedCount = 0;
+    for (i = 0; i < ArrayCount(result.rows) && printedCount < 5; i++)
     {
-        LogAlert(2, "  ... и ещё " + (ArrayCount(result.rows) - 5) + " строк(и), показаны только первые 5");
+        row = result.rows[i];
+        foundWithDate = false;
+        for (j = 0; j < ArrayCount(result.columns); j++)
+        {
+            col = result.columns[j];
+            dateValue = row.dates.GetProperty(col.id);
+            if (dateValue != undefined && dateValue != "")
+            {
+                foundWithDate = true;
+            }
+        }
+        if (foundWithDate)
+        {
+            DumpReportRow(result, i, "row_with_date");
+            printedCount++;
+        }
+    }
+    if (printedCount == 0)
+    {
+        LogAlert(3, "DumpResult(). Ни одной строки с заполненной датой не найдено!");
     }
 }
 
