@@ -1,26 +1,28 @@
 // =====================================================================
-// HREDU-181. Диагностика: где реально лежит "типовая должность"
-// (position_common_id / common_position) относительно коллекции collaborators.
+// HREDU-181. Диагностика №2: как называется коллекция документов должности,
+// чтобы можно было массово (одним XQuery, а не по одному documents.open_doc()
+// на каждого из тысяч сотрудников) достать position_common_id для всех
+// активных сотрудников -- аналогично тому, как GetMacroregionRows()/
+// GetMirCodeRows() массово достают свои поля.
 //
-// Зачем: фильтр position_name в HREDU-181_vostok_polny_spisok_draft.js сейчас сравнивает
-// String(collaborator.position_name) с filter -- это, похоже, конкретная должность
-// (каталог position), а не типовая (common_position), на которую настроен фильтр в LPE
-// (см. открытый вопрос №3 в шапке черновика и обсуждение по HREDU-174).
+// Контекст: диагностика №1 (HREDU-181_diagnostic_position_common_id.js) уже
+// подтвердила, что:
+//   - collaborators.position_id -> ссылка на документ должности;
+//   - у этого документа ЕСТЬ поле position_common_id (не под custom_elems,
+//     обычное поле) -- то самое, на которое настроен фильтр "типовая
+//     должность" в LPE;
+//   - но сама коллекция collaborators поля position_common_id НЕ отдаёт.
 //
-// Что делает скрипт:
-//   1. Берёт первую строку действующего сотрудника из коллекции collaborators и печатает
-//      ВСЕ её поля -- вдруг position_common_id (или похожее имя) уже лежит прямо тут.
-//   2. Если на этой строке есть поле-ссылка на документ должности (предположение: называется
-//      position_id) -- открывает сам этот документ и печатает ВСЕ его поля тоже, вдруг
-//      position_common_id живёт там.
-//
-// Если имя поля-ссылки на должность не "position_id" (гадаем) -- шаг 2 скажет об этом прямо,
-// и нужно будет посмотреть в дампе шага 1, как эта ссылка называется на самом деле, и
-// прогнать скрипт ещё раз, подставив её вручную (или просто прислать мне дамп из шага 1 --
-// разберём вместе).
+// Что делает скрипт: пробует прочитать несколько кандидатов-названий
+// коллекции через XQuery (по образцу того, как в основном файле уже
+// используются "for $elem in collaborators ...", "for $elem in
+// cc_learning_matrices ..." -- то есть множественное число похоже на
+// принятый в этой системе стиль именования коллекций). Для первого
+// кандидата, который сработает, печатает количество строк и ВСЕ поля
+// первой строки.
 //
 // Как запустить: как тестовый remote_action/скрипт-агент, по аналогии с
-// HREDU-181_diagnostic_learning_matrice_names.js. Пришли мне вывод alert() целиком.
+// первой диагностикой. Пришли мне вывод alert() целиком.
 // =====================================================================
 
 /*
@@ -42,32 +44,30 @@ function DumpFields(label, obj)
 
 function Run()
 {
-    var collaboratorRow, positionDoc;
+    var candidates, i, name, rows, report;
 
-    collaboratorRow = ArrayOptFirstElem(XQuery("for $elem in collaborators where $elem/is_dismiss=false() return $elem"));
-    if (collaboratorRow == undefined)
-    {
-        alert("Не нашлось ни одного действующего сотрудника -- странно, проверь коллекцию collaborators");
-        return;
-    }
-    DumpFields("collaborators (первая строка, id=" + Int(collaboratorRow.id) + ")", collaboratorRow);
+    candidates = ["position", "positions", "cc_position", "cc_positions"];
+    report = "";
 
-    try
+    for (i = 0; i < ArrayCount(candidates); i++)
     {
-        if (collaboratorRow.position_id != undefined && Int(collaboratorRow.position_id) > 0)
+        name = candidates[i];
+        try
         {
-            positionDoc = tools.open_doc(Int(collaboratorRow.position_id)).TopElem;
-            DumpFields("position (документ, id=" + Int(collaboratorRow.position_id) + ")", positionDoc);
+            rows = ArraySelectAll(XQuery("for $elem in " + name + " return $elem"));
+            report = report + name + " -- РАБОТАЕТ, строк: " + ArrayCount(rows) + "\r\n";
+            if (ArrayCount(rows) > 0)
+            {
+                DumpFields("коллекция [" + name + "], первая строка", rows[0]);
+            }
         }
-        else
+        catch (_ex)
         {
-            alert("На строке collaborators нет поля position_id (или оно 0) -- посмотри в дампе выше, как называется поле-ссылка на должность, и пришли мне -- подставим вручную");
+            report = report + name + " -- ошибка: " + ExtractUserError(_ex) + "\r\n";
         }
     }
-    catch (_ex)
-    {
-        alert("Не удалось открыть документ должности по предполагаемому полю position_id: " + ExtractUserError(_ex) + "\r\n(это нормально, если поле называется иначе -- см. дамп выше)");
-    }
+
+    alert("--- Итог проверки кандидатов ---\r\n" + report);
 }
 
 Run();
