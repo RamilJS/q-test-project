@@ -1,5 +1,4 @@
 
-
 //-------------------------------------------------------------------------
 //              Область функций
 //-------------------------------------------------------------------------
@@ -456,7 +455,7 @@ function Run()
             filteredCollaboratorRows = [];
             for (i = 0; i < ArrayCount(collaboratorRows); i++)
             {
-                if (IdArrayContains(allowedPositionIds, Int(collaboratorRows[i].position_id)))
+                if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0)))
                 {
                     filteredCollaboratorRows.push(collaboratorRows[i]);
                 }
