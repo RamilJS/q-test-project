@@ -36,6 +36,19 @@
 //      отдавать вообще всех активных, как сейчас. Отдельный вопрос от видимости по
 //      подчинённости/HR -- этот про то, какие строки вообще должны попадать в отчёт.
 //
+// ФОРМАТ ОТЧЁТА (обновление 07.09.2026): решили сначала протестировать выборку на стандартном
+// элементе LPE "Табличные данные" -- у него список колонок задаётся один раз, руками, в
+// JSON-конфиге виджета (sCollectionConfig), и не может меняться в зависимости от того, сколько
+// программ в конкретной матрице (разбирались в переписке по HREDU-181). Поэтому ПОКА
+// отказались от "широкого" формата (1 строка на сотрудника, по колонке на каждую программу) в
+// пользу "длинного": 1 строка на пару сотрудник+программа, с полями program_name и
+// completion_date. Колонок теперь фиксированное количество (6), это совместимо со статическим
+// виджетом без доработок. Плата: при матрице с N активными программами каждый сотрудник даёт N
+// строк -- в GetActiveCollaboratorRows() сейчас все действующие сотрудники без фильтра, так что
+// при большом числе программ строк может быть много; у виджета есть постраничная разбивка
+// (iPageSize), но если станет медленно -- вернуться к вопросу №3 выше (фильтр по
+// position_common_id/mir_code_id матрицы должен сильно сократить число сотрудников на страницу).
+//
 // TODO при заведении документа remote_action в админке: заполнить LOG_NAME и CUR_OBJECT_ID
 // ниже реальными значениями (Сервис >> Показать в XML / Копировать ID документа).
 
@@ -138,23 +151,26 @@ function GetProgramIds(matrixRows, elementRows)
 }
 
 /*
- * Строит список колонок отчёта -- по одной на программу обучения.
+ * Строит справочник { id, title } по программам обучения (education_method) -- используется
+ * как справочник для подстановки человекочитаемого названия программы в поле program_name
+ * каждой строки отчёта (длинный формат, см. "ФОРМАТ ОТЧЁТА" в шапке файла). ВАЖНО: это уже не
+ * список колонок виджета -- при "длинном" формате колонки статичны и не зависят от программ.
  * @param {number[]} programIds     -   ID программ (education_method).
  * @returns {Object[]}              -   Массив { id, title }.
  */
-function GetProgramColumns(programIds)
+function GetProgramTitles(programIds)
 {
-    LogAlert(1, "GetProgramColumns(). НАЧАЛО");
-    var columns, i, programID, educationMethodDoc;
-    columns = [];
+    LogAlert(1, "GetProgramTitles(). НАЧАЛО");
+    var titles, i, programID, educationMethodDoc;
+    titles = [];
     for (i = 0; i < ArrayCount(programIds); i++)
     {
         programID = programIds[i];
         educationMethodDoc = tools.open_doc(programID).TopElem;
-        columns.push({ id: String(programID), title: String(educationMethodDoc.name) });
+        titles.push({ id: String(programID), title: String(educationMethodDoc.name) });
     }
-    LogAlert(1, "GetProgramColumns(). КОНЕЦ");
-    return columns;
+    LogAlert(1, "GetProgramTitles(). КОНЕЦ");
+    return titles;
 }
 
 /*
@@ -247,28 +263,48 @@ function FindMacroregion(macroRows, collaboratorID)
 }
 
 /*
- * Собирает одну строку отчёта для сотрудника: 4 обязательных поля + дата по каждой программе.
+ * Ищет название программы по её ID в справочнике, построенном GetProgramTitles().
+ * @param {Object[]} programTitles  -   Результат GetProgramTitles().
+ * @param {number} programID        -   ID программы.
+ * @returns {string}
+ */
+function FindProgramTitle(programTitles, programID)
+{
+    var titleRow;
+    titleRow = ArrayOptFind(programTitles, "String(This.id) == String(programID)");
+    return (titleRow != undefined ? String(titleRow.title) : "");
+}
+
+/*
+ * Собирает строки отчёта для ОДНОГО сотрудника -- по одной строке на каждую программу матрицы
+ * (длинный формат, см. "ФОРМАТ ОТЧЁТА" в шапке файла): 4 обязательных поля сотрудника + название
+ * программы + дата прохождения. Ровно под статический список колонок стандартного виджета LPE
+ * "Табличные данные" (fullname, position_name, subdivision_name, macroregion, program_name,
+ * completion_date -- 6 полей, без зависимости от числа программ в матрице).
  * @param {Object} collaborator     -   Документ сотрудника (из GetActiveCollaboratorRows()).
  * @param {Object[]} macroRows      -   Результат GetMacroregionRows().
  * @param {Object[]} dateRows       -   Результат GetCompletionDateRows().
+ * @param {Object[]} programTitles  -   Результат GetProgramTitles().
  * @param {number[]} programIds     -   ID программ (education_method).
- * @returns {Object}
+ * @returns {Object[]}              -   Массив строк отчёта (по числу программ в матрице).
  */
-function BuildReportRow(collaborator, macroRows, dateRows, programIds)
+function BuildReportRows(collaborator, macroRows, dateRows, programTitles, programIds)
 {
-    var row, i, programID;
-    row = new Object();
-    row.fullname = String(collaborator.fullname);
-    row.position_name = String(collaborator.position_name);
-    row.subdivision_name = String(collaborator.position_parent_name);
-    row.macroregion = FindMacroregion(macroRows, Int(collaborator.id));
-    row.dates = new Object();
+    var rows, row, i, programID;
+    rows = [];
     for (i = 0; i < ArrayCount(programIds); i++)
     {
         programID = programIds[i];
-        row.dates.SetProperty(String(programID), FindCompletionDate(dateRows, Int(collaborator.id), programID));
+        row = new Object();
+        row.fullname = String(collaborator.fullname);
+        row.position_name = String(collaborator.position_name);
+        row.subdivision_name = String(collaborator.position_parent_name);
+        row.macroregion = FindMacroregion(macroRows, Int(collaborator.id));
+        row.program_name = FindProgramTitle(programTitles, programID);
+        row.completion_date = FindCompletionDate(dateRows, Int(collaborator.id), programID);
+        rows.push(row);
     }
-    return row;
+    return rows;
 }
 
 /*
@@ -307,20 +343,21 @@ function ResolveProgramIds(matrixId)
 
 /*
  * Точка входа удалённого действия. Собирает данные отчёта "Восток_полный_список" по
- * выбранной матрице обучения: список программ-колонок и строки сотрудников с датами
- * прохождения. ПОКА без фильтра по видимости (подчинённость/HR) и без фильтра сотрудников
- * по position_common_id/mir_code_id матрицы -- см. открытые вопросы в шапке файла.
+ * выбранной матрице обучения в ДЛИННОМ формате (1 строка на сотрудника+программу, см.
+ * "ФОРМАТ ОТЧЁТА" в шапке файла) -- под стандартный виджет LPE "Табличные данные" со
+ * статическим списком колонок. ПОКА без фильтра по видимости (подчинённость/HR) и без
+ * фильтра сотрудников по position_common_id/mir_code_id матрицы -- см. открытые вопросы
+ * в шапке файла.
  * @returns {void}
  */
 function Run()
 {
     LogAlert(2, "Run(). НАЧАЛО");
-    var matrixId, programIds, collaboratorRows, macroRows, dateRows, i;
+    var matrixId, programIds, programTitles, collaboratorRows, macroRows, dateRows, collaboratorReportRows, i, j;
 
     ERROR = 0;
     MESSAGE = "";
     RESULT = new Object();
-    RESULT.columns = [];
     RESULT.rows = [];
 
     try
@@ -335,17 +372,21 @@ function Run()
 
         programIds = ResolveProgramIds(matrixId);
 
-        RESULT.columns = GetProgramColumns(programIds);
+        programTitles = GetProgramTitles(programIds);
         collaboratorRows = GetActiveCollaboratorRows();
         macroRows = GetMacroregionRows();
         dateRows = GetCompletionDateRows(programIds);
 
         for (i = 0; i < ArrayCount(collaboratorRows); i++)
         {
-            RESULT.rows.push(BuildReportRow(collaboratorRows[i], macroRows, dateRows, programIds));
+            collaboratorReportRows = BuildReportRows(collaboratorRows[i], macroRows, dateRows, programTitles, programIds);
+            for (j = 0; j < ArrayCount(collaboratorReportRows); j++)
+            {
+                RESULT.rows.push(collaboratorReportRows[j]);
+            }
         }
 
-        LogAlert(2, "Run(). Готово. Сотрудников: " + ArrayCount(RESULT.rows) + ", программ: " + ArrayCount(programIds));
+        LogAlert(2, "Run(). Готово. Сотрудников: " + ArrayCount(collaboratorRows) + ", программ: " + ArrayCount(programIds) + ", строк отчёта: " + ArrayCount(RESULT.rows));
     }
     catch (_ex)
     {
@@ -361,3 +402,13 @@ function Run()
 //-------------------------------------------------------------------------
 
 Run();
+
+[
+  {"name": "fullname", "width": "20%"},
+  {"name": "position_name", "width": "15%"},
+  {"name": "subdivision_name", "width": "20%"},
+  {"name": "macroregion", "width": "15%"},
+  {"name": "program_name", "width": "20%"},
+  {"name": "completion_date", "width": "10%"}
+]
+          
