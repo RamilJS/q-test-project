@@ -1,56 +1,4 @@
-// HREDU-181. Восток_полный_список -- удалённое действие для выборки данных отчёта.
-// Черновик: БЕЗ фильтра по видимости (подчинённость/HR) -- пока отдаёт всех активных
-// сотрудников, без фильтра по position_common_id/mir_code_id самой матрицы.
-//
-// Параметр удалённого действия: matrix_id -- id одной из записей cc_learning_matrice.
-//
-// ПОДТВЕРЖДЕНО диагностикой (HREDU-181_diagnostic_learning_matrice_names.js, прогон
-// пользователем 04.09.2026): имена коллекций 'cc_learning_matrices' и
-// 'cc_learning_matrice_elements' -- верные, поля совпадают с ожиданиями из HREDU-184/180.
-//
-// ПОДТВЕРЖДЕНО ПОЛНОСТЬЮ end-to-end тестовым прогоном (HREDU-181_test_run_vostok_polny_spisok.js,
-// пользователь, 04.09.2026) на двух реальных матрицах ("Матрица тест" / программа "Ассесcмент";
-// "Матрица тест новый" / программа "Основы лизинга", 1824 совпадения дат из 2312 сотрудников,
-// даты и ФИО визуально сверены и совпадают с ожиданиями). По пути найден и исправлен реальный
-// баг: фильтр ec.is_collaborator = 1 в GetCompletionDateRows() отсекал вообще все строки, т.к.
-// это поле в реальных данных всегда NULL -- убран (см. комментарий у самой функции).
-//
-// ВСЁ ЕЩЁ ОТКРЫТО:
-//   1. Логика "матрица размножена на несколько записей с одинаковым name" (одна запись
-//      cc_learning_matrice на комбинацию должность/мир-код) -- предположение из HREDU-181/184,
-//      тимлидом напрямую не подтверждено, проверить нечем (реальные матрицы заведёт
-//      администратор позже). НЕ БЛОКИРУЕТ: GetMatrixRows()/GetProgramIds() ниже работают
-//      одинаково корректно в обоих случаях -- берём ВСЕ записи с данным name и объединяем
-//      программы со всех найденных записей и их элементов.
-//   2. У самой записи cc_learning_matrice есть собственное поле education_method_id (помимо
-//      того, что программы также приходят через её cc_learning_matrice_element). В тестовой
-//      записи оно совпало со значением у единственного элемента -- похоже на "зеркалирование",
-//      но на одной записи не доказать. Поэтому GetProgramIds() берёт программы И с матрицы,
-//      И с элементов, с дедупликацией -- не портит, если предположение верно, подстраховывает,
-//      если нет.
-//   3. Нужно уточнить у тимлида: похоже, что position_common_id и mir_code_id на
-//      cc_learning_matrice -- это условие "к каким сотрудникам применяется матрица" (по
-//      аналогии со старой compound_program и её f_position_names/f_mir_code). Если так, то
-//      GetActiveCollaboratorRows() должна фильтровать по position.position_common_id
-//      (см. HREDU-174) и мир-коду через cc_collaborator_mircode (см. HREDU-176/178/179), а не
-//      отдавать вообще всех активных, как сейчас. Отдельный вопрос от видимости по
-//      подчинённости/HR -- этот про то, какие строки вообще должны попадать в отчёт.
-//
-// ФОРМАТ ОТЧЁТА (обновление 07.09.2026): решили сначала протестировать выборку на стандартном
-// элементе LPE "Табличные данные" -- у него список колонок задаётся один раз, руками, в
-// JSON-конфиге виджета (sCollectionConfig), и не может меняться в зависимости от того, сколько
-// программ в конкретной матрице (разбирались в переписке по HREDU-181). Поэтому ПОКА
-// отказались от "широкого" формата (1 строка на сотрудника, по колонке на каждую программу) в
-// пользу "длинного": 1 строка на пару сотрудник+программа, с полями program_name и
-// completion_date. Колонок теперь фиксированное количество (6), это совместимо со статическим
-// виджетом без доработок. Плата: при матрице с N активными программами каждый сотрудник даёт N
-// строк -- в GetActiveCollaboratorRows() сейчас все действующие сотрудники без фильтра, так что
-// при большом числе программ строк может быть много; у виджета есть постраничная разбивка
-// (iPageSize), но если станет медленно -- вернуться к вопросу №3 выше (фильтр по
-// position_common_id/mir_code_id матрицы должен сильно сократить число сотрудников на страницу).
-//
-// TODO при заведении документа remote_action в админке: заполнить LOG_NAME и CUR_OBJECT_ID
-// ниже реальными значениями (Сервис >> Показать в XML / Копировать ID документа).
+
 
 //-------------------------------------------------------------------------
 //              Область констант
@@ -73,23 +21,6 @@ CUR_OBJECT_ID = 0;          // TODO: заполнить ID документа re
 function LogAlert(typeLog, message)
 {
     tools.call_code_library_method("vtbl_log_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
-}
-
-/*
- * Читает параметр удалённого действия, при отсутствии возвращает значение по умолчанию.
- * @param {string} paramName        -   Имя параметра (см. PARAMETERS).
- * @param {string} defaultValue     -   Значение по умолчанию.
- * @returns {string}
- */
-function GetParam(paramName, defaultValue)
-{
-    var paramValue;
-    paramValue = PARAMETERS.GetOptProperty(paramName);
-    if (defaultValue != undefined && (paramValue == undefined || paramValue == ""))
-    {
-        paramValue = defaultValue;
-    }
-    return paramValue;
 }
 
 /*
@@ -348,6 +279,11 @@ function ResolveProgramIds(matrixId)
  * статическим списком колонок. ПОКА без фильтра по видимости (подчинённость/HR) и без
  * фильтра сотрудников по position_common_id/mir_code_id матрицы -- см. открытые вопросы
  * в шапке файла.
+ *
+ * ВАЖНО про RESULT: для "общей коллекции" (как у education_accept_event_card) виджет
+ * ожидает, что RESULT -- это ПРЯМО массив строк, а не объект-обёртка (см. "ИСПРАВЛЕНО" в
+ * шапке файла). Параметр matrix_id читается как обычная глобальная переменная (по образцу
+ * event_id в education_accept_event_card), а не через PARAMETERS.
  * @returns {void}
  */
 function Run()
@@ -357,12 +293,11 @@ function Run()
 
     ERROR = 0;
     MESSAGE = "";
-    RESULT = new Object();
-    RESULT.rows = [];
+    RESULT = [];
 
     try
     {
-        matrixId = OptInt(GetParam("matrix_id", "0"), 0);
+        matrixId = OptInt(matrix_id, 0);
         LogAlert(1, "Run(). matrixId=" + matrixId);
 
         if (matrixId == 0)
@@ -382,17 +317,19 @@ function Run()
             collaboratorReportRows = BuildReportRows(collaboratorRows[i], macroRows, dateRows, programTitles, programIds);
             for (j = 0; j < ArrayCount(collaboratorReportRows); j++)
             {
-                RESULT.rows.push(collaboratorReportRows[j]);
+                RESULT.push(collaboratorReportRows[j]);
             }
         }
 
-        LogAlert(2, "Run(). Готово. Сотрудников: " + ArrayCount(collaboratorRows) + ", программ: " + ArrayCount(programIds) + ", строк отчёта: " + ArrayCount(RESULT.rows));
+        LogAlert(2, "Run(). Готово. Сотрудников: " + ArrayCount(collaboratorRows) + ", программ: " + ArrayCount(programIds) + ", строк отчёта: " + ArrayCount(RESULT));
+        //alert(tools.object_to_text(RESULT, 'json')); // временно для отладки -- посмотреть, что реально вернул скрипт; убрать перед сдачей
     }
     catch (_ex)
     {
         ERROR = 1;
         MESSAGE = ExtractUserError(_ex);
         LogAlert(4, "Run(). ОШИБКА: " + MESSAGE);
+        //alert("ОШИБКА: " + MESSAGE); // временно для отладки; убрать перед сдачей
     }
     LogAlert(2, "Run(). КОНЕЦ");
 }
@@ -402,13 +339,3 @@ function Run()
 //-------------------------------------------------------------------------
 
 Run();
-
-[
-  {"name": "fullname", "width": "20%"},
-  {"name": "position_name", "width": "15%"},
-  {"name": "subdivision_name", "width": "20%"},
-  {"name": "macroregion", "width": "15%"},
-  {"name": "program_name", "width": "20%"},
-  {"name": "completion_date", "width": "10%"}
-]
-          
