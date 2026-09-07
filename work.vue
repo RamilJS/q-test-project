@@ -1,26 +1,3 @@
-// HREDU-181. Восток_полный_список -- удалённое действие для выборки данных отчёта.
-// Черновик: БЕЗ фильтра по видимости (подчинённость/HR) -- пока отдаёт всех активных
-// сотрудников, без фильтра по position_common_id/mir_code_id самой матрицы.
-//
-// Параметры удалённого действия:
-//   matrix_id       -- обязательный, id одной из записей cc_learning_matrice.
-//   program_id      -- опциональный, id одной программы (education_method) из числа программ
-//                       выбранной матрицы -- сужает отчёт до одной программы вместо всех.
-//   macroregion     -- опциональный, точное значение макрорегиона (custom_elem f_2ewj).
-//   mir_code        -- опциональный, код мир-кода (например "LASK") -- сотрудник попадает в
-//                       отчёт, если этот код есть у него СРЕДИ ЛЮБЫХ его мир-кодов (не только
-//                       основного/с наибольшим процентом, см. getMirCodeObject() в примере
-//                       education_accept_event_card).
-//   position_name   -- опциональный, точное совпадение по названию должности.
-
-
-//-------------------------------------------------------------------------
-//              Область констант
-//-------------------------------------------------------------------------
-
-DEBUG = false;              // Включает подробные логи уровня 1 [DEBUG] -- на проде и в репозитории должно быть false
-LOG_NAME = "agent";         // TODO: уточнить после создания документа в админке -- пока по аналогии с серверными агентами
-CUR_OBJECT_ID = 0;          // TODO: заполнить ID документа remote_action после его создания в админке
 
 //-------------------------------------------------------------------------
 //              Область функций
@@ -372,6 +349,7 @@ function Run()
     LogAlert(2, "Run(). НАЧАЛО");
     var matrixId, iProgramFilter, sMacroregionFilter, sMirCodeFilter, sPositionFilter;
     var programIds, programTitles, collaboratorRows, macroRows, mirCodeRows, dateRows, collaboratorReportRows, i, j;
+    var filteredProgramIds, filteredCollaboratorRows;
 
     ERROR = 0;
     MESSAGE = "";
@@ -397,7 +375,19 @@ function Run()
 
         if (iProgramFilter > 0)
         {
-            programIds = ArraySelect(programIds, "Int(This) == iProgramFilter");
+            // ВАЖНО: тут раньше был ArraySelect(programIds, "Int(This) == iProgramFilter") --
+            // не заработало (см. "ИСПРАВЛЕНО (фильтры)" в шапке файла): судя по всему,
+            // ArraySelect(), в отличие от ArrayOptFind(), НЕ видит переменные из внешней
+            // области видимости внутри строки-выражения, только This. Заменено на ручной цикл.
+            filteredProgramIds = [];
+            for (i = 0; i < ArrayCount(programIds); i++)
+            {
+                if (Int(programIds[i]) == iProgramFilter)
+                {
+                    filteredProgramIds.push(programIds[i]);
+                }
+            }
+            programIds = filteredProgramIds;
             if (ArrayCount(programIds) == 0)
             {
                 throw ("Программа [" + iProgramFilter + "] не найдена среди программ выбранной матрицы");
@@ -409,21 +399,45 @@ function Run()
 
         if (sPositionFilter != "")
         {
-            collaboratorRows = ArraySelect(collaboratorRows, "String(This.position_name) == sPositionFilter");
+            filteredCollaboratorRows = [];
+            for (i = 0; i < ArrayCount(collaboratorRows); i++)
+            {
+                if (String(collaboratorRows[i].position_name) == sPositionFilter)
+                {
+                    filteredCollaboratorRows.push(collaboratorRows[i]);
+                }
+            }
+            collaboratorRows = filteredCollaboratorRows;
             LogAlert(1, "Run(). После фильтра по должности осталось сотрудников: " + ArrayCount(collaboratorRows));
         }
 
         macroRows = GetMacroregionRows();
         if (sMacroregionFilter != "")
         {
-            collaboratorRows = ArraySelect(collaboratorRows, "FindMacroregion(macroRows, Int(This.id)) == sMacroregionFilter");
+            filteredCollaboratorRows = [];
+            for (i = 0; i < ArrayCount(collaboratorRows); i++)
+            {
+                if (FindMacroregion(macroRows, Int(collaboratorRows[i].id)) == sMacroregionFilter)
+                {
+                    filteredCollaboratorRows.push(collaboratorRows[i]);
+                }
+            }
+            collaboratorRows = filteredCollaboratorRows;
             LogAlert(1, "Run(). После фильтра по макрорегиону осталось сотрудников: " + ArrayCount(collaboratorRows));
         }
 
         if (sMirCodeFilter != "")
         {
             mirCodeRows = GetMirCodeRows();
-            collaboratorRows = ArraySelect(collaboratorRows, "CollaboratorHasMirCode(mirCodeRows, Int(This.id), sMirCodeFilter)");
+            filteredCollaboratorRows = [];
+            for (i = 0; i < ArrayCount(collaboratorRows); i++)
+            {
+                if (CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRows[i].id), sMirCodeFilter))
+                {
+                    filteredCollaboratorRows.push(collaboratorRows[i]);
+                }
+            }
+            collaboratorRows = filteredCollaboratorRows;
             LogAlert(1, "Run(). После фильтра по мир-коду осталось сотрудников: " + ArrayCount(collaboratorRows));
         }
 
