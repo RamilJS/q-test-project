@@ -1,3 +1,17 @@
+// HREDU-181. Восток_полный_список -- удалённое действие для выборки данных отчёта.
+// Черновик: БЕЗ фильтра по видимости (подчинённость/HR) -- пока отдаёт всех активных
+// сотрудников, без фильтра по position_common_id/mir_code_id самой матрицы.
+//
+// Параметры удалённого действия:
+//   matrix_id       -- обязательный, id одной из записей cc_learning_matrice.
+//   program_id      -- опциональный, id одной программы (education_method) из числа программ
+//                       выбранной матрицы -- сужает отчёт до одной программы вместо всех.
+//   macroregion     -- опциональный, точное значение макрорегиона (custom_elem f_2ewj).
+//   mir_code        -- опциональный, код мир-кода (например "LASK") -- сотрудник попадает в
+//                       отчёт, если этот код есть у него СРЕДИ ЛЮБЫХ его мир-кодов (не только
+//                       основного/с наибольшим процентом, см. getMirCodeObject() в примере
+//                       education_accept_event_card).
+//   position_name   -- опциональный, точное совпадение по названию должности.
 
 
 //-------------------------------------------------------------------------
@@ -141,6 +155,72 @@ function GetMacroregionRows()
 }
 
 /*
+ * Достаёт сырое значение мир-кодов (custom_elem f_mir_codes) по всем действующим сотрудникам
+ * одним SQL-запросом -- тот же паттерн, что и GetMacroregionRows(). Разбор строки -- в
+ * ExtractMirCodes(). Вызывается только когда реально пришёл фильтр mir_code (см. Run()) --
+ * не нужен для самих строк отчёта, только для фильтрации.
+ * @returns {Object[]}      -   Массив { id, mir_codes } (mir_codes -- сырая строка вида "#LASK#17#|#LASM#17#").
+ */
+function GetMirCodeRows()
+{
+    LogAlert(1, "GetMirCodeRows(). НАЧАЛО");
+    var sqlText, rows;
+    sqlText = "";
+    sqlText = sqlText + "select cs.id,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_codes'']/value)[1]', 'varchar(max)') as mir_codes\r\n";
+    sqlText = sqlText + "from collaborators cs\r\n";
+    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText = sqlText + "where cs.is_dismiss != 1";
+    rows = ArraySelectAll(XQuery("sql:" + sqlText));
+    LogAlert(1, "GetMirCodeRows(). Строк: " + ArrayCount(rows));
+    LogAlert(1, "GetMirCodeRows(). КОНЕЦ");
+    return rows;
+}
+
+/*
+ * Разбирает сырое значение f_mir_codes ("#LASK#17#|#LASM#17#...") в массив кодов без процентов.
+ * По образцу getMirCodeObject() из education_accept_event_card, но нам не нужны ни проценты,
+ * ни руководитель мир-кода -- только сами коды, для фильтра "есть ли у сотрудника такой код".
+ * @param {string} rawValue     -   Сырое значение custom_elem f_mir_codes.
+ * @returns {string[]}
+ */
+function ExtractMirCodes(rawValue)
+{
+    var parts, fields, codes, i;
+    codes = [];
+    parts = ArrayDirect(ArraySelect(String(rawValue).split("|"), "This != ''"));
+    for (i = 0; i < ArrayCount(parts); i++)
+    {
+        fields = ArrayDirect(ArraySelect(String(parts[i]).split("#"), "This != ''"));
+        if (ArrayCount(fields) > 0)
+        {
+            codes.push(String(fields[0]));
+        }
+    }
+    return codes;
+}
+
+/*
+ * Проверяет, есть ли у сотрудника указанный мир-код -- СРЕДИ ЛЮБЫХ его мир-кодов, не только
+ * основного/с наибольшим процентом (так решили для фильтра -- см. параметры в шапке файла).
+ * @param {Object[]} mirCodeRows    -   Результат GetMirCodeRows().
+ * @param {number} collaboratorID   -   ID сотрудника.
+ * @param {string} mirCodeFilter    -   Искомый мир-код.
+ * @returns {boolean}
+ */
+function CollaboratorHasMirCode(mirCodeRows, collaboratorID, mirCodeFilter)
+{
+    var row, codes;
+    row = ArrayOptFind(mirCodeRows, "Int(This.id) == Int(collaboratorID)");
+    if (row == undefined)
+    {
+        return false;
+    }
+    codes = ExtractMirCodes(row.mir_codes);
+    return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
+}
+
+/*
  * Находит минимальную дату прохождения (start_date мероприятия) по каждому сотруднику
  * и программе. Без фильтра по статусу мероприятия -- по указанию тимлида, не усложняем.
  * ВАЖНО: фильтр по ec.is_collaborator НЕ используется -- диагностикой (тестовый прогон
@@ -276,20 +356,22 @@ function ResolveProgramIds(matrixId)
  * Точка входа удалённого действия. Собирает данные отчёта "Восток_полный_список" по
  * выбранной матрице обучения в ДЛИННОМ формате (1 строка на сотрудника+программу, см.
  * "ФОРМАТ ОТЧЁТА" в шапке файла) -- под стандартный виджет LPE "Табличные данные" со
- * статическим списком колонок. ПОКА без фильтра по видимости (подчинённость/HR) и без
- * фильтра сотрудников по position_common_id/mir_code_id матрицы -- см. открытые вопросы
- * в шапке файла.
+ * статическим списком колонок. Поддерживает опциональные ручные фильтры: program_id,
+ * macroregion, mir_code, position_name (см. описание параметров в шапке файла). ПОКА без
+ * автоматического фильтра сотрудников по position_common_id/mir_code_id САМОЙ МАТРИЦЫ --
+ * см. открытый вопрос №3 в шапке файла (это отдельный механизм, не путать с ручными фильтрами).
  *
  * ВАЖНО про RESULT: для "общей коллекции" (как у education_accept_event_card) виджет
  * ожидает, что RESULT -- это ПРЯМО массив строк, а не объект-обёртка (см. "ИСПРАВЛЕНО" в
- * шапке файла). Параметр matrix_id читается как обычная глобальная переменная (по образцу
- * event_id в education_accept_event_card), а не через PARAMETERS.
+ * шапке файла). Параметры читаются как обычные глобальные переменные (по образцу event_id
+ * в education_accept_event_card), а не через PARAMETERS.
  * @returns {void}
  */
 function Run()
 {
     LogAlert(2, "Run(). НАЧАЛО");
-    var matrixId, programIds, programTitles, collaboratorRows, macroRows, dateRows, collaboratorReportRows, i, j;
+    var matrixId, iProgramFilter, sMacroregionFilter, sMirCodeFilter, sPositionFilter;
+    var programIds, programTitles, collaboratorRows, macroRows, mirCodeRows, dateRows, collaboratorReportRows, i, j;
 
     ERROR = 0;
     MESSAGE = "";
@@ -298,7 +380,13 @@ function Run()
     try
     {
         matrixId = OptInt(matrix_id, 0);
-        LogAlert(1, "Run(). matrixId=" + matrixId);
+        iProgramFilter = OptInt(program_id, 0);
+        sMacroregionFilter = String(macroregion);
+        sMirCodeFilter = String(mir_code);
+        sPositionFilter = String(position_name);
+        LogAlert(1, "Run(). matrixId=" + matrixId + " programFilter=" + iProgramFilter
+            + " macroregionFilter=[" + sMacroregionFilter + "] mirCodeFilter=[" + sMirCodeFilter
+            + "] positionFilter=[" + sPositionFilter + "]");
 
         if (matrixId == 0)
         {
@@ -307,10 +395,40 @@ function Run()
 
         programIds = ResolveProgramIds(matrixId);
 
+        if (iProgramFilter > 0)
+        {
+            programIds = ArraySelect(programIds, "Int(This) == iProgramFilter");
+            if (ArrayCount(programIds) == 0)
+            {
+                throw ("Программа [" + iProgramFilter + "] не найдена среди программ выбранной матрицы");
+            }
+        }
+
         programTitles = GetProgramTitles(programIds);
         collaboratorRows = GetActiveCollaboratorRows();
+
+        if (sPositionFilter != "")
+        {
+            collaboratorRows = ArraySelect(collaboratorRows, "String(This.position_name) == sPositionFilter");
+            LogAlert(1, "Run(). После фильтра по должности осталось сотрудников: " + ArrayCount(collaboratorRows));
+        }
+
         macroRows = GetMacroregionRows();
+        if (sMacroregionFilter != "")
+        {
+            collaboratorRows = ArraySelect(collaboratorRows, "FindMacroregion(macroRows, Int(This.id)) == sMacroregionFilter");
+            LogAlert(1, "Run(). После фильтра по макрорегиону осталось сотрудников: " + ArrayCount(collaboratorRows));
+        }
+
+        if (sMirCodeFilter != "")
+        {
+            mirCodeRows = GetMirCodeRows();
+            collaboratorRows = ArraySelect(collaboratorRows, "CollaboratorHasMirCode(mirCodeRows, Int(This.id), sMirCodeFilter)");
+            LogAlert(1, "Run(). После фильтра по мир-коду осталось сотрудников: " + ArrayCount(collaboratorRows));
+        }
+
         dateRows = GetCompletionDateRows(programIds);
+        //alert("programIds=" + tools.object_to_text(programIds, 'json') + "\r\ndateRows.count=" + ArrayCount(dateRows) + "\r\ndateRows=" + tools.object_to_text(dateRows, 'json')); // временно для отладки -- убрать перед сдачей
 
         for (i = 0; i < ArrayCount(collaboratorRows); i++)
         {
