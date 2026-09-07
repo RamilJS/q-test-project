@@ -1,73 +1,84 @@
 // =====================================================================
-// HREDU-181. Диагностика №2: как называется коллекция документов должности,
-// чтобы можно было массово (одним XQuery, а не по одному documents.open_doc()
-// на каждого из тысяч сотрудников) достать position_common_id для всех
-// активных сотрудников -- аналогично тому, как GetMacroregionRows()/
-// GetMirCodeRows() массово достают свои поля.
+// HREDU-181. Диагностика №3: точечная проверка полей коллекции "positions"
+// (9986 строк, подтверждено диагностикой №2).
 //
-// Контекст: диагностика №1 (HREDU-181_diagnostic_position_common_id.js) уже
-// подтвердила, что:
-//   - collaborators.position_id -> ссылка на документ должности;
-//   - у этого документа ЕСТЬ поле position_common_id (не под custom_elems,
-//     обычное поле) -- то самое, на которое настроен фильтр "типовая
-//     должность" в LPE;
-//   - но сама коллекция collaborators поля position_common_id НЕ отдаёт.
+// Диагностика №2 нашла рабочее название коллекции ("positions"), но её
+// собственный вызов DumpFields() для первой строки этой коллекции либо не
+// показал ничего, либо потерялся в логе -- неизвестно, что именно произошло.
+// Этот скрипт не полагается на общий перебор "for (fld in obj)", а сначала
+// пробует прочитать конкретные поля по имени (id, position_common_id)
+// напрямую -- это должно быть надёжнее. Общий дамп тоже делает, но с
+// защитой: если одно поле падает, это не должно убить весь дамп остальных.
 //
-// Что делает скрипт: пробует прочитать несколько кандидатов-названий
-// коллекции через XQuery (по образцу того, как в основном файле уже
-// используются "for $elem in collaborators ...", "for $elem in
-// cc_learning_matrices ..." -- то есть множественное число похоже на
-// принятый в этой системе стиль именования коллекций). Для первого
-// кандидата, который сработает, печатает количество строк и ВСЕ поля
-// первой строки.
-//
-// Как запустить: как тестовый remote_action/скрипт-агент, по аналогии с
-// первой диагностикой. Пришли мне вывод alert() целиком.
+// Как запустить: как тестовый remote_action/скрипт-агент. Пришли мне вывод
+// alert() целиком -- в этот раз, пожалуйста, весь лог, там будет несколько
+// строк/блоков подряд.
 // =====================================================================
-
-/*
- * Печатает все поля объекта через alert().
- * @param {string} label    -   Заголовок для лога.
- * @param {Object} obj      -   Объект, поля которого нужно распечатать.
- * @returns {void}
- */
-function DumpFields(label, obj)
-{
-    var dump, fld;
-    dump = "";
-    for (fld in obj)
-    {
-        dump = dump + fld.Name + " = " + String(fld) + "\r\n";
-    }
-    alert("--- " + label + " ---\r\n" + dump);
-}
 
 function Run()
 {
-    var candidates, i, name, rows, report;
+    var rows, row, report, fld, val;
 
-    candidates = ["position", "positions", "cc_position", "cc_positions"];
-    report = "";
+    rows = ArraySelectAll(XQuery("for $elem in positions return $elem"));
+    alert("Шаг 1. positions: строк всего = " + ArrayCount(rows));
 
-    for (i = 0; i < ArrayCount(candidates); i++)
+    if (ArrayCount(rows) == 0)
     {
-        name = candidates[i];
-        try
-        {
-            rows = ArraySelectAll(XQuery("for $elem in " + name + " return $elem"));
-            report = report + name + " -- РАБОТАЕТ, строк: " + ArrayCount(rows) + "\r\n";
-            if (ArrayCount(rows) > 0)
-            {
-                DumpFields("коллекция [" + name + "], первая строка", rows[0]);
-            }
-        }
-        catch (_ex)
-        {
-            report = report + name + " -- ошибка: " + ExtractUserError(_ex) + "\r\n";
-        }
+        alert("Коллекция positions пустая -- дальше проверять нечего");
+        return;
     }
 
-    alert("--- Итог проверки кандидатов ---\r\n" + report);
+    row = rows[0];
+
+    // Шаг 2: прямой доступ к конкретным полям по имени.
+    report = "";
+    try
+    {
+        report = report + "row.id = " + String(row.id) + " (Int=" + Int(row.id) + ")\r\n";
+    }
+    catch (_ex1)
+    {
+        report = report + "row.id -- ОШИБКА: " + ExtractUserError(_ex1) + "\r\n";
+    }
+    try
+    {
+        report = report + "row.position_common_id = [" + String(row.position_common_id) + "]\r\n";
+    }
+    catch (_ex2)
+    {
+        report = report + "row.position_common_id -- ОШИБКА: " + ExtractUserError(_ex2) + "\r\n";
+    }
+    try
+    {
+        report = report + "row.name = [" + String(row.name) + "]\r\n";
+    }
+    catch (_ex3)
+    {
+        report = report + "row.name -- ОШИБКА: " + ExtractUserError(_ex3) + "\r\n";
+    }
+    alert("Шаг 2. Прямой доступ к полям первой строки positions:\r\n" + report);
+
+    // Шаг 3: общий перебор полей, но с защитой -- одно упавшее поле не должен убить остальные.
+    report = "";
+    try
+    {
+        for (fld in row)
+        {
+            try
+            {
+                report = report + fld.Name + " = " + String(fld) + "\r\n";
+            }
+            catch (_exField)
+            {
+                report = report + "<поле не читается: " + ExtractUserError(_exField) + ">\r\n";
+            }
+        }
+    }
+    catch (_exLoop)
+    {
+        report = report + "\r\n[перебор полей упал целиком: " + ExtractUserError(_exLoop) + "]\r\n";
+    }
+    alert("Шаг 3. Общий перебор полей первой строки positions (" + report.length + " символов):\r\n" + report);
 }
 
 Run();
