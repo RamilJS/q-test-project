@@ -150,7 +150,14 @@ oForm.form_fields = [
         value: "",
         mandatory: true,
         multiple: false,
-        catalog: "cc_learning_matrices",
+        // ИСПРАВЛЕНО (08.09.2026): у foreign_elem catalog -- это ИМЯ ТИПА ДОКУМЕНТА
+        // (singular, как в tools.open_doc_by_name/new_doc_by_name), а НЕ название
+        // XQuery-коллекции во множественном числе. cc_learning_matrices (плюрал,
+        // имя коллекции) вызывал ошибку рендера dlg_select.xaml -- заменено на
+        // предположительный singular по аналогии с cc_learning_matrice_elements
+        // (плюрал коллекции элементов) -> singular "cc_learning_matrice_element".
+        // ПРОВЕРИТЬ при тесте.
+        catalog: "cc_learning_matrice",
         query_qual: ""
     },
     {
@@ -170,12 +177,20 @@ oForm.form_fields = [
         value: "",
         mandatory: false,
         multiple: false,
-        catalog: "cc_mir_codes",
+        // ИСПРАВЛЕНО (08.09.2026): та же причина, что и у matrix_id -- catalog должен
+        // быть singular именем типа документа, не именем коллекции cc_mir_codes.
+        // ПРОВЕРИТЬ при тесте.
+        catalog: "cc_mir_code",
         query_qual: ""
     },
     {
-        // TODO: имя каталога "common_position" НЕ ПОДТВЕРЖДЕНО -- см. комментарий в
-        // шапке файла. Если список в этом поле не грузится при тесте -- поправить.
+        // TODO: имя каталога "common_position" НЕ ПОДТВЕРЖДЕНО -- это тоже, скорее
+        // всего, должно быть singular имя типа документа (см. ИСПРАВЛЕНО у matrix_id/
+        // mir_code_id выше), но правильное имя мне неоткуда взять самому. У тебя уже
+        // ЕСТЬ рабочий пример: поле "типовая должность", которое ты сам настраивал в
+        // LPE для фильтра в HREDU-181. Открой его настройки там и пришли мне точное
+        // значение catalog оттуда -- скорее всего ошибка на этом поле останется, пока
+        // не заменим на реальное имя.
         name: "position_common_id",
         label: "Типовая должность",
         title: "Выберите типовую должность",
