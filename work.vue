@@ -1,71 +1,73 @@
+
 // =====================================================================
 // HREDU-183. Шаг 1: модальное окно с фильтрами.
 //
+// ИСПРАВЛЕНИЕ (09.09.2026, аварийное): предыдущая версия ЛОМАЛА весь файл целиком --
+// даже стартовый display_form не открывался. Главный подозреваемый: UrlEncodeSafe()
+// использовала regex-литерал (/ /g) в запасной ветке -- скриптовый движок WebTutor,
+// судя по всему, НЕ поддерживает синтаксис регулярных выражений, и это ломает разбор
+// (компиляцию) всего файла целиком, а не только ветку "apply", где эта функция
+// реально вызывается. Regex убран (используется split/join без regex).
+//
+// ЗАЩИТА ОТ ПОВТОРЕНИЯ ТАКОГО ЖЕ СБОЯ: весь основной код теперь обёрнут в один
+// try/catch -- если где-то ещё есть невидимая проблема, вместо "ничего не происходит"
+// ты увидишь alert() с точным текстом ошибки (через ExtractUserError). Плюс по твоей
+// просьбе добавлены чек-пойнты DebugAlert() на каждом шаге -- если DEBUG = true, они
+// покажут alert() на каждой стадии, чтобы точно видеть, до какого места код доходит.
+// Когда всё заработает и надоест -- поставь DEBUG = false, чек-пойнты замолчат, но
+// try/catch-защита останется (она не зависит от DEBUG).
+//
 // Устроено по образцу рабочего "Удаленное действие кнопки" (визард создания
-// заявки на подбор) -- то же самое устройство параметров/форм:
+// заявки на подбор):
 //   - PARAMETERS.GetOptProperty("form_fields") / ("form_fields_default") --
 //     JSON-массивы полей формы, читаются через getParam()/getFormField().
 //   - oForm.command = "display_form" -- команда показать модальное окно.
 //   - Кнопки с submit_type определяют, что произойдёт при нажатии (обрабатывается
-//     через switch(sSubmitType) ниже) -- ремоут-экшен вызывается заново с новым
-//     form_fields при каждом нажатии кнопки формы.
+//     через switch(sSubmitType) ниже).
 //
-// Параметры удалённого действия (настраиваются в LPE у кнопки, аналогично
-// примеру): form_fields -- обычно пусто; form_fields_default -- обычно [].
+// Параметры удалённого действия (настраиваются в LPE у кнопки): form_fields --
+// обычно пусто; form_fields_default -- обычно [].
 //
-// Поля фильтра (без изменений с прошлой версии):
-//   matrix_id           -- foreign_elem, catalog: "cc_learning_matrice". Picker чинился
-//                           через отдельную выборку uni_catalog_list_cc_learning_matrice
-//                           (см. HREDU-183_uni_catalog_list_cc_learning_matrice.js) -- исправлено,
-//                           работает.
-//   macroregion          -- select. Список строится запросом SQL DISTINCT по custom_elem
-//                           f_2ewj у активных сотрудников (GetMacroregionEntries()).
-//   mir_code_id          -- foreign_elem, catalog: "cc_mir_code". foreign_elem отдаёт ID
-//                           объекта каталога, а не текстовый код -- код резолвится через
-//                           ResolveMirCodeText().
+// Поля фильтра:
+//   matrix_id           -- foreign_elem, catalog: "cc_learning_matrice".
+//   macroregion          -- select, список из GetMacroregionEntries() (SQL DISTINCT).
+//   mir_code_id          -- foreign_elem, catalog: "cc_mir_code" -- резолвится в текст
+//                           через ResolveMirCodeText().
 //   position_common_id   -- foreign_elem, catalog: "position_common".
-//   program_id           -- foreign_elem, catalog: "education_method". ИЗВЕСТНОЕ
-//                           ОГРАНИЧЕНИЕ: список НЕ сужается по уже выбранной матрице.
+//   program_id           -- foreign_elem, catalog: "education_method".
 //
+// ШАГ "apply" (09.09.2026) -- redirect на страницу отчёта с фильтрами в query string.
+// Тестовый адрес: https://als-devwt.vl.vtb/view_doc.html?mode=matrix_test (у него уже
+// есть свой параметр mode=matrix_test, поэтому фильтры дописываются через "&").
+// НЕ ПОДТВЕРЖДЕНО: (1) контракт oForm.command="close_form" + oForm.confirm_result=
+// {command:"redirect",url:...} взят по аналогии с education_accept_edit_event, но не
+// проверялся именно в этой модалке; (2) подхватит ли выборка Табличных данных GET-
+// параметры -- проверь привязку параметра matrix_id на вкладках Env/Context.
 // =====================================================================
-// ШАГ "apply" (09.09.2026) -- ПОПЫТКА №1 передать фильтры в отчёт: НЕ ПРОВЕРЕНО.
-//
-// Идея: по кнопке "Применить" делаем не alert(), а redirect на ту же страницу отчёта
-// с фильтрами в query string. У страницы отчёта параметры выборки "Табличные данные"
-// (matrix_id, macroregion, mir_code, position_common_id, program_id) должны быть
-// привязаны не к {{curObject.x}}, а к подстановке, которая читает GET-параметр запроса
-// (по документации в selections.md это один из трёх официальных способов передать
-// параметры в выборку) -- предположительно вкладка Env или Context в редакторе
-// привязки параметров. ЭТО ТЕБЕ НУЖНО ПРОВЕРИТЬ САМОМУ перед тестом всей связки:
-// открой привязку параметра matrix_id у выборки "Табличных данных" и посмотри,
-// есть ли на вкладках Env/Context подстановка вида "параметр запроса"/GET.
-//
-// ЧТО ТОЧНО НЕ ПРОВЕРЕНО и может не сработать с первого раза:
-//   1. sReportUrl ниже -- ПОДСТАВЛЕН (09.09.2026, тестовый адрес времени разработки):
-//      "https://als-devwt.vl.vtb/view_doc.html?mode=matrix_test". У него уже есть свой
-//      query-параметр mode=matrix_test, поэтому фильтры дописываются через "&". Когда
-//      появится боевой адрес -- поменять только эту строку.
-//   2. Контракт oForm.command="close_form" + oForm.confirm_result={command:"redirect",url:...}
-//      взят по аналогии с education_accept_edit_event (там были именно такие пары полей
-//      на завершение действия), но НЕ подтверждён на этой конкретной модалке -- если после
-//      "Применить" ничего не произойдёт или будет ошибка, пришли мне точный текст ошибки.
-//   3. UrlEncodeSafe() ниже пытается использовать encodeURIComponent() -- это стандартная
-//      функция JS, в других файлах этого проекта встречались операции, характерные для
-//      обычного JS (например report.length в диагностике), так что она ВЕРОЯТНО есть, но
-//      я не тестировал это в данном движке. Если macroregion (кириллица, например "Восток")
-//      придёт в отчёт пустым/битым -- сообщи, будем разбираться с кодированием отдельно.
-//
-// Если после теста redirect либо не происходит, либо на новой странице фильтры не
-// подхватываются -- НЕ пытайся чинить это в одиночку через догадки, скинь мне: (а) что
-// написано в адресной строке браузера после нажатия "Применить", (б) что показывает
-// Табличные данные. Тогда решим, что чинить: URL, привязку параметра или сам контракт
-// confirm_result.
-//
-// ВРЕМЕННЫЙ ПРОВЕРОЧНЫЙ alert() (старая версия шага "apply", просто показывала, что
-// пришло по каждому полю) оставлен ниже закомментированным -- если redirect совсем не
-// заработает, можно быстро вернуться к нему, чтобы отдельно проверить, что сами поля
-// формы (picker'ы/select) всё ещё отдают ожидаемые значения.
-// =====================================================================
+
+DEBUG = true;
+
+/*
+ * Чек-пойнт для отладки -- alert() с номером шага, только если DEBUG = true.
+ * Обёрнут в try/catch, чтобы сама отладочная печать не могла обрушить скрипт,
+ * если в каком-то контексте alert()/LogAlert недоступны.
+ * @param {string} sStep
+ */
+function DebugAlert(sStep)
+{
+    if (!DEBUG)
+    {
+        return;
+    }
+    try
+    {
+        alert("[DEBUG] " + sStep);
+    }
+    catch (_exDebug)
+    {
+        // ничего -- отладочная печать не должна ронять основной код
+    }
+}
 
 function getParam(sName, sDefault) {
     var sValue = PARAMETERS.GetOptProperty(sName);
@@ -128,8 +130,7 @@ function GetMacroregionEntries()
 
 /*
  * Резолвит ID объекта cc_mir_codes (то, что реально возвращает foreign_elem) в его
- * текстовый код (то, что реально лежит в custom_elem f_mir_codes у сотрудников) --
- * по аналогии с getMirCodeObject() в education_accept_event_card.
+ * текстовый код (то, что реально лежит в custom_elem f_mir_codes у сотрудников).
  * @param {number} iMirCodeID   -   ID документа cc_mir_codes.
  * @returns {string}            -   Код (например "LASK") или "" если не найден/не выбран.
  */
@@ -150,10 +151,10 @@ function ResolveMirCodeText(iMirCodeID)
 }
 
 /*
- * Пытается процентно закодировать значение для query string через encodeURIComponent().
- * Если в этом скриптовом движке такой функции нет -- падает в грубый ручной запасной
- * вариант (см. предупреждение в шапке файла -- кириллица тут не гарантированно проедет,
- * это нужно проверить на реальном тесте).
+ * Кодирует значение для query string. ИСПРАВЛЕНО (09.09.2026): убран regex-литерал
+ * в запасной ветке -- судя по всему, именно он ломал разбор всего файла. Запасной
+ * вариант теперь через split/join (без regex), на случай если encodeURIComponent
+ * в этом движке недоступен.
  * @param {*} value
  * @returns {string}
  */
@@ -166,141 +167,170 @@ function UrlEncodeSafe(value)
     }
     catch (_ex)
     {
-        return sValue.replace(/ /g, "%20");
+        return sValue.split(" ").join("%20");
     }
 }
 
-aFormFields = ParseJson(getParam("form_fields", "[]"));
-aFormFieldsDef = ParseJson(getParam("form_fields_default", "[]"));
-sSubmitType = getFormField("__submit_type__", getFormFieldDefault("__submit_type__", "step_0"));
+DebugAlert("0. Файл начал выполняться");
 
-oForm = new Object();
-oForm.command = "display_form";
-oForm.height = 320;
-oForm.title = "Фильтры отчёта (Восток)";
-oForm.message = null;
-oForm.form_fields = [
-    {
-        name: "matrix_id",
-        label: "Матрица обучения *",
-        title: "Выберите матрицу обучения",
-        type: "foreign_elem",
-        value: "",
-        mandatory: true,
-        multiple: false,
-        catalog: "cc_learning_matrice",
-        query_qual: ""
-    },
-    {
-        name: "macroregion",
-        label: "Макрорегион",
-        type: "select",
-        value: "",
-        entries: GetMacroregionEntries(),
-        mandatory: false,
-        visibility: false
-    },
-    {
-        name: "mir_code_id",
-        label: "Мир-код",
-        title: "Выберите мир-код",
-        type: "foreign_elem",
-        value: "",
-        mandatory: false,
-        multiple: false,
-        catalog: "cc_mir_code",
-        query_qual: ""
-    },
-    {
-        name: "position_common_id",
-        label: "Типовая должность",
-        title: "Выберите типовую должность",
-        type: "foreign_elem",
-        value: "",
-        mandatory: false,
-        multiple: false,
-        catalog: "position_common",
-        query_qual: ""
-    },
-    {
-        name: "program_id",
-        label: "Учебная программа",
-        title: "Выберите учебную программу",
-        type: "foreign_elem",
-        value: "",
-        mandatory: false,
-        multiple: false,
-        catalog: "education_method",
-        query_qual: ""
-    }
-];
-
-for (oField in oForm.form_fields)
+try
 {
-    oField.value = getFormField(oField.name, oField.value);
+    DebugAlert("1. Читаем form_fields/form_fields_default");
+    aFormFields = ParseJson(getParam("form_fields", "[]"));
+    aFormFieldsDef = ParseJson(getParam("form_fields_default", "[]"));
+    sSubmitType = getFormField("__submit_type__", getFormFieldDefault("__submit_type__", "step_0"));
+    DebugAlert("2. sSubmitType = [" + sSubmitType + "]");
+
+    oForm = new Object();
+    oForm.command = "display_form";
+    oForm.height = 320;
+    oForm.title = "Фильтры отчёта (Восток)";
+    oForm.message = null;
+
+    DebugAlert("3. Строим GetMacroregionEntries()");
+    aMacroregionEntries = GetMacroregionEntries();
+    DebugAlert("4. GetMacroregionEntries() построен, пунктов: " + ArrayCount(aMacroregionEntries));
+
+    oForm.form_fields = [
+        {
+            name: "matrix_id",
+            label: "Матрица обучения *",
+            title: "Выберите матрицу обучения",
+            type: "foreign_elem",
+            value: "",
+            mandatory: true,
+            multiple: false,
+            catalog: "cc_learning_matrice",
+            query_qual: ""
+        },
+        {
+            name: "macroregion",
+            label: "Макрорегион",
+            type: "select",
+            value: "",
+            entries: aMacroregionEntries,
+            mandatory: false,
+            visibility: false
+        },
+        {
+            name: "mir_code_id",
+            label: "Мир-код",
+            title: "Выберите мир-код",
+            type: "foreign_elem",
+            value: "",
+            mandatory: false,
+            multiple: false,
+            catalog: "cc_mir_code",
+            query_qual: ""
+        },
+        {
+            name: "position_common_id",
+            label: "Типовая должность",
+            title: "Выберите типовую должность",
+            type: "foreign_elem",
+            value: "",
+            mandatory: false,
+            multiple: false,
+            catalog: "position_common",
+            query_qual: ""
+        },
+        {
+            name: "program_id",
+            label: "Учебная программа",
+            title: "Выберите учебную программу",
+            type: "foreign_elem",
+            value: "",
+            mandatory: false,
+            multiple: false,
+            catalog: "education_method",
+            query_qual: ""
+        }
+    ];
+    DebugAlert("5. oForm.form_fields собран, полей: " + ArrayCount(oForm.form_fields));
+
+    for (oField in oForm.form_fields)
+    {
+        oField.value = getFormField(oField.name, oField.value);
+    }
+    DebugAlert("6. Значения полей проставлены из aFormFields");
+
+    oForm.buttons = [];
+    oForm.no_buttons = false;
+
+    switch (sSubmitType)
+    {
+        case "apply":
+        {
+            DebugAlert("7a. Ветка apply -- читаем значения полей");
+            iMatrixID = OptInt(getFormField("matrix_id", ""), 0);
+            sMacroregion = String(getFormField("macroregion", ""));
+            iMirCodeID = OptInt(getFormField("mir_code_id", ""), 0);
+            iPositionCommonID = OptInt(getFormField("position_common_id", ""), 0);
+            iProgramID = OptInt(getFormField("program_id", ""), 0);
+            DebugAlert("7b. matrix_id=" + iMatrixID + " macroregion=[" + sMacroregion + "] mir_code_id=" + iMirCodeID + " position_common_id=" + iPositionCommonID + " program_id=" + iProgramID);
+
+            sMirCodeText = ResolveMirCodeText(iMirCodeID);
+            DebugAlert("7c. mir_code резолвлен в текст: [" + sMirCodeText + "]");
+
+            // Адрес страницы отчёта (тестовый, время разработки). У страницы уже есть
+            // свой query-параметр "mode=matrix_test", поэтому фильтры добавляем через
+            // "&". Когда появится боевой адрес -- поменять только эту строку.
+            sReportUrl = "https://als-devwt.vl.vtb/view_doc.html?mode=matrix_test";
+
+            sQueryString = "";
+            sQueryString = sQueryString + "matrix_id=" + UrlEncodeSafe(iMatrixID);
+            sQueryString = sQueryString + "&macroregion=" + UrlEncodeSafe(sMacroregion);
+            sQueryString = sQueryString + "&mir_code=" + UrlEncodeSafe(sMirCodeText);
+            sQueryString = sQueryString + "&position_common_id=" + UrlEncodeSafe(iPositionCommonID);
+            sQueryString = sQueryString + "&program_id=" + UrlEncodeSafe(iProgramID);
+
+            sFullUrl = sReportUrl + "&" + sQueryString;
+            DebugAlert("7d. Итоговый URL redirect: " + sFullUrl);
+
+            oForm = {
+                command: "close_form",
+                confirm_result: {
+                    command: "redirect",
+                    url: sFullUrl
+                }
+            };
+
+            // ЗАПАСНОЙ ВАРИАНТ (проверочный alert вместо редиректа) -- если после починки
+            // регэкспа модалка открывается, но именно redirect не срабатывает -- раскомментируй
+            // этот блок вместо oForm выше, чтобы отдельно проверить, что сами значения полей
+            // (picker'ы/select) верны, независимо от механизма передачи в отчёт:
+            //
+            // oForm = {
+            //     command: "alert",
+            //     msg: ("Выбранные фильтры (проверочный вывод):<br/><pre>" + sFullUrl + "</pre>"),
+            //     title: "Фильтры применены (пока без связи с отчётом)"
+            // };
+
+            DebugAlert("7e. Ветка apply завершена, RESULT будет = close_form/redirect");
+            break;
+        }
+        case "step_0":
+        default:
+        {
+            DebugAlert("8. Ветка step_0/default -- добавляем кнопки Применить/Отмена");
+            oForm.buttons.push(
+                { name: "submit", submit_type: "apply", label: "Применить", type: "submit" },
+                { name: "cancel", label: "Отмена", type: "cancel" }
+            );
+            break;
+        }
+    }
+
+    RESULT = oForm;
+    DebugAlert("9. RESULT успешно собран, sSubmitType был [" + sSubmitType + "]");
 }
-
-oForm.buttons = [];
-oForm.no_buttons = false;
-
-switch (sSubmitType)
+catch (_exMain)
 {
-    case "apply":
-    {
-        iMatrixID = OptInt(getFormField("matrix_id", ""), 0);
-        sMacroregion = String(getFormField("macroregion", ""));
-        iMirCodeID = OptInt(getFormField("mir_code_id", ""), 0);
-        iPositionCommonID = OptInt(getFormField("position_common_id", ""), 0);
-        iProgramID = OptInt(getFormField("program_id", ""), 0);
-        sMirCodeText = ResolveMirCodeText(iMirCodeID);
-
-        // Адрес страницы отчёта (тестовый, время разработки -- получен от пользователя
-        // 09.09.2026). ВАЖНО: у страницы уже есть свой query-параметр "mode=matrix_test",
-        // поэтому фильтры добавляем через "&", а не заново через "?" -- иначе затрём его.
-        // Когда появится боевой адрес, поменяй только эту строку.
-        sReportUrl = "https://als-devwt.vl.vtb/view_doc.html?mode=matrix_test";
-
-        sQueryString = "";
-        sQueryString = sQueryString + "matrix_id=" + UrlEncodeSafe(iMatrixID);
-        sQueryString = sQueryString + "&macroregion=" + UrlEncodeSafe(sMacroregion);
-        sQueryString = sQueryString + "&mir_code=" + UrlEncodeSafe(sMirCodeText);
-        sQueryString = sQueryString + "&position_common_id=" + UrlEncodeSafe(iPositionCommonID);
-        sQueryString = sQueryString + "&program_id=" + UrlEncodeSafe(iProgramID);
-
-        oForm = {
-            command: "close_form",
-            confirm_result: {
-                command: "redirect",
-                url: sReportUrl + "&" + sQueryString
-            }
-        };
-
-        // ЗАПАСНОЙ ВАРИАНТ (старая проверочная версия) -- если редирект совсем не сработает,
-        // раскомментируй этот блок вместо oForm выше, чтобы отдельно проверить значения полей:
-        //
-        // sReport = "";
-        // sReport = sReport + "matrix_id = " + iMatrixID + "\r\n";
-        // sReport = sReport + "macroregion = [" + sMacroregion + "]\r\n";
-        // sReport = sReport + "mir_code_id = " + iMirCodeID + " (код: [" + sMirCodeText + "])\r\n";
-        // sReport = sReport + "position_common_id = " + iPositionCommonID + "\r\n";
-        // sReport = sReport + "program_id = " + iProgramID;
-        // oForm = {
-        //     command: "alert",
-        //     msg: ("Выбранные фильтры (проверочный вывод):<br/><pre>" + sReport + "</pre>"),
-        //     title: "Фильтры применены (пока без связи с отчётом)"
-        // };
-
-        break;
-    }
-    case "step_0":
-    default:
-    {
-        oForm.buttons.push(
-            { name: "submit", submit_type: "apply", label: "Применить", type: "submit" },
-            { name: "cancel", label: "Отмена", type: "cancel" }
-        );
-        break;
-    }
+    // ГЛАВНАЯ ЗАЩИТА (09.09.2026): если где-то в коде выше вылетит ЛЮБАЯ ошибка --
+    // вместо "ничего не происходит"/пустого падения покажем alert с точным текстом.
+    RESULT = {
+        command: "alert",
+        msg: ("Ошибка в модалке фильтров (HREDU-183_filtry_modal_shag1.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
+        title: "ОШИБКА"
+    };
 }
-
-RESULT = oForm;
