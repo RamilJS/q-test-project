@@ -1,33 +1,29 @@
 // =====================================================================
-// HREDU-183. Диагностика v3: как в ВЫБОРКЕ прочитать GET-параметр из URL.
+// HREDU-183. Диагностика v4: парсим GET-параметры вручную из Request.Url.
 //
-// ИТОГИ v2 (09.09.2026, реальный прогон через redirect с ?matrix_id=...):
-//   matrix_id (голая переменная)              -- "matrix_id not defined"
-//   Request.matrix_id                          -- "Unknown object property: matrix_id"
-//   Request.Q("matrix_id")                     -- "Unknown method: Q()"
-//   Request.GetParam("matrix_id")              -- "Unknown method: GetParam()"
-//   Request.GetOptProperty("matrix_id")        -- "Unknown method: GetOptProperty()"
-//   GET.matrix_id                              -- "GET not defined"
-//   PARAMETERS.GetOptProperty("matrix_id")     -- "PARAMETERS not defined"
-//   ScopeWVars.matrix_id                       -- "ScopeWVars not defined"
+// ИТОГИ v3 (09.09.2026, реальный прогон): единственное, что реально сработало --
+// Request.Url -- вернул полный адрес страницы целиком, включая query string:
+//   https://als-devwt.vl.vtb:443/view_doc.html?mode=matrix_test&matrix_id=...&macroregion=...
+// Всё остальное (for-in по Request, Request["x"], QueryString(), GetProperty(),
+// Property(), Params) -- либо не существует, либо не тот тип объекта (for-in вообще
+// требует МАССИВ в этом движке -- "Expression is not an array", поэтому по обычным
+// объектам, не по массивам, for-in не работает; отсюда же и его успешная работа
+// раньше -- там всегда были именно МАССИВЫ: form_fields, aFormFields и т.п.).
 //
-// ВЫВОД: единственный реально существующий объект в этом списке -- Request (у него
-// "Unknown object property"/"Unknown method", а не "not defined" -- то есть сам объект
-// есть, просто не те имена свойств/методов). Все остальные глобалы (matrix_id, GET,
-// PARAMETERS, ScopeWVars) в контексте ВЫБОРКИ попросту не существуют -- похоже,
-// PARAMETERS/ScopeWVars это специфика УДАЛЁННЫХ ДЕЙСТВИЙ (там PARAMETERS точно
-// работал -- в filtry_modal_shag1.js), а не выборок.
+// ВЫВОД: раз именованного метода чтения одного GET-параметра нет -- читаем ВЕСЬ URL
+// строкой (Request.Url) и вырезаем нужный параметр сами: ищем "?" или "&", затем имя
+// параметра и "=", до следующего "&" или до конца строки. Без regex (не поддерживается),
+// обычными строковыми методами (indexOf/substring/split) -- они уже точно работают в
+// этом движке (encodeURIComponent сработал в filtry_modal, .length сработал в других
+// диагностиках).
 //
-// Вместо дальнейшего перебора наугад -- в этой версии:
-//   1) перечисляем СВОИМИ СИЛАМИ, какие свойства/методы реально есть у Request
-//      (та же техника, что сработала для полей коллекции positions в HREDU-181);
-//   2) пробуем ещё несколько типовых кандидатов (QueryString, GetProperty, Params,
-//      квадратные скобки Request["matrix_id"]).
+// Функция GetQueryParam() ниже -- если она подтвердится в этом прогоне, переносим её
+// без изменений в настоящую выборку отчёта (ту, что стоит на Табличных данных) для
+// ВСЕХ пяти фильтров: matrix_id, macroregion, mir_code, position_common_id, program_id.
 //
-// КАК ЗАПУСТИТЬ: так же, как v2 -- привязать выборкой к Табличным данным на странице
-// matrix_test и открыть страницу ЧЕРЕЗ модалку (кнопка "Применить"), чтобы в URL был
-// реальный query string. Поля результата в админке: id (integer), method (string),
-// value (string) -- как и раньше, не меняются.
+// КАК ЗАПУСТИТЬ: так же, как v2/v3 -- выборка на Табличных данных страницы matrix_test,
+// открыть страницу через "Применить" в модалке. Поля результата не меняются: id
+// (integer), method (string), value (string).
 // =====================================================================
 
 DEBUG = true;
@@ -48,6 +44,45 @@ function DebugAlert(sStep)
     }
 }
 
+/*
+ * Вырезает значение GET-параметра из полного URL строки, без regex.
+ * Ищет "имя=" сразу после "?" или "&", берёт всё до следующего "&" или до конца строки,
+ * затем декодирует через decodeURIComponent (с запасным вариантом, если её нет).
+ * @param {string} sUrl         -   Полный URL (например Request.Url).
+ * @param {string} sParamName   -   Имя параметра, например "matrix_id".
+ * @returns {string}             -   Значение параметра или "" если не найден.
+ */
+function GetQueryParam(sUrl, sParamName)
+{
+    var iQuestionPos, sQueryPart, aPairs, i, aPair, sRawValue;
+
+    iQuestionPos = sUrl.indexOf("?");
+    if (iQuestionPos < 0)
+    {
+        return "";
+    }
+    sQueryPart = sUrl.substring(iQuestionPos + 1);
+
+    aPairs = sQueryPart.split("&");
+    for (i = 0; i < ArrayCount(aPairs); i++)
+    {
+        aPair = aPairs[i].split("=");
+        if (aPair[0] == sParamName)
+        {
+            sRawValue = (ArrayCount(aPair) > 1 ? aPair[1] : "");
+            try
+            {
+                return decodeURIComponent(sRawValue);
+            }
+            catch (_exDecode)
+            {
+                return sRawValue;
+            }
+        }
+    }
+    return "";
+}
+
 DebugAlert("0. Файл начал выполняться");
 
 RESULT = [];
@@ -55,140 +90,43 @@ iRowId = 0;
 
 try
 {
-    // --- Часть 1: перечисляем свойства/методы Request через for-in ---------------
-    DebugAlert("1. Начинаем перебор свойств Request через for-in");
-    sEnumReport = "";
-    try
-    {
-        for (fld in Request)
-        {
-            try
-            {
-                sEnumReport = sEnumReport + String(fld) + "\r\n";
-            }
-            catch (_exFld)
-            {
-                sEnumReport = sEnumReport + "<не читается: " + ExtractUserError(_exFld) + ">\r\n";
-            }
-        }
-    }
-    catch (_exEnum)
-    {
-        sEnumReport = "for-in по Request упал целиком: " + ExtractUserError(_exEnum);
-    }
+    DebugAlert("1. Читаем Request.Url");
+    sFullUrl = String(Request.Url);
+    DebugAlert("1. Готово, Request.Url = " + sFullUrl);
     iRowId = iRowId + 1;
-    RESULT.push({ id: iRowId, method: "for (fld in Request) -- список того, что перечислилось", value: (sEnumReport != "" ? sEnumReport : "-- пусто, перебор ничего не дал --") });
-    DebugAlert("1. Готово, длина отчёта: " + sEnumReport.length);
+    RESULT.push({ id: iRowId, method: "Request.Url (сырой)", value: sFullUrl });
 
-    // --- Часть 2: пробуем прочитать значение по каждому имени из перебора --------
-    // (если for-in что-то дал -- fld это, скорее всего, ИМЯ свойства, пробуем Request[fld])
-    DebugAlert("2. Пробуем Request[fld] для каждого перечисленного имени, ищем matrix_id");
-    sFoundReport = "";
-    try
-    {
-        for (fld in Request)
-        {
-            try
-            {
-                if (String(fld) == "matrix_id")
-                {
-                    sFoundReport = sFoundReport + "НАШЛИ! Request[\"matrix_id\"] = [" + String(Request[fld]) + "]\r\n";
-                }
-            }
-            catch (_exFld2)
-            {
-                // пропускаем
-            }
-        }
-    }
-    catch (_exEnum2)
-    {
-        sFoundReport = "перебор с поиском matrix_id упал: " + ExtractUserError(_exEnum2);
-    }
+    DebugAlert("2. Парсим matrix_id из Request.Url через GetQueryParam()");
+    sMatrixID = GetQueryParam(sFullUrl, "matrix_id");
     iRowId = iRowId + 1;
-    RESULT.push({ id: iRowId, method: "поиск matrix_id среди перечисленных имён Request", value: (sFoundReport != "" ? sFoundReport : "-- matrix_id среди перечисленных имён не найден --") });
-    DebugAlert("2. Готово");
+    RESULT.push({ id: iRowId, method: "GetQueryParam(Request.Url, \"matrix_id\")", value: (sMatrixID != "" ? sMatrixID : "-- пусто/не найдено --") });
+    DebugAlert("2. Готово: [" + sMatrixID + "]");
 
-    // --- Часть 3: квадратные скобки напрямую по известному имени -----------------
-    DebugAlert("3. Пробуем Request[\"matrix_id\"] напрямую");
-    try
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request[\"matrix_id\"]", value: String(Request["matrix_id"]) });
-    }
-    catch (_ex3)
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request[\"matrix_id\"]", value: "-- ОШИБКА: " + ExtractUserError(_ex3) + " --" });
-    }
-    DebugAlert("3. Готово");
+    DebugAlert("3. Парсим macroregion");
+    sMacroregion = GetQueryParam(sFullUrl, "macroregion");
+    iRowId = iRowId + 1;
+    RESULT.push({ id: iRowId, method: "GetQueryParam(Request.Url, \"macroregion\")", value: (sMacroregion != "" ? sMacroregion : "-- пусто/не найдено --") });
+    DebugAlert("3. Готово: [" + sMacroregion + "]");
 
-    // --- Часть 4: классические ASP-подобные варианты ------------------------------
-    DebugAlert("4. Пробуем Request.QueryString(\"matrix_id\")");
-    try
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.QueryString(\"matrix_id\")", value: String(Request.QueryString("matrix_id")) });
-    }
-    catch (_ex4)
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.QueryString(\"matrix_id\")", value: "-- ОШИБКА: " + ExtractUserError(_ex4) + " --" });
-    }
-    DebugAlert("4. Готово");
+    DebugAlert("4. Парсим mir_code");
+    sMirCode = GetQueryParam(sFullUrl, "mir_code");
+    iRowId = iRowId + 1;
+    RESULT.push({ id: iRowId, method: "GetQueryParam(Request.Url, \"mir_code\")", value: (sMirCode != "" ? sMirCode : "-- пусто/не найдено --") });
+    DebugAlert("4. Готово: [" + sMirCode + "]");
 
-    DebugAlert("5. Пробуем Request.QueryString (без вызова, как свойство-строка)");
-    try
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.QueryString (свойство)", value: String(Request.QueryString) });
-    }
-    catch (_ex5)
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.QueryString (свойство)", value: "-- ОШИБКА: " + ExtractUserError(_ex5) + " --" });
-    }
-    DebugAlert("5. Готово");
+    DebugAlert("5. Парсим position_common_id");
+    sPositionCommonID = GetQueryParam(sFullUrl, "position_common_id");
+    iRowId = iRowId + 1;
+    RESULT.push({ id: iRowId, method: "GetQueryParam(Request.Url, \"position_common_id\")", value: (sPositionCommonID != "" ? sPositionCommonID : "-- пусто/не найдено --") });
+    DebugAlert("5. Готово: [" + sPositionCommonID + "]");
 
-    DebugAlert("6. Пробуем Request.GetProperty(\"matrix_id\") (без Opt)");
-    try
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.GetProperty(\"matrix_id\")", value: String(Request.GetProperty("matrix_id")) });
-    }
-    catch (_ex6)
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.GetProperty(\"matrix_id\")", value: "-- ОШИБКА: " + ExtractUserError(_ex6) + " --" });
-    }
-    DebugAlert("6. Готово");
+    DebugAlert("6. Парсим program_id");
+    sProgramID = GetQueryParam(sFullUrl, "program_id");
+    iRowId = iRowId + 1;
+    RESULT.push({ id: iRowId, method: "GetQueryParam(Request.Url, \"program_id\")", value: (sProgramID != "" ? sProgramID : "-- пусто/не найдено --") });
+    DebugAlert("6. Готово: [" + sProgramID + "]");
 
-    DebugAlert("7. Пробуем Request.Property(\"matrix_id\")");
-    try
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.Property(\"matrix_id\")", value: String(Request.Property("matrix_id")) });
-    }
-    catch (_ex7)
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.Property(\"matrix_id\")", value: "-- ОШИБКА: " + ExtractUserError(_ex7) + " --" });
-    }
-    DebugAlert("7. Готово");
-
-    DebugAlert("8. Пробуем Request.Params");
-    try
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.Params (свойство)", value: String(Request.Params) });
-    }
-    catch (_ex8)
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.Params (свойство)", value: "-- ОШИБКА: " + ExtractUserError(_ex8) + " --" });
-    }
-    DebugAlert("8. Готово");
-
-    DebugAlert("9. Пробуем Request.Url / Request.URL / Request.CurUrl (полный адрес, чтобы хотя бы вытащить строку вручную)");
-    try
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.Url (свойство)", value: String(Request.Url) });
-    }
-    catch (_ex9)
-    {
-        RESULT.push({ id: (iRowId = iRowId + 1), method: "Request.Url (свойство)", value: "-- ОШИБКА: " + ExtractUserError(_ex9) + " --" });
-    }
-    DebugAlert("9. Готово");
-
-    DebugAlert("10. Все варианты проверены, строк в RESULT: " + ArrayCount(RESULT));
+    DebugAlert("7. Всё распарсено, строк в RESULT: " + ArrayCount(RESULT));
 }
 catch (_exMain)
 {
