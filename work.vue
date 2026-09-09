@@ -1,29 +1,30 @@
 // =====================================================================
-// HREDU-183. Диагностика v4: парсим GET-параметры вручную из Request.Url.
+// HREDU-183. Диагностика v5: парсим GET-параметры из Request.Url через настоящий
+// строковый API этой платформы (документация datex.ru).
 //
-// ИТОГИ v3 (09.09.2026, реальный прогон): единственное, что реально сработало --
-// Request.Url -- вернул полный адрес страницы целиком, включая query string:
-//   https://als-devwt.vl.vtb:443/view_doc.html?mode=matrix_test&matrix_id=...&macroregion=...
-// Всё остальное (for-in по Request, Request["x"], QueryString(), GetProperty(),
-// Property(), Params) -- либо не существует, либо не тот тип объекта (for-in вообще
-// требует МАССИВ в этом движке -- "Expression is not an array", поэтому по обычным
-// объектам, не по массивам, for-in не работает; отсюда же и его успешная работа
-// раньше -- там всегда были именно МАССИВЫ: form_fields, aFormFields и т.п.).
+// ИТОГИ v4: .indexOf()/.substring() -- это НЕ методы строк в этом движке ("Unknown
+// method: substring()"). Строковые операции здесь -- ГЛОБАЛЬНЫЕ ФУНКЦИИ (тот же
+// стиль, что Trim(), String(), Int() -- ничего нового, просто мы раньше не знали
+// имён). Точные сигнатуры (документация datex.ru, 09.09.2026):
 //
-// ВЫВОД: раз именованного метода чтения одного GET-параметра нет -- читаем ВЕСЬ URL
-// строкой (Request.Url) и вырезаем нужный параметр сами: ищем "?" или "&", затем имя
-// параметра и "=", до следующего "&" или до конца строки. Без regex (не поддерживается),
-// обычными строковыми методами (indexOf/substring/split) -- они уже точно работают в
-// этом движке (encodeURIComponent сработал в filtry_modal, .length сработал в других
-// диагностиках).
+//   StrOptSubStrPos(str, subStr [, ignoreCase [, startPos]])
+//     -- позиция подстроки в строке; undefined, если не найдена (как у OptInt --
+//        "Opt" в названии означает "может не найти, тогда undefined, а не ошибка").
+//   StrRangePos(str, pos1, pos2)
+//     -- часть строки между позициями pos1 и pos2, возвращает String.
+//   StrLen(str)
+//     -- длина строки.
 //
-// Функция GetQueryParam() ниже -- если она подтвердится в этом прогоне, переносим её
-// без изменений в настоящую выборку отчёта (ту, что стоит на Табличных данных) для
-// ВСЕХ пяти фильтров: matrix_id, macroregion, mir_code, position_common_id, program_id.
+// GetQueryParam() ниже: ищет "&имя=" (для параметров не первых по счёту) или
+// "?имя=" (для первого параметра сразу после "?"), берёт позицию конца найденной
+// подстроки через StrLen(), находит следующий "&" (или конец строки, если параметр
+// последний), вырезает всё между этими двумя позициями через StrRangePos(), затем
+// decodeURIComponent() (уже подтверждено рабочим -- сработал при кодировании
+// кириллицы в filtry_modal).
 //
-// КАК ЗАПУСТИТЬ: так же, как v2/v3 -- выборка на Табличных данных страницы matrix_test,
-// открыть страницу через "Применить" в модалке. Поля результата не меняются: id
-// (integer), method (string), value (string).
+// КАК ЗАПУСТИТЬ: как и раньше -- выборка на Табличных данных страницы matrix_test,
+// открыть страницу через "Применить" в модалке. Поля результата: id (integer),
+// method (string), value (string).
 // =====================================================================
 
 DEBUG = true;
@@ -45,42 +46,52 @@ function DebugAlert(sStep)
 }
 
 /*
- * Вырезает значение GET-параметра из полного URL строки, без regex.
- * Ищет "имя=" сразу после "?" или "&", берёт всё до следующего "&" или до конца строки,
- * затем декодирует через decodeURIComponent (с запасным вариантом, если её нет).
+ * Вырезает значение GET-параметра из полного URL строки через штатный строковый API
+ * платформы (StrOptSubStrPos/StrRangePos/StrLen) -- без regex и без методов строк
+ * (.indexOf/.substring здесь не существуют, см. шапку файла).
  * @param {string} sUrl         -   Полный URL (например Request.Url).
  * @param {string} sParamName   -   Имя параметра, например "matrix_id".
  * @returns {string}             -   Значение параметра или "" если не найден.
  */
 function GetQueryParam(sUrl, sParamName)
 {
-    var iQuestionPos, sQueryPart, aPairs, i, aPair, sRawValue;
+    var sAmpMarker, sQMarkMarker, iParamPos, iValueStart, iAmpPos, iValueEnd, sRawValue, iUrlLen;
 
-    iQuestionPos = sUrl.indexOf("?");
-    if (iQuestionPos < 0)
+    iUrlLen = StrLen(sUrl);
+
+    // Вариант 1: параметр не первый в query string -- ищем "&имя="
+    sAmpMarker = "&" + sParamName + "=";
+    iParamPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
+    if (iParamPos != undefined)
     {
-        return "";
+        iValueStart = iParamPos + StrLen(sAmpMarker);
     }
-    sQueryPart = sUrl.substring(iQuestionPos + 1);
-
-    aPairs = sQueryPart.split("&");
-    for (i = 0; i < ArrayCount(aPairs); i++)
+    else
     {
-        aPair = aPairs[i].split("=");
-        if (aPair[0] == sParamName)
+        // Вариант 2: параметр первый сразу после "?"
+        sQMarkMarker = "?" + sParamName + "=";
+        iParamPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
+        if (iParamPos == undefined)
         {
-            sRawValue = (ArrayCount(aPair) > 1 ? aPair[1] : "");
-            try
-            {
-                return decodeURIComponent(sRawValue);
-            }
-            catch (_exDecode)
-            {
-                return sRawValue;
-            }
+            return "";
         }
+        iValueStart = iParamPos + StrLen(sQMarkMarker);
     }
-    return "";
+
+    // Конец значения -- следующий "&" после начала значения, либо конец строки.
+    iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
+    iValueEnd = (iAmpPos != undefined ? iAmpPos : iUrlLen);
+
+    sRawValue = StrRangePos(sUrl, iValueStart, iValueEnd);
+
+    try
+    {
+        return decodeURIComponent(sRawValue);
+    }
+    catch (_exDecode)
+    {
+        return sRawValue;
+    }
 }
 
 DebugAlert("0. Файл начал выполняться");
@@ -96,7 +107,7 @@ try
     iRowId = iRowId + 1;
     RESULT.push({ id: iRowId, method: "Request.Url (сырой)", value: sFullUrl });
 
-    DebugAlert("2. Парсим matrix_id из Request.Url через GetQueryParam()");
+    DebugAlert("2. Парсим matrix_id");
     sMatrixID = GetQueryParam(sFullUrl, "matrix_id");
     iRowId = iRowId + 1;
     RESULT.push({ id: iRowId, method: "GetQueryParam(Request.Url, \"matrix_id\")", value: (sMatrixID != "" ? sMatrixID : "-- пусто/не найдено --") });
@@ -126,7 +137,13 @@ try
     RESULT.push({ id: iRowId, method: "GetQueryParam(Request.Url, \"program_id\")", value: (sProgramID != "" ? sProgramID : "-- пусто/не найдено --") });
     DebugAlert("6. Готово: [" + sProgramID + "]");
 
-    DebugAlert("7. Всё распарсено, строк в RESULT: " + ArrayCount(RESULT));
+    DebugAlert("7. Дополнительно: parсим mode (должно быть 'matrix_test', первый параметр после '?') -- проверка ветки '?имя='");
+    sMode = GetQueryParam(sFullUrl, "mode");
+    iRowId = iRowId + 1;
+    RESULT.push({ id: iRowId, method: "GetQueryParam(Request.Url, \"mode\") -- проверка первого параметра", value: (sMode != "" ? sMode : "-- пусто/не найдено --") });
+    DebugAlert("7. Готово: [" + sMode + "]");
+
+    DebugAlert("8. Всё распарсено, строк в RESULT: " + ArrayCount(RESULT));
 }
 catch (_exMain)
 {
