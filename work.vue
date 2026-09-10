@@ -1,456 +1,123 @@
 // =====================================================================
-// HREDU-183. Шаг 1: модальное окно с фильтрами.
+// HREDU-183. Диагностика: поля "аудитории матрицы" (position_common_id/mir_code_id
+// на самой cc_learning_matrice -- см. ТЗ: "Общее кол-во сотрудников -- все, кто
+// подходят под матрицу (должность + мир-код)") и поля "периода прохождения тренинга"
+// (нужно для "План" -- "у кого уже наступил период прохождения тренинга") -- такого
+// поля мы ещё НЕ находили ни на матрице, ни на её элементах, ни где-либо ещё.
 //
-// ИСПРАВЛЕНИЕ (09.09.2026, аварийное): предыдущая версия ЛОМАЛА весь файл целиком --
-// даже стартовый display_form не открывался. Главный подозреваемый: UrlEncodeSafe()
-// использовала regex-литерал (/ /g) в запасной ветке -- скриптовый движок WebTutor,
-// судя по всему, НЕ поддерживает синтаксис регулярных выражений, и это ломает разбор
-// (компиляцию) всего файла целиком, а не только ветку "apply", где эта функция
-// реально вызывается. Regex убран (используется split/join без regex).
+// Проверяем ОБЕ коллекции сразу: саму матрицу (cc_learning_matrice) и её элементы
+// (cc_learning_matrice_element, по одному на программу в составе матрицы) -- срок
+// может быть общим для всей матрицы, а может быть свой у каждой программы.
 //
-// ЗАЩИТА ОТ ПОВТОРЕНИЯ ТАКОГО ЖЕ СБОЯ: весь основной код теперь обёрнут в один
-// try/catch -- если где-то ещё есть невидимая проблема, вместо "ничего не происходит"
-// ты увидишь alert() с точным текстом ошибки (через ExtractUserError). Плюс по твоей
-// просьбе добавлены чек-пойнты DebugAlert() на каждом шаге -- если DEBUG = true, они
-// покажут alert() на каждой стадии, чтобы точно видеть, до какого места код доходит.
-// Когда всё заработает и надоест -- поставь DEBUG = false, чек-пойнты замолчат, но
-// try/catch-защита останется (она не зависит от DEBUG).
+// Техника -- та же, что уже сработала для полей "positions" (HREDU-181_diagnostic_positions_fields.js):
+// общий перебор через for-in (работает по МАССИВАМ строк из XQuery, не по любым объектам --
+// это уже проверено на Request и не сработало там, но сработало на строках из ArraySelectAll)
+// + точечная проверка кандидатов по имени напрямую через точку (без скобочной нотации --
+// Request["x"] уже показал себя ненадёжно, скобочный доступ к произвольному свойству по
+// имени переменной здесь может не работать как в обычном JS).
 //
-// Устроено по образцу рабочего "Удаленное действие кнопки" (визард создания
-// заявки на подбор):
-//   - PARAMETERS.GetOptProperty("form_fields") / ("form_fields_default") --
-//     JSON-массивы полей формы, читаются через getParam()/getFormField().
-//   - oForm.command = "display_form" -- команда показать модальное окно.
-//   - Кнопки с submit_type определяют, что произойдёт при нажатии (обрабатывается
-//     через switch(sSubmitType) ниже).
+// matrixId ниже -- реальный ID матрицы из предыдущих логов ("Матрица тест 3").
 //
-// Параметры удалённого действия (настраиваются в LPE у кнопки): form_fields --
-// обычно пусто; form_fields_default -- обычно [].
-//
-// Поля фильтра:
-//   matrix_id           -- foreign_elem, catalog: "cc_learning_matrice".
-//   macroregion          -- select, список из GetMacroregionEntries() (SQL DISTINCT).
-//   mir_code_id          -- foreign_elem, catalog: "cc_mir_code" -- резолвится в текст
-//                           через ResolveMirCodeText().
-//   position_common_id   -- foreign_elem, catalog: "position_common".
-//   program_id           -- foreign_elem, catalog: "education_method".
-//
-// ШАГ "apply" (09.09.2026) -- redirect на страницу отчёта с фильтрами в query string.
-// Тестовый адрес: https://als-devwt.vl.vtb/view_doc.html?mode=matrix_test (у него уже
-// есть свой параметр mode=matrix_test, поэтому фильтры дописываются через "&"). НА
-// ПРОДЕ будет другой адрес (сказал пользователь 09.09.2026): https://als-wt/view_doc.html?mode=matrix
-// -- поменять тогда только sReportUrl ниже.
-//
-// ПОДТВЕРЖДЕНО (09.09.2026, реальный тест): контракт oForm.command="close_form" +
-// oForm.confirm_result={command:"redirect",url:...} работает, редирект происходит.
-// Табличные данные читают GET-параметры не через подстановку в UI (в Env/Context её
-// нет), а сама выборка читает их из Request.Url и парсит вручную -- см.
-// HREDU-183_diagnostic_get_params.js.
-//
-// ИСПРАВЛЕНО (09.09.2026, кодирование): раньше кодировали через encodeURIComponent()
-// (стандартный JS -- UTF-8: кириллица уезжала как %D0%A3%D0%A4%D0%9E). Но родная
-// функция платформы для декодирования на стороне выборки -- UrlDecode() -- судя по
-// примеру в документации (%E0%EF%F0%EE%EB -> "апрол"), ждёт ОДНОБАЙТНУЮ кодировку,
-// не UTF-8: декодирование UTF-8-строки через неё дало бы кракозябру. Поэтому теперь
-// кодируем ТОЖЕ родной функцией платформы -- UrlEncodeQuery(obj) -- она сама собирает
-// "имя1=значение1&имя2=значение2&..." из объекта, в той же схеме, что понимает
-// UrlDecode() на другом конце.
-//
-// ДОБАВЛЕНО (10.09.2026, запоминание фильтров): после ЛЮБОЙ перезагрузки страницы
-// модалка при открытии (ветка "step_0") показывала пустые поля -- пользователю
-// приходилось выбирать все фильтры заново, даже если он просто обновил страницу.
-// Решение -- та же техника, что уже подтверждена в выборке отчёта (см.
-// HREDU-181_vostok_polny_spisok_draft.js): САМА МОДАЛКА при открытии читает
-// Request.Url текущей страницы (куда фильтры уже попали через предыдущий "Применить")
-// и подставляет их как значения полей ПО УМОЛЧАНИЮ, вместо хардкода value: "". Раз
-// сама страница и есть источник состояния (через query string), отдельное хранение
-// (LOCAL-переменные, куки, что-то ещё) не нужно.
-//
-// НЮАНС с мир-кодом: в URL для отчёта передаётся ТЕКСТОВЫЙ код (mir_code=LAMA,
-// нужен отчёту для фильтрации сотрудников), а полю-picker'у mir_code_id для
-// восстановления нужен ID документа cc_mir_code, не текст -- обратно текст в ID без
-// дополнительного похода в базу не превратить надёжно (могут быть тёзки по названию).
-// Поэтому в query string теперь дублируем ОБА значения: mir_code (текст, для отчёта,
-// как и раньше) и mir_code_id (ID, только для восстановления поля в модалке) -- отчёт
-// (HREDU-181_vostok_polny_spisok_draft.js) продолжает читать mir_code как раньше,
-// его трогать не пришлось.
+// Как запустить: как тестовый remote_action/скрипт-агент. Пришли мне вывод alert() целиком.
 // =====================================================================
 
-DEBUG = true;
-
 /*
- * Чек-пойнт для отладки -- alert() с номером шага, только если DEBUG = true.
- * Обёрнут в try/catch, чтобы сама отладочная печать не могла обрушить скрипт,
- * если в каком-то контексте alert()/LogAlert недоступны.
- * @param {string} sStep
+ * Общий перебор полей строки через for-in -- по аналогии с диагностикой positions.
+ * @param {Object} row
+ * @returns {string}
  */
-function DebugAlert(sStep)
+function DumpFieldsGeneric(row)
 {
-    if (!DEBUG)
-    {
-        return;
-    }
+    var report, fld;
+    report = "";
     try
     {
-        alert("[DEBUG] " + sStep);
-    }
-    catch (_exDebug)
-    {
-        // ничего -- отладочная печать не должна ронять основной код
-    }
-}
-
-function getParam(sName, sDefault) {
-    var sValue = PARAMETERS.GetOptProperty(sName);
-    if (sDefault != undefined && (sValue == undefined || sValue == "")) {
-        sValue = sDefault;
-    }
-    return sValue;
-}
-
-function getFormField(sName, sDefault) {
-    var sValue = ArrayOptFind(aFormFields, ("This.name == " + XQueryLiteral(sName)));
-    sValue = (sValue != undefined ? sValue.value : sValue);
-    if (sDefault != undefined && (sValue == undefined || sValue == "")) {
-        sValue = sDefault;
-    }
-    return sValue;
-}
-
-function getFormFieldDefault(sName, sDefault) {
-    var sValue = ArrayOptFind(aFormFieldsDef, ("This.name == " + XQueryLiteral(sName)));
-    sValue = (sValue != undefined ? sValue.value : sValue);
-    if (sDefault != undefined && (sValue == undefined || sValue == "")) {
-        sValue = sDefault;
-    }
-    return sValue;
-}
-
-/*
- * Строит список entries для select-поля "Макрорегион" -- DISTINCT по реальным
- * значениям custom_elem f_2ewj у активных сотрудников (не хардкод).
- * @returns {Object[]}   -   Массив {name, value}, первый пункт -- "Все".
- */
-function GetMacroregionEntries()
-{
-    var sqlText, rows, entries, i, sVal;
-    entries = [{ name: "Все", value: "" }];
-    try
-    {
-        sqlText = "";
-        sqlText = sqlText + "select distinct c.data.value('(*/custom_elems/custom_elem[name=''f_2ewj'']/value)[1]', 'varchar(max)') as macroregion\r\n";
-        sqlText = sqlText + "from collaborators cs\r\n";
-        sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
-        sqlText = sqlText + "where cs.is_dismiss != 1";
-        rows = ArraySelectAll(XQuery("sql:" + sqlText));
-        for (i = 0; i < ArrayCount(rows); i++)
+        for (fld in row)
         {
-            sVal = String(rows[i].macroregion);
-            if (sVal != "")
+            try
             {
-                entries.push({ name: sVal, value: sVal });
+                report = report + "  " + fld.Name + " = " + String(fld) + "\r\n";
+            }
+            catch (_exField)
+            {
+                report = report + "  <поле не читается: " + ExtractUserError(_exField) + ">\r\n";
             }
         }
     }
-    catch (_ex)
+    catch (_exLoop)
     {
-        entries = [{ name: "-- ошибка загрузки списка: " + ExtractUserError(_ex) + " --", value: "" }];
+        report = report + "  [перебор полей упал целиком: " + ExtractUserError(_exLoop) + "]\r\n";
     }
-    return entries;
+    return report;
 }
 
-/*
- * Резолвит ID объекта cc_mir_codes (то, что реально возвращает foreign_elem) в его
- * текстовый код (то, что реально лежит в custom_elem f_mir_codes у сотрудников).
- * @param {number} iMirCodeID   -   ID документа cc_mir_codes.
- * @returns {string}            -   Код (например "LASK") или "" если не найден/не выбран.
- */
-function ResolveMirCodeText(iMirCodeID)
+function Run()
 {
-    if (OptInt(iMirCodeID, 0) <= 0)
+    var matrixId, matrixRows, matrixRow, elementRows, elementRow, report;
+
+    matrixId = 7682761831139375285; // "Матрица тест 3" -- известный ID из прошлых логов
+
+    report = "";
+
+    // --- Матрица (cc_learning_matrice) -------------------------------------------
+    matrixRows = ArraySelectAll(XQuery("for $elem in cc_learning_matrices where $elem/id = " + matrixId + " return $elem"));
+    if (ArrayCount(matrixRows) == 0)
     {
-        return "";
+        alert("Матрица с id=" + matrixId + " не найдена -- нужен другой реальный ID для диагностики");
+        return;
     }
-    try
+    matrixRow = matrixRows[0];
+
+    report = report + "===== МАТРИЦА (cc_learning_matrice, id=" + matrixId + ") =====\r\n";
+    report = report + "-- общий перебор полей (for-in) --\r\n";
+    report = report + DumpFieldsGeneric(matrixRow);
+    report = report + "-- точечные кандидаты --\r\n";
+
+    try { report = report + "  position_common_id = [" + String(matrixRow.position_common_id) + "]\r\n"; } catch (_e1) { report = report + "  position_common_id -- ОШИБКА: " + ExtractUserError(_e1) + "\r\n"; }
+    try { report = report + "  position_id = [" + String(matrixRow.position_id) + "]\r\n"; } catch (_e2) { report = report + "  position_id -- ОШИБКА: " + ExtractUserError(_e2) + "\r\n"; }
+    try { report = report + "  mir_code_id = [" + String(matrixRow.mir_code_id) + "]\r\n"; } catch (_e3) { report = report + "  mir_code_id -- ОШИБКА: " + ExtractUserError(_e3) + "\r\n"; }
+    try { report = report + "  mir_code = [" + String(matrixRow.mir_code) + "]\r\n"; } catch (_e4) { report = report + "  mir_code -- ОШИБКА: " + ExtractUserError(_e4) + "\r\n"; }
+    try { report = report + "  start_date = [" + String(matrixRow.start_date) + "]\r\n"; } catch (_e5) { report = report + "  start_date -- ОШИБКА: " + ExtractUserError(_e5) + "\r\n"; }
+    try { report = report + "  due_date = [" + String(matrixRow.due_date) + "]\r\n"; } catch (_e6) { report = report + "  due_date -- ОШИБКА: " + ExtractUserError(_e6) + "\r\n"; }
+    try { report = report + "  deadline_date = [" + String(matrixRow.deadline_date) + "]\r\n"; } catch (_e7) { report = report + "  deadline_date -- ОШИБКА: " + ExtractUserError(_e7) + "\r\n"; }
+    try { report = report + "  period_start = [" + String(matrixRow.period_start) + "]\r\n"; } catch (_e8) { report = report + "  period_start -- ОШИБКА: " + ExtractUserError(_e8) + "\r\n"; }
+    try { report = report + "  period_start_date = [" + String(matrixRow.period_start_date) + "]\r\n"; } catch (_e9) { report = report + "  period_start_date -- ОШИБКА: " + ExtractUserError(_e9) + "\r\n"; }
+    try { report = report + "  training_period = [" + String(matrixRow.training_period) + "]\r\n"; } catch (_e10) { report = report + "  training_period -- ОШИБКА: " + ExtractUserError(_e10) + "\r\n"; }
+    try { report = report + "  period = [" + String(matrixRow.period) + "]\r\n"; } catch (_e11) { report = report + "  period -- ОШИБКА: " + ExtractUserError(_e11) + "\r\n"; }
+    try { report = report + "  term = [" + String(matrixRow.term) + "]\r\n"; } catch (_e12) { report = report + "  term -- ОШИБКА: " + ExtractUserError(_e12) + "\r\n"; }
+    try { report = report + "  assign_date = [" + String(matrixRow.assign_date) + "]\r\n"; } catch (_e13) { report = report + "  assign_date -- ОШИБКА: " + ExtractUserError(_e13) + "\r\n"; }
+    try { report = report + "  period_days = [" + String(matrixRow.period_days) + "]\r\n"; } catch (_e14) { report = report + "  period_days -- ОШИБКА: " + ExtractUserError(_e14) + "\r\n"; }
+
+    alert("Шаг 1/2 (МАТРИЦА) готов, длина отчёта: " + report.length);
+
+    // --- Элемент матрицы (cc_learning_matrice_element) -----------------------------
+    elementRows = ArraySelectAll(XQuery("for $elem in cc_learning_matrice_elements where $elem/cc_learning_matrice_id = " + matrixId + " return $elem"));
+    report = report + "\r\n===== ЭЛЕМЕНТ МАТРИЦЫ (cc_learning_matrice_element), найдено элементов: " + ArrayCount(elementRows) + " =====\r\n";
+
+    if (ArrayCount(elementRows) > 0)
     {
-        return String(tools.open_doc(Int(iMirCodeID)).TopElem.name);
+        elementRow = elementRows[0];
+        report = report + "-- общий перебор полей ПЕРВОГО элемента (for-in) --\r\n";
+        report = report + DumpFieldsGeneric(elementRow);
+        report = report + "-- точечные кандидаты --\r\n";
+
+        try { report = report + "  position_common_id = [" + String(elementRow.position_common_id) + "]\r\n"; } catch (_f1) { report = report + "  position_common_id -- ОШИБКА: " + ExtractUserError(_f1) + "\r\n"; }
+        try { report = report + "  mir_code_id = [" + String(elementRow.mir_code_id) + "]\r\n"; } catch (_f2) { report = report + "  mir_code_id -- ОШИБКА: " + ExtractUserError(_f2) + "\r\n"; }
+        try { report = report + "  start_date = [" + String(elementRow.start_date) + "]\r\n"; } catch (_f3) { report = report + "  start_date -- ОШИБКА: " + ExtractUserError(_f3) + "\r\n"; }
+        try { report = report + "  due_date = [" + String(elementRow.due_date) + "]\r\n"; } catch (_f4) { report = report + "  due_date -- ОШИБКА: " + ExtractUserError(_f4) + "\r\n"; }
+        try { report = report + "  deadline_date = [" + String(elementRow.deadline_date) + "]\r\n"; } catch (_f5) { report = report + "  deadline_date -- ОШИБКА: " + ExtractUserError(_f5) + "\r\n"; }
+        try { report = report + "  period_start = [" + String(elementRow.period_start) + "]\r\n"; } catch (_f6) { report = report + "  period_start -- ОШИБКА: " + ExtractUserError(_f6) + "\r\n"; }
+        try { report = report + "  period_start_date = [" + String(elementRow.period_start_date) + "]\r\n"; } catch (_f7) { report = report + "  period_start_date -- ОШИБКА: " + ExtractUserError(_f7) + "\r\n"; }
+        try { report = report + "  training_period = [" + String(elementRow.training_period) + "]\r\n"; } catch (_f8) { report = report + "  training_period -- ОШИБКА: " + ExtractUserError(_f8) + "\r\n"; }
+        try { report = report + "  period = [" + String(elementRow.period) + "]\r\n"; } catch (_f9) { report = report + "  period -- ОШИБКА: " + ExtractUserError(_f9) + "\r\n"; }
+        try { report = report + "  term = [" + String(elementRow.term) + "]\r\n"; } catch (_f10) { report = report + "  term -- ОШИБКА: " + ExtractUserError(_f10) + "\r\n"; }
+        try { report = report + "  assign_date = [" + String(elementRow.assign_date) + "]\r\n"; } catch (_f11) { report = report + "  assign_date -- ОШИБКА: " + ExtractUserError(_f11) + "\r\n"; }
+        try { report = report + "  period_days = [" + String(elementRow.period_days) + "]\r\n"; } catch (_f12) { report = report + "  period_days -- ОШИБКА: " + ExtractUserError(_f12) + "\r\n"; }
+        try { report = report + "  education_method_id = [" + String(elementRow.education_method_id) + "]\r\n"; } catch (_f13) { report = report + "  education_method_id -- ОШИБКА: " + ExtractUserError(_f13) + "\r\n"; }
+        try { report = report + "  is_active = [" + String(elementRow.is_active) + "]\r\n"; } catch (_f14) { report = report + "  is_active -- ОШИБКА: " + ExtractUserError(_f14) + "\r\n"; }
     }
-    catch (_ex)
-    {
-        return "";
-    }
+
+    alert("--- ИТОГОВЫЙ ОТЧЁТ (длина " + report.length + " символов) ---\r\n" + report);
 }
 
-/*
- * Достаёт полный URL текущей страницы (с фильтрами, которые туда попали через
- * предыдущий "Применить"). ИСПРАВЛЕНО (10.09.2026, реальный тест показал пустые
- * значения): Request.Url надёжно сработал в ВЫБОРКЕ (см. HREDU-181_vostok_polny_spisok_draft.js,
- * HREDU-183_diagnostic_get_params.js), но в контексте УДАЛЁННОГО ДЕЙСТВИЯ (эта модалка
- * вызывается по кнопке через ajax) он, судя по всему, отражает адрес самого ajax-запроса
- * к серверу, а не видимый адрес страницы в браузере -- это другой контекст выполнения,
- * та же история, что уже была с PARAMETERS/ScopeWVars (доступны только в одном из двух
- * контекстов, не в обоих).
- *
- * Способ 1 (предпочтительный): параметр удалённого действия "cur_page_url", привязанный
- * в LPE к подстановке {{curEnv.curEnvUrl}} ("Полный URL страницы" -- см. список Env, что
- * ты присылал раньше). НАСТРОЙ этот параметр в LPE у кнопки: добавь параметр с именем
- * cur_page_url, тип "Текст с подстановками", значение {{curEnv.curEnvUrl}}.
- * Способ 2 (запасной): Request.Url -- оставлен на случай, если способ 1 почему-то не
- * настроен или тоже не сработает.
- * @returns {string}
- */
-function GetCurPageUrlSafe()
-{
-    var sUrl;
-
-    sUrl = getParam("cur_page_url", "");
-    if (sUrl != "")
-    {
-        return sUrl;
-    }
-
-    try
-    {
-        return String(Request.Url);
-    }
-    catch (_ex)
-    {
-        return "";
-    }
-}
-
-/*
- * Вырезает значение GET-параметра из полного URL строки -- та же функция, что уже
- * подтверждена диагностикой и используется в выборке отчёта (HREDU-183_diagnostic_get_params.js,
- * HREDU-181_vostok_polny_spisok_draft.js). Без regex и без методов строк (.indexOf/.substring
- * здесь не существуют) -- через штатный строковый API платформы.
- * @param {string} sUrl         -   Полный URL (например Request.Url).
- * @param {string} sParamName   -   Имя параметра, например "matrix_id".
- * @returns {string}             -   Значение параметра или "" если не найден.
- */
-function GetQueryParam(sUrl, sParamName)
-{
-    var sAmpMarker, sQMarkMarker, iParamPos, iValueStart, iAmpPos, iValueEnd, sRawValue, iUrlLen;
-
-    iUrlLen = StrLen(sUrl);
-
-    sAmpMarker = "&" + sParamName + "=";
-    iParamPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
-    if (iParamPos != undefined)
-    {
-        iValueStart = iParamPos + StrLen(sAmpMarker);
-    }
-    else
-    {
-        sQMarkMarker = "?" + sParamName + "=";
-        iParamPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
-        if (iParamPos == undefined)
-        {
-            return "";
-        }
-        iValueStart = iParamPos + StrLen(sQMarkMarker);
-    }
-
-    iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
-    iValueEnd = (iAmpPos != undefined ? iAmpPos : iUrlLen);
-
-    sRawValue = StrRangePos(sUrl, iValueStart, iValueEnd);
-
-    try
-    {
-        return UrlDecode(sRawValue);
-    }
-    catch (_exDecode)
-    {
-        return sRawValue;
-    }
-}
-
-DebugAlert("0. Файл начал выполняться");
-
-try
-{
-    DebugAlert("1. Читаем form_fields/form_fields_default");
-    aFormFields = ParseJson(getParam("form_fields", "[]"));
-    aFormFieldsDef = ParseJson(getParam("form_fields_default", "[]"));
-    sSubmitType = getFormField("__submit_type__", getFormFieldDefault("__submit_type__", "step_0"));
-    DebugAlert("2. sSubmitType = [" + sSubmitType + "]");
-
-    oForm = new Object();
-    oForm.command = "display_form";
-    oForm.height = 320;
-    oForm.title = "Фильтры отчёта (Восток)";
-    oForm.message = null;
-
-    DebugAlert("3. Строим GetMacroregionEntries()");
-    aMacroregionEntries = GetMacroregionEntries();
-    DebugAlert("4. GetMacroregionEntries() построен, пунктов: " + ArrayCount(aMacroregionEntries));
-
-    // ДОБАВЛЕНО (10.09.2026, запоминание фильтров): читаем текущий URL страницы --
-    // если фильтры туда уже попали через предыдущий "Применить", используем их как
-    // значения по умолчанию вместо "". Если Request недоступен (sModalPageUrl == "") --
-    // GetQueryParam() всё равно вернёт "" на любое имя, ничего не ломается.
-    DebugAlert("3b. Читаем текущий URL страницы для восстановления фильтров (сначала параметр cur_page_url, потом Request.Url)");
-    sModalPageUrl = GetCurPageUrlSafe();
-    DebugAlert("3b2. Итоговый URL, который используем: [" + sModalPageUrl + "]");
-    sDefaultMatrixID = GetQueryParam(sModalPageUrl, "matrix_id");
-    sDefaultMacroregion = GetQueryParam(sModalPageUrl, "macroregion");
-    sDefaultMirCodeID = GetQueryParam(sModalPageUrl, "mir_code_id");
-    sDefaultPositionCommonID = GetQueryParam(sModalPageUrl, "position_common_id");
-    sDefaultProgramID = GetQueryParam(sModalPageUrl, "program_id");
-    DebugAlert("3c. Значения по умолчанию из URL: matrix_id=[" + sDefaultMatrixID + "] macroregion=[" + sDefaultMacroregion
-        + "] mir_code_id=[" + sDefaultMirCodeID + "] position_common_id=[" + sDefaultPositionCommonID
-        + "] program_id=[" + sDefaultProgramID + "]");
-
-    oForm.form_fields = [
-        {
-            name: "matrix_id",
-            label: "Матрица обучения *",
-            title: "Выберите матрицу обучения",
-            type: "foreign_elem",
-            value: sDefaultMatrixID,
-            mandatory: true,
-            multiple: false,
-            catalog: "cc_learning_matrice",
-            query_qual: ""
-        },
-        {
-            name: "macroregion",
-            label: "Макрорегион",
-            type: "select",
-            value: sDefaultMacroregion,
-            entries: aMacroregionEntries,
-            mandatory: false,
-            visibility: false
-        },
-        {
-            name: "mir_code_id",
-            label: "Мир-код",
-            title: "Выберите мир-код",
-            type: "foreign_elem",
-            value: sDefaultMirCodeID,
-            mandatory: false,
-            multiple: false,
-            catalog: "cc_mir_code",
-            query_qual: ""
-        },
-        {
-            name: "position_common_id",
-            label: "Типовая должность",
-            title: "Выберите типовую должность",
-            type: "foreign_elem",
-            value: sDefaultPositionCommonID,
-            mandatory: false,
-            multiple: false,
-            catalog: "position_common",
-            query_qual: ""
-        },
-        {
-            name: "program_id",
-            label: "Учебная программа",
-            title: "Выберите учебную программу",
-            type: "foreign_elem",
-            value: sDefaultProgramID,
-            mandatory: false,
-            multiple: false,
-            catalog: "education_method",
-            query_qual: ""
-        }
-    ];
-    DebugAlert("5. oForm.form_fields собран, полей: " + ArrayCount(oForm.form_fields));
-
-    for (oField in oForm.form_fields)
-    {
-        oField.value = getFormField(oField.name, oField.value);
-    }
-    DebugAlert("6. Значения полей проставлены из aFormFields");
-
-    oForm.buttons = [];
-    oForm.no_buttons = false;
-
-    switch (sSubmitType)
-    {
-        case "apply":
-        {
-            DebugAlert("7a. Ветка apply -- читаем значения полей");
-            iMatrixID = OptInt(getFormField("matrix_id", ""), 0);
-            sMacroregion = String(getFormField("macroregion", ""));
-            iMirCodeID = OptInt(getFormField("mir_code_id", ""), 0);
-            iPositionCommonID = OptInt(getFormField("position_common_id", ""), 0);
-            iProgramID = OptInt(getFormField("program_id", ""), 0);
-            DebugAlert("7b. matrix_id=" + iMatrixID + " macroregion=[" + sMacroregion + "] mir_code_id=" + iMirCodeID + " position_common_id=" + iPositionCommonID + " program_id=" + iProgramID);
-
-            sMirCodeText = ResolveMirCodeText(iMirCodeID);
-            DebugAlert("7c. mir_code резолвлен в текст: [" + sMirCodeText + "]");
-
-            // Адрес страницы отчёта (тестовый, время разработки). У страницы уже есть
-            // свой query-параметр "mode=matrix_test", поэтому фильтры добавляем через
-            // "&". Когда появится боевой адрес -- поменять только эту строку.
-            sReportUrl = "https://als-devwt.vl.vtb/view_doc.html?mode=matrix_test";
-
-            // Родная функция платформы -- сама собирает "имя1=значение1&имя2=значение2&..."
-            // и кодирует значения в той же схеме, что понимает UrlDecode() на стороне выборки.
-            // mir_code_id ДОБАВЛЕН (10.09.2026) -- отчёту не нужен (он фильтрует по тексту
-            // mir_code, как и раньше), нужен ТОЛЬКО модалке, чтобы при следующем открытии
-            // восстановить значение picker'а по ID, а не по тексту (см. "НЮАНС с мир-кодом"
-            // в шапке файла).
-            oQueryParams = {
-                matrix_id: String(iMatrixID),
-                macroregion: sMacroregion,
-                mir_code: sMirCodeText,
-                mir_code_id: String(iMirCodeID),
-                position_common_id: String(iPositionCommonID),
-                program_id: String(iProgramID)
-            };
-            sQueryString = UrlEncodeQuery(oQueryParams);
-
-            sFullUrl = sReportUrl + "&" + sQueryString;
-            DebugAlert("7d. Итоговый URL redirect: " + sFullUrl);
-
-            oForm = {
-                command: "close_form",
-                confirm_result: {
-                    command: "redirect",
-                    url: sFullUrl
-                }
-            };
-
-            // ЗАПАСНОЙ ВАРИАНТ (проверочный alert вместо редиректа) -- если после починки
-            // регэкспа модалка открывается, но именно redirect не срабатывает -- раскомментируй
-            // этот блок вместо oForm выше, чтобы отдельно проверить, что сами значения полей
-            // (picker'ы/select) верны, независимо от механизма передачи в отчёт:
-            //
-            // oForm = {
-            //     command: "alert",
-            //     msg: ("Выбранные фильтры (проверочный вывод):<br/><pre>" + sFullUrl + "</pre>"),
-            //     title: "Фильтры применены (пока без связи с отчётом)"
-            // };
-
-            DebugAlert("7e. Ветка apply завершена, RESULT будет = close_form/redirect");
-            break;
-        }
-        case "step_0":
-        default:
-        {
-            DebugAlert("8. Ветка step_0/default -- добавляем кнопки Применить/Отмена");
-            oForm.buttons.push(
-                { name: "submit", submit_type: "apply", label: "Применить", type: "submit" },
-                { name: "cancel", label: "Отмена", type: "cancel" }
-            );
-            break;
-        }
-    }
-
-    RESULT = oForm;
-    DebugAlert("9. RESULT успешно собран, sSubmitType был [" + sSubmitType + "]");
-}
-catch (_exMain)
-{
-    // ГЛАВНАЯ ЗАЩИТА (09.09.2026): если где-то в коде выше вылетит ЛЮБАЯ ошибка --
-    // вместо "ничего не происходит"/пустого падения покажем alert с точным текстом.
-    RESULT = {
-        command: "alert",
-        msg: ("Ошибка в модалке фильтров (HREDU-183_filtry_modal_shag1.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
-        title: "ОШИБКА"
-    };
-}
+Run();
