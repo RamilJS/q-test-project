@@ -273,6 +273,32 @@ function GetQueryParam(sUrl, sParamName)
 }
 
 /*
+ * ИСПРАВЛЕНО (10.09.2026, аварийное -- "GetFE Error ... objects/0000/00.xml"): поля
+ * matrix_id/mir_code_id/position_common_id/program_id -- это picker'ы типа
+ * "foreign_elem". Когда фильтр НЕ выбран, наш код (ветка "apply") кладёт в URL
+ * буквально "...=0" (дефолт OptInt(x, 0)). При повторном открытии модалки мы читаем
+ * это "0" из URL и подставляем в value: picker-поля -- а платформа воспринимает "0"
+ * НЕ как "ничего не выбрано", а как РЕАЛЬНЫЙ ID документа, и пытается открыть
+ * документ №0 (x-local://wt_data/objects/0000/00.xml) -- такого не существует, отсюда
+ * нативная ошибка платформы "GetFE Error returned: ... End of file (OpenDoc(),
+ * wt\web\lpapi.html, line 1289)" при повторном открытии модалки (после первого
+ * "Применить" без position_common_id/program_id). Раньше эти поля просто не получали
+ * value: (было "" по умолчанию), поэтому баг не проявлялся -- он появился ИМЕННО из-за
+ * фичи "запоминание фильтров". Фикс: "0" из URL для полей-picker'ов всегда превращаем
+ * обратно в "" перед тем, как класть в value:.
+ * @param {string} sValue
+ * @returns {string}
+ */
+function SanitizeIdFieldValue(sValue)
+{
+    if (sValue == "0" || sValue == undefined)
+    {
+        return "";
+    }
+    return sValue;
+}
+
+/*
  * ДОБАВЛЕНО (10.09.2026, переносимость на разные страницы): убирает из URL старое
  * значение указанного GET-параметра (если оно там есть), не трогая остальную часть
  * адреса. Нужно, чтобы модалка могла делать redirect на ТУ ЖЕ страницу, на которой её
@@ -346,11 +372,11 @@ try
     DebugAlert("3b. Читаем текущий URL страницы для восстановления фильтров (сначала параметр cur_page_url, потом Request.Url)");
     sModalPageUrl = GetCurPageUrlSafe();
     DebugAlert("3b2. Итоговый URL, который используем: [" + sModalPageUrl + "]");
-    sDefaultMatrixID = GetQueryParam(sModalPageUrl, "matrix_id");
+    sDefaultMatrixID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "matrix_id"));
     sDefaultMacroregion = GetQueryParam(sModalPageUrl, "macroregion");
-    sDefaultMirCodeID = GetQueryParam(sModalPageUrl, "mir_code_id");
-    sDefaultPositionCommonID = GetQueryParam(sModalPageUrl, "position_common_id");
-    sDefaultProgramID = GetQueryParam(sModalPageUrl, "program_id");
+    sDefaultMirCodeID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "mir_code_id"));
+    sDefaultPositionCommonID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "position_common_id"));
+    sDefaultProgramID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "program_id"));
     DebugAlert("3c. Значения по умолчанию из URL: matrix_id=[" + sDefaultMatrixID + "] macroregion=[" + sDefaultMacroregion
         + "] mir_code_id=[" + sDefaultMirCodeID + "] position_common_id=[" + sDefaultPositionCommonID
         + "] program_id=[" + sDefaultProgramID + "]");
