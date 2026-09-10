@@ -182,14 +182,33 @@ function ResolveMirCodeText(iMirCodeID)
 }
 
 /*
- * Пытается прочитать Request.Url -- полный URL текущей страницы (с фильтрами, которые
- * туда попали через предыдущий "Применить"). Обёрнуто в try/catch: если Request в этом
- * контексте недоступен, возвращает "" -- вызывающий код тогда просто показывает пустые
- * поля, как раньше (см. "ДОБАВЛЕНО (запоминание фильтров)" в шапке файла).
+ * Достаёт полный URL текущей страницы (с фильтрами, которые туда попали через
+ * предыдущий "Применить"). ИСПРАВЛЕНО (10.09.2026, реальный тест показал пустые
+ * значения): Request.Url надёжно сработал в ВЫБОРКЕ (см. HREDU-181_vostok_polny_spisok_draft.js,
+ * HREDU-183_diagnostic_get_params.js), но в контексте УДАЛЁННОГО ДЕЙСТВИЯ (эта модалка
+ * вызывается по кнопке через ajax) он, судя по всему, отражает адрес самого ajax-запроса
+ * к серверу, а не видимый адрес страницы в браузере -- это другой контекст выполнения,
+ * та же история, что уже была с PARAMETERS/ScopeWVars (доступны только в одном из двух
+ * контекстов, не в обоих).
+ *
+ * Способ 1 (предпочтительный): параметр удалённого действия "cur_page_url", привязанный
+ * в LPE к подстановке {{curEnv.curEnvUrl}} ("Полный URL страницы" -- см. список Env, что
+ * ты присылал раньше). НАСТРОЙ этот параметр в LPE у кнопки: добавь параметр с именем
+ * cur_page_url, тип "Текст с подстановками", значение {{curEnv.curEnvUrl}}.
+ * Способ 2 (запасной): Request.Url -- оставлен на случай, если способ 1 почему-то не
+ * настроен или тоже не сработает.
  * @returns {string}
  */
-function GetRequestUrlSafe()
+function GetCurPageUrlSafe()
 {
+    var sUrl;
+
+    sUrl = getParam("cur_page_url", "");
+    if (sUrl != "")
+    {
+        return sUrl;
+    }
+
     try
     {
         return String(Request.Url);
@@ -271,8 +290,9 @@ try
     // если фильтры туда уже попали через предыдущий "Применить", используем их как
     // значения по умолчанию вместо "". Если Request недоступен (sModalPageUrl == "") --
     // GetQueryParam() всё равно вернёт "" на любое имя, ничего не ломается.
-    DebugAlert("3b. Читаем текущий URL страницы для восстановления фильтров");
-    sModalPageUrl = GetRequestUrlSafe();
+    DebugAlert("3b. Читаем текущий URL страницы для восстановления фильтров (сначала параметр cur_page_url, потом Request.Url)");
+    sModalPageUrl = GetCurPageUrlSafe();
+    DebugAlert("3b2. Итоговый URL, который используем: [" + sModalPageUrl + "]");
     sDefaultMatrixID = GetQueryParam(sModalPageUrl, "matrix_id");
     sDefaultMacroregion = GetQueryParam(sModalPageUrl, "macroregion");
     sDefaultMirCodeID = GetQueryParam(sModalPageUrl, "mir_code_id");
