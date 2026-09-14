@@ -1,31 +1,26 @@
 // =====================================================================
-// HREDU-183. Шаг 1: модальное окно с фильтрами.
+// HREDU-182. Модальное окно с фильтрами -- ТОЛЬКО для страницы "Процент обученных".
 //
-// ИСПРАВЛЕНИЕ (09.09.2026, аварийное): предыдущая версия ЛОМАЛА весь файл целиком --
-// даже стартовый display_form не открывался. Главный подозреваемый: UrlEncodeSafe()
-// использовала regex-литерал (/ /g) в запасной ветке -- скриптовый движок WebTutor,
-// судя по всему, НЕ поддерживает синтаксис регулярных выражений, и это ломает разбор
-// (компиляцию) всего файла целиком, а не только ветку "apply", где эта функция
-// реально вызывается. Regex убран (используется split/join без regex).
-//
-// ЗАЩИТА ОТ ПОВТОРЕНИЯ ТАКОГО ЖЕ СБОЯ: весь основной код теперь обёрнут в один
-// try/catch -- если где-то ещё есть невидимая проблема, вместо "ничего не происходит"
-// ты увидишь alert() с точным текстом ошибки (через ExtractUserError). Плюс по твоей
-// просьбе добавлены чек-пойнты DebugAlert() на каждом шаге -- если DEBUG = true, они
-// покажут alert() на каждой стадии, чтобы точно видеть, до какого места код доходит.
-// Когда всё заработает и надоест -- поставь DEBUG = false, чек-пойнты замолчат, но
-// try/catch-защита останется (она не зависит от DEBUG).
-//
-// Устроено по образцу рабочего "Удаленное действие кнопки" (визард создания
-// заявки на подбор):
-//   - PARAMETERS.GetOptProperty("form_fields") / ("form_fields_default") --
-//     JSON-массивы полей формы, читаются через getParam()/getFormField().
-//   - oForm.command = "display_form" -- команда показать модальное окно.
-//   - Кнопки с submit_type определяют, что произойдёт при нажатии (обрабатывается
-//     через switch(sSubmitType) ниже).
-//
-// Параметры удалённого действия (настраиваются в LPE у кнопки): form_fields --
-// обычно пусто; form_fields_default -- обычно [].
+// РАЗДЕЛЕНО (14.09.2026, по прямому указанию пользователя): раньше одна и та же
+// модалка (HREDU-183_filtry_modal_shag1.js) висела и на страницах ТЭП, и на странице
+// "Процент обученных" -- но у ТЭП есть поле "Режим отчёта" (result_type), которое
+// "Процент обученных" вообще не использует (HREDU-182_procent_obuchennyh.js его не
+// читает). Чтобы не тащить лишнее поле на страницу, где оно не нужно, и не путать
+// пользователя -- РАЗДЕЛИЛИ на два независимых удалённых действия:
+//   - HREDU-183_filtry_modal_shag1.js -- ОСТАЁТСЯ БЕЗ ИЗМЕНЕНИЙ, только для 4 страниц
+//     ТЭП-отчётов (там же живёт поле "Режим отчёта").
+//   - HREDU_182_filtry_percent.js (этот файл) -- НОВЫЙ, для страницы "Процент
+//     обученных" и, если понадобится, для "Восток полный список". Это ПОЛНАЯ КОПИЯ
+//     HREDU-183_filtry_modal_shag1.js, из которой убрано ВСЁ, что относится к
+//     "Режим отчёта"/result_type (поле формы, чтение из URL, запись в URL,
+//     RemoveQueryParam) -- остальная логика (5 фильтров, восстановление значений,
+//     переносимость на любую страницу через cur_page_url/{{curEnv.curEnvUrl}},
+//     санитизация "0" для picker-полей, кодирование через UrlEncodeQuery/UrlDecode)
+//     -- идентична, без изменений. См. HREDU-183_filtry_modal_shag1.js -- там вся
+//     история находок и фиксов (regex ломает весь файл, function-as-value ломает весь
+//     файл, .indexOf/.substring не существуют, Request.Url не работает в удалённом
+//     действии, "0" в picker-поле роняет платформу) описана подробно, здесь не
+//     повторяем.
 //
 // Поля фильтра:
 //   matrix_id           -- foreign_elem, catalog: "cc_learning_matrice".
@@ -35,70 +30,17 @@
 //   position_common_id   -- foreign_elem, catalog: "position_common".
 //   program_id           -- foreign_elem, catalog: "education_method".
 //
-// ШАГ "apply" (09.09.2026) -- redirect на страницу отчёта с фильтрами в query string.
-//
-// ПЕРЕНОСИМОСТЬ (10.09.2026): раньше redirect шёл на ЗАХАРДКОЖЕННЫЙ адрес (тестовую
-// страницу matrix_test) -- значит одну и ту же модалку нельзя было повесить на другую
-// страницу без правки кода. Теперь redirect идёт на ТУ ЖЕ страницу, откуда модалку
-// открыли (через cur_page_url/Request.Url, см. GetCleanTargetUrl-логику в ветке
-// "apply" -- старые значения фильтров сначала стираются через RemoveQueryParam(),
-// потом дописываются новые). Значит ЭТУ ЖЕ модалку (без изменений в коде) можно
-// вешать кнопкой на любую новую страницу -- в том числе на страницы 4 ТЭП-отчётов
-// (HREDU-183_tep_reports.js) -- она сама вернёт на ту страницу, откуда её открыли,
-// с новыми фильтрами.
-//
-// ПОДТВЕРЖДЕНО (09.09.2026, реальный тест): контракт oForm.command="close_form" +
-// oForm.confirm_result={command:"redirect",url:...} работает, редирект происходит.
-// Табличные данные читают GET-параметры не через подстановку в UI (в Env/Context её
-// нет), а сама выборка читает их из Request.Url и парсит вручную -- см.
-// HREDU-183_diagnostic_get_params.js.
-//
-// ИСПРАВЛЕНО (09.09.2026, кодирование): раньше кодировали через encodeURIComponent()
-// (стандартный JS -- UTF-8: кириллица уезжала как %D0%A3%D0%A4%D0%9E). Но родная
-// функция платформы для декодирования на стороне выборки -- UrlDecode() -- судя по
-// примеру в документации (%E0%EF%F0%EE%EB -> "апрол"), ждёт ОДНОБАЙТНУЮ кодировку,
-// не UTF-8: декодирование UTF-8-строки через неё дало бы кракозябру. Поэтому теперь
-// кодируем ТОЖЕ родной функцией платформы -- UrlEncodeQuery(obj) -- она сама собирает
-// "имя1=значение1&имя2=значение2&..." из объекта, в той же схеме, что понимает
-// UrlDecode() на другом конце.
-//
-// ДОБАВЛЕНО (10.09.2026, запоминание фильтров): после ЛЮБОЙ перезагрузки страницы
-// модалка при открытии (ветка "step_0") показывала пустые поля -- пользователю
-// приходилось выбирать все фильтры заново, даже если он просто обновил страницу.
-// Решение -- та же техника, что уже подтверждена в выборке отчёта (см.
-// HREDU-181_vostok_polny_spisok_draft.js): САМА МОДАЛКА при открытии читает
-// Request.Url текущей страницы (куда фильтры уже попали через предыдущий "Применить")
-// и подставляет их как значения полей ПО УМОЛЧАНИЮ, вместо хардкода value: "". Раз
-// сама страница и есть источник состояния (через query string), отдельное хранение
-// (LOCAL-переменные, куки, что-то ещё) не нужно.
-//
-// ДОБАВЛЕНО (10.09.2026, режим ТЭП-отчёта -- "result_type"): 6-е поле формы, select
-// с 4 пунктами (Общее кол-во/План/Факт/Обязательно к прохождению -- значения
-// total/plan/fact/mandatory, см. HREDU-183_tep_reports.js). Это НЕ фильтр сотрудников,
-// а переключатель того, какой из 4 отчётов показывать. Раньше это было фиксированное
-// значение параметра result_type на вкладке "Параметры" у КАЖДОГО из 4 отдельных
-// виджетов "Табличные данные" -- пользователь не мог его менять сам. Теперь режим
-// выбирается прямо в этой модалке (вместе с остальными фильтрами, одной кнопкой
-// "Применить") и попадает в URL так же, как остальные 5 полей -- а значит НА СТРАНИЦЕ
-// ТЭП-ОТЧЁТА ТЕПЕРЬ ДОСТАТОЧНО ОДНОГО ВИДЖЕТА "Табличные данные" (не четырёх) --
-// HREDU-183_tep_reports.js сам читает result_type из URL и переключает поведение.
-//
-// НЮАНС с мир-кодом: в URL для отчёта передаётся ТЕКСТОВЫЙ код (mir_code=LAMA,
-// нужен отчёту для фильтрации сотрудников), а полю-picker'у mir_code_id для
-// восстановления нужен ID документа cc_mir_code, не текст -- обратно текст в ID без
-// дополнительного похода в базу не превратить надёжно (могут быть тёзки по названию).
-// Поэтому в query string теперь дублируем ОБА значения: mir_code (текст, для отчёта,
-// как и раньше) и mir_code_id (ID, только для восстановления поля в модалке) -- отчёт
-// (HREDU-181_vostok_polny_spisok_draft.js) продолжает читать mir_code как раньше,
-// его трогать не пришлось.
+// Параметры удалённого действия (настраиваются в LPE у кнопки): form_fields --
+// обычно пусто; form_fields_default -- обычно []; cur_page_url -- ОБЯЗАТЕЛЬНО привязать
+// к подстановке {{curEnv.curEnvUrl}} на КАЖДОЙ странице, где ставится кнопка (это
+// per-страница настройка в LPE, не часть кода) -- без неё "запоминание фильтров" при
+// повторном открытии не будет работать (см. GetCurPageUrlSafe() ниже).
 // =====================================================================
 
 DEBUG = true;
 
 /*
  * Чек-пойнт для отладки -- alert() с номером шага, только если DEBUG = true.
- * Обёрнут в try/catch, чтобы сама отладочная печать не могла обрушить скрипт,
- * если в каком-то контексте alert()/LogAlert недоступны.
  * @param {string} sStep
  */
 function DebugAlert(sStep)
@@ -199,21 +141,9 @@ function ResolveMirCodeText(iMirCodeID)
 }
 
 /*
- * Достаёт полный URL текущей страницы (с фильтрами, которые туда попали через
- * предыдущий "Применить"). ИСПРАВЛЕНО (10.09.2026, реальный тест показал пустые
- * значения): Request.Url надёжно сработал в ВЫБОРКЕ (см. HREDU-181_vostok_polny_spisok_draft.js,
- * HREDU-183_diagnostic_get_params.js), но в контексте УДАЛЁННОГО ДЕЙСТВИЯ (эта модалка
- * вызывается по кнопке через ajax) он, судя по всему, отражает адрес самого ajax-запроса
- * к серверу, а не видимый адрес страницы в браузере -- это другой контекст выполнения,
- * та же история, что уже была с PARAMETERS/ScopeWVars (доступны только в одном из двух
- * контекстов, не в обоих).
- *
- * Способ 1 (предпочтительный): параметр удалённого действия "cur_page_url", привязанный
- * в LPE к подстановке {{curEnv.curEnvUrl}} ("Полный URL страницы" -- см. список Env, что
- * ты присылал раньше). НАСТРОЙ этот параметр в LPE у кнопки: добавь параметр с именем
- * cur_page_url, тип "Текст с подстановками", значение {{curEnv.curEnvUrl}}.
- * Способ 2 (запасной): Request.Url -- оставлен на случай, если способ 1 почему-то не
- * настроен или тоже не сработает.
+ * Достаёт полный URL текущей страницы. В контексте УДАЛЁННОГО ДЕЙСТВИЯ Request.Url НЕ
+ * отражает видимый адрес страницы -- нужен параметр "cur_page_url", привязанный в LPE
+ * к подстановке {{curEnv.curEnvUrl}} (см. подробности в HREDU-183_filtry_modal_shag1.js).
  * @returns {string}
  */
 function GetCurPageUrlSafe()
@@ -237,10 +167,9 @@ function GetCurPageUrlSafe()
 }
 
 /*
- * Вырезает значение GET-параметра из полного URL строки -- та же функция, что уже
- * подтверждена диагностикой и используется в выборке отчёта (HREDU-183_diagnostic_get_params.js,
- * HREDU-181_vostok_polny_spisok_draft.js). Без regex и без методов строк (.indexOf/.substring
- * здесь не существуют) -- через штатный строковый API платформы.
+ * Вырезает значение GET-параметра из полного URL строки -- без regex, без методов
+ * строк (.indexOf/.substring здесь не существуют), через штатный строковый API
+ * платформы.
  * @param {string} sUrl         -   Полный URL (например Request.Url).
  * @param {string} sParamName   -   Имя параметра, например "matrix_id".
  * @returns {string}             -   Значение параметра или "" если не найден.
@@ -284,19 +213,9 @@ function GetQueryParam(sUrl, sParamName)
 }
 
 /*
- * ИСПРАВЛЕНО (10.09.2026, аварийное -- "GetFE Error ... objects/0000/00.xml"): поля
- * matrix_id/mir_code_id/position_common_id/program_id -- это picker'ы типа
- * "foreign_elem". Когда фильтр НЕ выбран, наш код (ветка "apply") кладёт в URL
- * буквально "...=0" (дефолт OptInt(x, 0)). При повторном открытии модалки мы читаем
- * это "0" из URL и подставляем в value: picker-поля -- а платформа воспринимает "0"
- * НЕ как "ничего не выбрано", а как РЕАЛЬНЫЙ ID документа, и пытается открыть
- * документ №0 (x-local://wt_data/objects/0000/00.xml) -- такого не существует, отсюда
- * нативная ошибка платформы "GetFE Error returned: ... End of file (OpenDoc(),
- * wt\web\lpapi.html, line 1289)" при повторном открытии модалки (после первого
- * "Применить" без position_common_id/program_id). Раньше эти поля просто не получали
- * value: (было "" по умолчанию), поэтому баг не проявлялся -- он появился ИМЕННО из-за
- * фичи "запоминание фильтров". Фикс: "0" из URL для полей-picker'ов всегда превращаем
- * обратно в "" перед тем, как класть в value:.
+ * "0" из URL для picker-полей (foreign_elem) означает "не выбрано", НЕ реальный ID --
+ * платформа иначе пытается открыть несуществующий документ №0 (см. подробности в
+ * HREDU-183_filtry_modal_shag1.js).
  * @param {string} sValue
  * @returns {string}
  */
@@ -310,12 +229,8 @@ function SanitizeIdFieldValue(sValue)
 }
 
 /*
- * ДОБАВЛЕНО (10.09.2026, переносимость на разные страницы): убирает из URL старое
- * значение указанного GET-параметра (если оно там есть), не трогая остальную часть
- * адреса. Нужно, чтобы модалка могла делать redirect на ТУ ЖЕ страницу, на которой её
- * открыли (а не на захардкоженный адрес) -- сначала стираем старые фильтры из текущего
- * URL, потом дописываем новые (см. "ПЕРЕНОСИМОСТЬ" в шапке файла). Без regex -- через
- * тот же штатный строковый API, что и GetQueryParam().
+ * Убирает из URL старое значение указанного GET-параметра, не трогая остальную часть
+ * адреса -- нужно для переносимости (redirect на ТУ ЖЕ страницу, откуда открыли).
  * @param {string} sUrl
  * @param {string} sParamName
  * @returns {string}   -   URL без этого параметра (если параметра не было -- вернёт как есть).
@@ -326,8 +241,6 @@ function RemoveQueryParam(sUrl, sParamName)
 
     iUrlLen = StrLen(sUrl);
 
-    // Случай 1: параметр не первый -- ищем "&имя=" и убираем его целиком вместе со
-    // значением, до следующего "&" или до конца строки.
     sAmpMarker = "&" + sParamName + "=";
     iMarkerPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
     if (iMarkerPos != undefined)
@@ -339,8 +252,6 @@ function RemoveQueryParam(sUrl, sParamName)
         return sBefore + sAfter;
     }
 
-    // Случай 2: параметр первый сразу после "?" -- "?" оставляем, а если следом шёл
-    // "&" следующего параметра -- он становится новой границей после "?".
     sQMarkMarker = "?" + sParamName + "=";
     iMarkerPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
     if (iMarkerPos != undefined)
@@ -352,7 +263,6 @@ function RemoveQueryParam(sUrl, sParamName)
         return sBefore + sAfter;
     }
 
-    // Параметра не было -- ничего менять не нужно.
     return sUrl;
 }
 
@@ -369,17 +279,13 @@ try
     oForm = new Object();
     oForm.command = "display_form";
     oForm.height = 320;
-    oForm.title = "Фильтры отчёта (Восток)";
+    oForm.title = "Фильтры отчёта (Процент обученных)";
     oForm.message = null;
 
     DebugAlert("3. Строим GetMacroregionEntries()");
     aMacroregionEntries = GetMacroregionEntries();
     DebugAlert("4. GetMacroregionEntries() построен, пунктов: " + ArrayCount(aMacroregionEntries));
 
-    // ДОБАВЛЕНО (10.09.2026, запоминание фильтров): читаем текущий URL страницы --
-    // если фильтры туда уже попали через предыдущий "Применить", используем их как
-    // значения по умолчанию вместо "". Если Request недоступен (sModalPageUrl == "") --
-    // GetQueryParam() всё равно вернёт "" на любое имя, ничего не ломается.
     DebugAlert("3b. Читаем текущий URL страницы для восстановления фильтров (сначала параметр cur_page_url, потом Request.Url)");
     sModalPageUrl = GetCurPageUrlSafe();
     DebugAlert("3b2. Итоговый URL, который используем: [" + sModalPageUrl + "]");
@@ -388,26 +294,9 @@ try
     sDefaultMirCodeID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "mir_code_id"));
     sDefaultPositionCommonID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "position_common_id"));
     sDefaultProgramID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "program_id"));
-
-    // ДОБАВЛЕНО (10.09.2026, режим ТЭП-отчёта): "result_type" -- НЕ фильтр сотрудников,
-    // а переключатель того, КАКОЙ из 4 отчётов ТЭП показывать (Общее/План/Факт/
-    // Обязательно, см. HREDU-183_tep_reports.js). Раньше это было фиксированное
-    // значение на вкладке "Параметры" отдельного виджета (нужно было 4 разных виджета) --
-    // теперь пользователь выбирает режим прямо в этой модалке, вместе с остальными
-    // фильтрами, и он же попадает в URL -- значит на странице достаточно ОДНОГО виджета
-    // "Табличные данные" (HREDU-183_tep_reports.js сам переключает поведение по URL).
-    // Дефолт -- "total" (Общее), а не "" -- select-полю нужно совпадающее значение
-    // из entries ниже, иначе платформа может повести себя непредсказуемо (по аналогии
-    // с историей про "0" для picker-полей, см. SanitizeIdFieldValue выше).
-    sDefaultResultType = GetQueryParam(sModalPageUrl, "result_type");
-    if (sDefaultResultType == "")
-    {
-        sDefaultResultType = "total";
-    }
-
     DebugAlert("3c. Значения по умолчанию из URL: matrix_id=[" + sDefaultMatrixID + "] macroregion=[" + sDefaultMacroregion
         + "] mir_code_id=[" + sDefaultMirCodeID + "] position_common_id=[" + sDefaultPositionCommonID
-        + "] program_id=[" + sDefaultProgramID + "] result_type=[" + sDefaultResultType + "]");
+        + "] program_id=[" + sDefaultProgramID + "]");
 
     oForm.form_fields = [
         {
@@ -462,26 +351,6 @@ try
             multiple: false,
             catalog: "education_method",
             query_qual: ""
-        },
-        {
-            // ИСПРАВЛЕНО (14.09.2026): mandatory БЫЛ true -- но эту же модалку теперь
-            // вешаем ещё и на страницы, которые result_type вообще НЕ используют
-            // ("Восток полный список", "Процент обученных" -- см. HREDU-182_procent_obuchennyh.js,
-            // он этот параметр не читает). Обязательный выбор непонятного поля на
-            // странице, где оно ни на что не влияет, -- плохой UX. Сделано необязательным,
-            // дефолт "Общее кол-во" (total) -- странице, которой всё равно, лишний
-            // параметр в URL не мешает.
-            name: "result_type",
-            label: "Режим отчёта (только для страниц ТЭП)",
-            type: "select",
-            value: sDefaultResultType,
-            entries: [
-                { name: "Общее кол-во", value: "total" },
-                { name: "План", value: "plan" },
-                { name: "Факт", value: "fact" },
-                { name: "Обязательно к прохождению", value: "mandatory" }
-            ],
-            mandatory: false
         }
     ];
     DebugAlert("5. oForm.form_fields собран, полей: " + ArrayCount(oForm.form_fields));
@@ -505,20 +374,12 @@ try
             iMirCodeID = OptInt(getFormField("mir_code_id", ""), 0);
             iPositionCommonID = OptInt(getFormField("position_common_id", ""), 0);
             iProgramID = OptInt(getFormField("program_id", ""), 0);
-            sResultType = String(getFormField("result_type", "total"));
-            DebugAlert("7b. matrix_id=" + iMatrixID + " macroregion=[" + sMacroregion + "] mir_code_id=" + iMirCodeID + " position_common_id=" + iPositionCommonID + " program_id=" + iProgramID + " result_type=[" + sResultType + "]");
+            DebugAlert("7b. matrix_id=" + iMatrixID + " macroregion=[" + sMacroregion + "] mir_code_id=" + iMirCodeID + " position_common_id=" + iPositionCommonID + " program_id=" + iProgramID);
 
             sMirCodeText = ResolveMirCodeText(iMirCodeID);
             DebugAlert("7c. mir_code резолвлен в текст: [" + sMirCodeText + "]");
 
-            // ИЗМЕНЕНО (10.09.2026, ПЕРЕНОСИМОСТЬ на разные страницы): раньше redirect шёл
-            // на захардкоженный тестовый адрес -- значит эту же модалку нельзя было
-            // повесить на другую страницу (например, на страницы ТЭП-отчётов) без правки
-            // кода. Теперь берём ТЕКУЩУЮ страницу (sModalPageUrl, уже прочитан выше для
-            // восстановления значений полей), стираем из неё старые значения фильтров
-            // (если модалку открывали не в первый раз) и дописываем новые -- так одна и
-            // та же модалка работает на любой странице, куда её повесят, и всегда
-            // возвращает на ту же страницу, откуда её открыли.
+            // Переносимость: redirect на ТУ ЖЕ страницу, откуда открыли модалку.
             sCleanBaseUrl = sModalPageUrl;
             sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "matrix_id");
             sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "macroregion");
@@ -526,29 +387,18 @@ try
             sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "mir_code");
             sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "position_common_id");
             sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "program_id");
-            sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "result_type");
             DebugAlert("7c2. Текущая страница без старых фильтров: [" + sCleanBaseUrl + "]");
 
-            // Родная функция платформы -- сама собирает "имя1=значение1&имя2=значение2&..."
-            // и кодирует значения в той же схеме, что понимает UrlDecode() на стороне выборки.
-            // mir_code_id ДОБАВЛЕН (10.09.2026) -- отчёту не нужен (он фильтрует по тексту
-            // mir_code, как и раньше), нужен ТОЛЬКО модалке, чтобы при следующем открытии
-            // восстановить значение picker'а по ID, а не по тексту (см. "НЮАНС с мир-кодом"
-            // в шапке файла).
             oQueryParams = {
                 matrix_id: String(iMatrixID),
                 macroregion: sMacroregion,
                 mir_code: sMirCodeText,
                 mir_code_id: String(iMirCodeID),
                 position_common_id: String(iPositionCommonID),
-                program_id: String(iProgramID),
-                result_type: sResultType
+                program_id: String(iProgramID)
             };
             sQueryString = UrlEncodeQuery(oQueryParams);
 
-            // Разделитель зависит от того, остался ли в sCleanBaseUrl хоть один "?"
-            // (страница почти наверняка сохранит свой собственный параметр вроде
-            // mode=... -- мы стираем только 6 фильтров, не всю строку запроса).
             sSeparator = (StrOptSubStrPos(sCleanBaseUrl, "?", false) != undefined ? "&" : "?");
             sFullUrl = sCleanBaseUrl + sSeparator + sQueryString;
             DebugAlert("7d. Итоговый URL redirect: " + sFullUrl);
@@ -560,17 +410,6 @@ try
                     url: sFullUrl
                 }
             };
-
-            // ЗАПАСНОЙ ВАРИАНТ (проверочный alert вместо редиректа) -- если после починки
-            // регэкспа модалка открывается, но именно redirect не срабатывает -- раскомментируй
-            // этот блок вместо oForm выше, чтобы отдельно проверить, что сами значения полей
-            // (picker'ы/select) верны, независимо от механизма передачи в отчёт:
-            //
-            // oForm = {
-            //     command: "alert",
-            //     msg: ("Выбранные фильтры (проверочный вывод):<br/><pre>" + sFullUrl + "</pre>"),
-            //     title: "Фильтры применены (пока без связи с отчётом)"
-            // };
 
             DebugAlert("7e. Ветка apply завершена, RESULT будет = close_form/redirect");
             break;
@@ -592,11 +431,9 @@ try
 }
 catch (_exMain)
 {
-    // ГЛАВНАЯ ЗАЩИТА (09.09.2026): если где-то в коде выше вылетит ЛЮБАЯ ошибка --
-    // вместо "ничего не происходит"/пустого падения покажем alert с точным текстом.
     RESULT = {
         command: "alert",
-        msg: ("Ошибка в модалке фильтров (HREDU-183_filtry_modal_shag1.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
+        msg: ("Ошибка в модалке фильтров (HREDU_182_filtry_percent.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
         title: "ОШИБКА"
     };
 }
