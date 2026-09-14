@@ -1,51 +1,48 @@
 // =====================================================================
-// HREDU-182. Диагностика: сверка арифметики отчёта "Процент обученных"
-// (HREDU-182_procent_obuchennyh.js) для ОДНОЙ И ТОЙ ЖЕ матрицы+фильтров.
+// HREDU-182. Диагностика: "сырой" дамп аудитории/фактической базы для отчёта
+// "Процент обученных" -- НЕ арифметика (её мы уже сверили в
+// HREDU-182_diagnostic_procent_crosscheck.js, все тождества были "OK"), а ГЛАЗАМИ
+// проверяемые списки людей, чтобы найти РАСХОЖДЕНИЕ С РЕАЛЬНОСТЬЮ (пользователь
+// 14.09.2026: "мне кажется, что данные не совпадают с реальными данными").
 //
-// ЗАЧЕМ (запрошено пользователем 14.09.2026, "не уверен, что данные которые строит
-// отчёт корректны"): по аналогии с уже проверенной техникой для ТЭП-отчётов
-// (HREDU-183_diagnostic_tep_crosscheck.js, все 3 тождества дали "OK" на реальных
-// данных 44/44/98/8) -- строим ДВА НЕЗАВИСИМЫХ расчёта в одном скрипте и сверяем их,
-// вместо того чтобы гадать глазами по таблице:
+// ПОЧЕМУ арифметика "OK", а данные всё равно могут быть неправильными: crosscheck
+// проверяет, что ЧИСЛА ВНУТРИ СЕБЯ согласованы (сумма по городам = целиком по матрице,
+// total = mandatory + пройдено-в-аудитории и т.д.) -- это гарантирует, что КОД считает
+// без внутренних противоречий, но НЕ гарантирует, что сама БИЗНЕС-ЛОГИКА (кто входит в
+// "аудиторию матрицы") соответствует реальности. Судя по двум присланным прогонам:
+//   -- матрица 1 (Матрица ТЭП, фильтры macroregion=Москва + mir_code=LASM):
+//      аудитория = 0 человек, а Факт = 82 -- то есть НИКТО формально не входит в
+//      аудиторию этой матрицы по её собственным критериям (position_common_id/
+//      mir_code_id матрицы), хотя 82 человека программу уже прошли.
+//   -- матрица 2 (Матрица тест 3, без ручных фильтров): аудитория = 44 человека, и
+//      ВСЕ 44 -- в Москве (0 в любом другом городе), хотя Факт разбросан по ~70 городам.
+// Это МОЖЕТ быть правдой (аудитория матрицы правда узкая и московская), а МОЖЕТ быть
+// признаком того, что аудитория матрицы вообще не должна определяться ТОЛЬКО через
+// position_common_id/mir_code_id САМОЙ матрицы (см. GetMatrixAudienceCollaboratorRows()
+// в HREDU-182_procent_obuchennyh.js) -- этот скрипт даёт СПИСКИ, а не числа, чтобы можно
+// было сверить с тем, что ты реально знаешь про этих людей/матрицу.
 //
-//   Расчёт А (ПО ГОРОДАМ) -- 1:1 копия логики HREDU-182_procent_obuchennyh.js: два
-//   цикла (аудитория -> total/mandatory, без-аудитории -> fact), группировка по городу
-//   через FindCity()/GetOrCreateCityAcc(), + добавлено ОДНО новое накопление --
-//   completed_in_audience ПО ГОРОДУ (сколько из аудитории этого города уже прошли) --
-//   этого числа нет в самом отчёте, оно нужно только для тождества здесь.
+// ЧТО ПОКАЗЫВАЕТ:
+//   1. Сырые аудиторные критерии САМОЙ матрицы (position_common_id/mir_code_id) --
+//      резолвлены в текст, чтобы можно было прочитать глазами, что это за роль/мир-код.
+//   2. Размер аудитории БЕЗ ручных фильтров (macroregion/mir_code/position/program) --
+//      сколько человек вообще подходит под критерии матрицы, до применения твоих
+//      фильтров из URL. Если это тоже 0 или тоже "все в одном городе" -- значит дело в
+//      самой матрице/критериях, а не в твоих ручных фильтрах.
+//   3. Список (до 200 строк) сотрудников из АУДИТОРИИ (с ручными фильтрами, т.е. та
+//      же аудитория, что фактически участвует в отчёте) -- id + город + типовая
+//      должность (текст) + мир-коды (текст).
+//   4. Список (до 200 строк) сотрудников из ФАКТ-базы (прошли обучение, БЕЗ
+//      ограничения аудиторией) -- id + город + дата прохождения -- чтобы сверить,
+//      реальны ли эти 82/407 "прошедших".
 //
-//   Расчёт Б (ЦЕЛИКОМ ПО МАТРИЦЕ, БЕЗ городов) -- та же логика, что уже подтверждена в
-//   HREDU-183_diagnostic_tep_crosscheck.js (CountPairs() по всей аудитории/факт-базе
-//   сразу, без группировки) -- считает total/mandatory/fact/completed_in_audience
-//   ОДНИМ проходом, никак не завязанным на понятие "город".
-//
-// ПРОВЕРКИ:
-//   1) ИТОГОВАЯ СВЕРКА: сумма по городам (расчёт А) должна СОВПАСТЬ с числом по всей
-//      матрице (расчёт Б) для каждой из 4 величин (total/mandatory/fact/
-//      completed_in_audience). Если совпало -- разбивка по городам не теряет и не
-//      дублирует людей относительно уже провalidated расчёта из HREDU-183.
-//   2) ПОГОРОДНЫЕ ТОЖДЕСТВА (те же 2 из 3, что в HREDU-183 -- "план==total" тут не
-//      нужно повторять для каждого города, это тривиально по построению):
-//        а) total(город) == mandatory(город) + completed_in_audience(город)
-//        б) fact(город) >= completed_in_audience(город)
-//   3) ПРОВЕРКА НА ДУБЛИ: XQuery иногда может вернуть один и тот же collaborator
-//      несколько раз (например при неаккуратном join) -- считаем count(distinct id) и
-//      сверяем с обычным count(). Несовпадение -- сигнал задвоения исходных данных
-//      (не ошибка бизнес-логики, а проблема данных/запроса).
-//
-// Если ВСЁ "OK" -- это сильное свидетельство, что арифметика разбивки по городам верна
-// (сама бизнес-логика total/plan/fact/mandatory/percent уже была отдельно подтверждена
-// сверкой с реальным примером таблицы -- см. шапку HREDU-182_procent_obuchennyh.js).
-//
-// КАК ЗАПУСТИТЬ: как обычная выборка "Табличные данные", НА СТРАНИЦЕ, где в URL уже
-// есть matrix_id и остальные фильтры (после "Применить" в HREDU-183_filtry_modal_shag1.js
-// или HREDU_182_filtry_percent.js -- любая из двух модалок подойдёт, читаются только
-// 5 общих фильтров, result_type не используется).
+// КАК ЗАПУСТИТЬ: как обычная выборка "Табличные данные", на странице с уже
+// применёнными фильтрами (matrix_id обязателен в URL).
 // =====================================================================
 
 DEBUG = true;
 LOG_NAME = "agent";
-CUR_OBJECT_ID = 0; // TODO: заполнить после создания документа в админке (LogAlert защищена try/catch)
+CUR_OBJECT_ID = 0; // TODO: заполнить после создания документа в админке
 
 function LogAlert(typeLog, message)
 {
@@ -55,13 +52,12 @@ function LogAlert(typeLog, message)
     }
     catch (_exLog)
     {
-        // ничего -- сбой логирования не должен ронять основной код
+        // ничего
     }
 }
 
 //-------------------------------------------------------------------------
-//              Продублированные функции (см. HREDU-182_procent_obuchennyh.js /
-//              HREDU-183_diagnostic_tep_crosscheck.js -- без повторной документации)
+//              Продублированные функции (см. HREDU-182_procent_obuchennyh.js)
 //-------------------------------------------------------------------------
 
 function GetRequestUrlSafe()
@@ -223,11 +219,37 @@ function CollaboratorHasMirCode(mirCodeRows, collaboratorID, mirCodeFilter)
     return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
 }
 
+/*
+ * Все мир-коды сотрудника КАК ТЕКСТ, через "|" -- для дампа (в отличие от
+ * CollaboratorHasMirCode, который проверяет только ОДИН конкретный код).
+ */
+function GetMirCodesText(mirCodeRows, collaboratorID)
+{
+    var row, codes;
+    row = ArrayOptFind(mirCodeRows, "Int(This.id) == Int(collaboratorID)");
+    if (row == undefined) { return ""; }
+    codes = ExtractMirCodes(row.mir_codes);
+    return ArrayMerge(codes, "This", "|");
+}
+
 function ResolveMirCodeText(iMirCodeID)
 {
     if (OptInt(iMirCodeID, 0) <= 0) { return ""; }
     try { return String(tools.open_doc(Int(iMirCodeID)).TopElem.name); }
     catch (_ex) { return ""; }
+}
+
+/*
+ * НОВОЕ (эта диагностика): резолвит ID типовой должности (position_common) в текст --
+ * та же схема, что ResolveMirCodeText(), только другой каталог.
+ * @param {number} iPositionCommonID
+ * @returns {string}
+ */
+function ResolvePositionCommonText(iPositionCommonID)
+{
+    if (OptInt(iPositionCommonID, 0) <= 0) { return "(не задано)"; }
+    try { return String(tools.open_doc(Int(iPositionCommonID)).TopElem.name) + " (id=" + iPositionCommonID + ")"; }
+    catch (_ex) { return "ОШИБКА резолва id=" + iPositionCommonID + ": " + ExtractUserError(_ex); }
 }
 
 function GetMatrixAudienceCollaboratorRows(matrixDoc, collaboratorRows)
@@ -327,65 +349,7 @@ function FindCompletionDate(dateRows, collaboratorID, programID)
     return (dateRow != undefined ? StrDate(Date(dateRow.first_date), false) : "");
 }
 
-/*
- * Считает кол-во пар "сотрудник x программа" и, отдельно, кол-во таких пар с уже
- * заполненной датой прохождения -- РАСЧЁТ Б (целиком, без городов). Идентична функции
- * из HREDU-183_diagnostic_tep_crosscheck.js.
- * @returns {Object}   -   { totalPairs, completedPairs }
- */
-function CountPairs(collaboratorRows, programIds, dateRows)
-{
-    var i, j, totalPairs, completedPairs, sDate;
-    totalPairs = 0;
-    completedPairs = 0;
-    for (i = 0; i < ArrayCount(collaboratorRows); i++)
-    {
-        for (j = 0; j < ArrayCount(programIds); j++)
-        {
-            totalPairs = totalPairs + 1;
-            sDate = FindCompletionDate(dateRows, Int(collaboratorRows[i].id), programIds[j]);
-            if (sDate != "") { completedPairs = completedPairs + 1; }
-        }
-    }
-    return { totalPairs: totalPairs, completedPairs: completedPairs };
-}
-
-/*
- * РАСЧЁТ А (по городам) -- находит/создаёт накопитель города; добавлено новое поле
- * completedInAudience (нет в самом отчёте HREDU-182_procent_obuchennyh.js -- нужно
- * только здесь, для тождества "total == mandatory + completedInAudience" по городу).
- */
-function GetOrCreateCityAcc(acc, sCity)
-{
-    var i;
-    for (i = 0; i < ArrayCount(acc); i++)
-    {
-        if (acc[i].city == sCity) { return acc[i]; }
-    }
-    var newAcc;
-    newAcc = { city: sCity, total: 0, mandatory: 0, fact: 0, completedInAudience: 0 };
-    acc.push(newAcc);
-    return newAcc;
-}
-
-/*
- * Кол-во РАЗЛИЧНЫХ (distinct) id в массиве строк-сотрудников -- для проверки на дубли
- * (см. "ПРОВЕРКА НА ДУБЛИ" в шапке файла). Без regex/непроверенных функций -- обычный
- * цикл + поиск в уже накопленном списке (тот же приём, что и GetOrCreateCityAcc).
- * @param {Object[]} collaboratorRows
- * @returns {number}
- */
-function CountDistinctIds(collaboratorRows)
-{
-    var seenIds, i, id;
-    seenIds = [];
-    for (i = 0; i < ArrayCount(collaboratorRows); i++)
-    {
-        id = Int(collaboratorRows[i].id);
-        if (!IdArrayContains(seenIds, id)) { seenIds.push(id); }
-    }
-    return ArrayCount(seenIds);
-}
+var MAX_DUMP_ROWS = 200;
 
 //-------------------------------------------------------------------------
 //              Точка входа
@@ -393,17 +357,13 @@ function CountDistinctIds(collaboratorRows)
 
 function Run()
 {
-    LogAlert(2, "Run(). НАЧАЛО (диагностика сверки Процент обученных)");
+    LogAlert(2, "Run(). НАЧАЛО (диагностика -- сырой дамп Процент обученных)");
     var sFullUrl, matrixId, matrixDoc, matrixName, iProgramFilter, sMacroregionFilter, sMirCodeFilter, iPositionFilter;
     var programIds, filteredProgramIds, i, j;
-    var activeRows, audienceRows, audienceFilteredRows, factBaseFilteredRows;
-    var macroRows, cityRows, dateRows;
-    var acc, cityAcc, sCity, sDate, row;
-    var sumTotal, sumMandatory, sumFact, sumCompletedInAudience;
-    var wholeCounts, factWholeCounts, nWholeTotal, nWholeMandatory, nWholeFact, nWholeCompletedInAudience;
-    var checkTotal, checkMandatory, checkFact, checkCompleted;
-    var nAudienceDistinct, nAudienceRaw, nFactBaseDistinct, nFactBaseRaw, checkAudienceDup, checkFactBaseDup;
-    var resultRows, id;
+    var activeRows, audienceRowsNoManualFilters, audienceFilteredRows, factBaseFilteredRows;
+    var macroRows, cityRows, mirCodeRows, dateRows;
+    var iAudiencePositionCommonId, iAudienceMirCodeId, sAudienceMirCodeText, sAudiencePositionText;
+    var resultRows, id, row, sCity, sHasCompletedAny, sDate, nProgramsCompleted;
 
     RESULT = [];
 
@@ -420,14 +380,13 @@ function Run()
 
         if (matrixId == 0)
         {
-            throw ("Не передан matrix_id -- открой эту диагностику на странице, где в URL уже есть фильтры (после \"Применить\" в любой из двух модалок)");
+            throw ("Не передан matrix_id -- открой эту диагностику на странице, где в URL уже есть фильтры");
         }
 
         matrixDoc = tools.open_doc(matrixId).TopElem;
         matrixName = String(matrixDoc.name);
 
         programIds = ResolveProgramIds(matrixId, matrixName);
-
         if (iProgramFilter > 0)
         {
             filteredProgramIds = [];
@@ -441,151 +400,106 @@ function Run()
         activeRows = GetActiveCollaboratorRows();
         macroRows = GetMacroregionRows();
         cityRows = GetCityRows();
+        mirCodeRows = GetMirCodeRows();
         dateRows = GetCompletionDateRows(programIds);
 
-        // --- Пул "аудитория матрицы" (для total/mandatory/completedInAudience) ---
-        audienceRows = GetMatrixAudienceCollaboratorRows(matrixDoc, activeRows);
-        audienceFilteredRows = ApplyManualFilters(audienceRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
+        iAudiencePositionCommonId = OptInt(matrixDoc.position_common_id, 0);
+        iAudienceMirCodeId = OptInt(matrixDoc.mir_code_id, 0);
+        sAudienceMirCodeText = ResolveMirCodeText(iAudienceMirCodeId);
+        sAudiencePositionText = ResolvePositionCommonText(iAudiencePositionCommonId);
 
-        // --- Пул "без аудитории" (для fact) ---
+        // Аудитория БЕЗ ручных фильтров пользователя -- ТОЛЬКО критерии самой матрицы.
+        audienceRowsNoManualFilters = GetMatrixAudienceCollaboratorRows(matrixDoc, activeRows);
+
+        // Аудитория С ручными фильтрами -- то, что реально используется в самом отчёте.
+        audienceFilteredRows = ApplyManualFilters(audienceRowsNoManualFilters, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
+
+        // База для Факт -- без ограничения аудиторией матрицы, только ручные фильтры.
         factBaseFilteredRows = ApplyManualFilters(activeRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
-
-        // ===================== РАСЧЁТ А: ПО ГОРОДАМ =====================
-        acc = [];
-        for (i = 0; i < ArrayCount(audienceFilteredRows); i++)
-        {
-            sCity = FindCity(cityRows, Int(audienceFilteredRows[i].id));
-            cityAcc = GetOrCreateCityAcc(acc, sCity);
-            for (j = 0; j < ArrayCount(programIds); j++)
-            {
-                sDate = FindCompletionDate(dateRows, Int(audienceFilteredRows[i].id), programIds[j]);
-                cityAcc.total = cityAcc.total + 1;
-                if (sDate == "") { cityAcc.mandatory = cityAcc.mandatory + 1; }
-                else { cityAcc.completedInAudience = cityAcc.completedInAudience + 1; }
-            }
-        }
-        for (i = 0; i < ArrayCount(factBaseFilteredRows); i++)
-        {
-            sCity = FindCity(cityRows, Int(factBaseFilteredRows[i].id));
-            cityAcc = GetOrCreateCityAcc(acc, sCity);
-            for (j = 0; j < ArrayCount(programIds); j++)
-            {
-                sDate = FindCompletionDate(dateRows, Int(factBaseFilteredRows[i].id), programIds[j]);
-                if (sDate != "") { cityAcc.fact = cityAcc.fact + 1; }
-            }
-        }
-
-        sumTotal = 0; sumMandatory = 0; sumFact = 0; sumCompletedInAudience = 0;
-        for (i = 0; i < ArrayCount(acc); i++)
-        {
-            sumTotal = sumTotal + acc[i].total;
-            sumMandatory = sumMandatory + acc[i].mandatory;
-            sumFact = sumFact + acc[i].fact;
-            sumCompletedInAudience = sumCompletedInAudience + acc[i].completedInAudience;
-        }
-
-        // ===================== РАСЧЁТ Б: ЦЕЛИКОМ, БЕЗ ГОРОДОВ =====================
-        wholeCounts = CountPairs(audienceFilteredRows, programIds, dateRows);
-        nWholeTotal = wholeCounts.totalPairs;
-        nWholeMandatory = wholeCounts.totalPairs - wholeCounts.completedPairs;
-        nWholeCompletedInAudience = wholeCounts.completedPairs;
-
-        factWholeCounts = CountPairs(factBaseFilteredRows, programIds, dateRows);
-        nWholeFact = factWholeCounts.completedPairs;
-
-        LogAlert(1, "Run(). А: sumTotal=" + sumTotal + " sumMandatory=" + sumMandatory + " sumFact=" + sumFact
-            + " sumCompletedInAudience=" + sumCompletedInAudience);
-        LogAlert(1, "Run(). Б: nWholeTotal=" + nWholeTotal + " nWholeMandatory=" + nWholeMandatory + " nWholeFact=" + nWholeFact
-            + " nWholeCompletedInAudience=" + nWholeCompletedInAudience);
-
-        checkTotal = (sumTotal == nWholeTotal);
-        checkMandatory = (sumMandatory == nWholeMandatory);
-        checkFact = (sumFact == nWholeFact);
-        checkCompleted = (sumCompletedInAudience == nWholeCompletedInAudience);
-
-        // ===================== ПРОВЕРКА НА ДУБЛИ =====================
-        nAudienceRaw = ArrayCount(audienceFilteredRows);
-        nAudienceDistinct = CountDistinctIds(audienceFilteredRows);
-        checkAudienceDup = (nAudienceRaw == nAudienceDistinct);
-
-        nFactBaseRaw = ArrayCount(factBaseFilteredRows);
-        nFactBaseDistinct = CountDistinctIds(factBaseFilteredRows);
-        checkFactBaseDup = (nFactBaseRaw == nFactBaseDistinct);
 
         resultRows = [];
         id = 0;
 
         id = id + 1;
-        resultRows.push({ id: id, metric: "matrix_id / название матрицы", value: matrixId + " / " + matrixName, check: "" });
+        resultRows.push({ id: id, section: "ШАПКА", field: "matrix_id / название матрицы", value: matrixId + " / " + matrixName });
         id = id + 1;
-        resultRows.push({ id: id, metric: "Фильтры (macroregion/mir_code/position_common_id/program_id)",
-            value: "[" + sMacroregionFilter + "] / [" + sMirCodeFilter + "] / " + iPositionFilter + " / " + iProgramFilter, check: "" });
+        resultRows.push({ id: id, section: "ШАПКА", field: "Программ в матрице (после фильтра program_id)", value: String(ArrayCount(programIds)) });
         id = id + 1;
-        resultRows.push({ id: id, metric: "Программ в матрице (после фильтра program_id)", value: String(ArrayCount(programIds)), check: "" });
-        id = id + 1;
-        resultRows.push({ id: id, metric: "Городов в разбивке (расчёт А, включая \"(без города)\", без \"Общий итог\")", value: String(ArrayCount(acc)), check: "" });
+        resultRows.push({ id: id, section: "ШАПКА", field: "Ручные фильтры (macroregion/mir_code/position_common_id/program_id)",
+            value: "[" + sMacroregionFilter + "] / [" + sMirCodeFilter + "] / " + iPositionFilter + " / " + iProgramFilter });
 
         id = id + 1;
-        resultRows.push({ id: id, metric: "-- 1) ПРОВЕРКА НА ДУБЛИ (сырые строки XQuery vs distinct id) --", value: "", check: "" });
+        resultRows.push({ id: id, section: "1. АУДИТОРНЫЕ КРИТЕРИИ САМОЙ МАТРИЦЫ (сырые поля matrixDoc)", field: "", value: "" });
         id = id + 1;
-        resultRows.push({ id: id, metric: "Аудитория матрицы: строк / уникальных id", value: nAudienceRaw + " / " + nAudienceDistinct, check: (checkAudienceDup ? "OK" : "ДУБЛИ!") });
+        resultRows.push({ id: id, section: "1. АУДИТОРНЫЕ КРИТЕРИИ", field: "matrixDoc.position_common_id (типовая должность аудитории)", value: sAudiencePositionText });
         id = id + 1;
-        resultRows.push({ id: id, metric: "База для Факт (без аудитории): строк / уникальных id", value: nFactBaseRaw + " / " + nFactBaseDistinct, check: (checkFactBaseDup ? "OK" : "ДУБЛИ!") });
+        resultRows.push({ id: id, section: "1. АУДИТОРНЫЕ КРИТЕРИИ", field: "matrixDoc.mir_code_id (мир-код аудитории)", value: "id=" + iAudienceMirCodeId + ", текст=[" + sAudienceMirCodeText + "]" });
+        id = id + 1;
+        resultRows.push({ id: id, section: "1. АУДИТОРНЫЕ КРИТЕРИИ", field: "Аудитория БЕЗ ручных фильтров (только критерии матрицы выше)", value: String(ArrayCount(audienceRowsNoManualFilters)) + " человек" });
+        id = id + 1;
+        resultRows.push({ id: id, section: "1. АУДИТОРНЫЕ КРИТЕРИИ", field: "Аудитория С ручными фильтрами (то, что реально в отчёте)", value: String(ArrayCount(audienceFilteredRows)) + " человек" });
+        id = id + 1;
+        resultRows.push({ id: id, section: "1. АУДИТОРНЫЕ КРИТЕРИИ", field: "База для Факт (без аудитории, только ручные фильтры)", value: String(ArrayCount(factBaseFilteredRows)) + " человек" });
 
         id = id + 1;
-        resultRows.push({ id: id, metric: "-- 2) ИТОГОВАЯ СВЕРКА: сумма по городам (А) vs целиком по матрице (Б) --", value: "", check: "" });
-        id = id + 1;
-        resultRows.push({ id: id, metric: "total: сумма по городам vs целиком", value: sumTotal + " vs " + nWholeTotal, check: (checkTotal ? "OK" : "MISMATCH!") });
-        id = id + 1;
-        resultRows.push({ id: id, metric: "mandatory: сумма по городам vs целиком", value: sumMandatory + " vs " + nWholeMandatory, check: (checkMandatory ? "OK" : "MISMATCH!") });
-        id = id + 1;
-        resultRows.push({ id: id, metric: "fact: сумма по городам vs целиком", value: sumFact + " vs " + nWholeFact, check: (checkFact ? "OK" : "MISMATCH!") });
-        id = id + 1;
-        resultRows.push({ id: id, metric: "(справочно) пройдено-в-аудитории: сумма по городам vs целиком", value: sumCompletedInAudience + " vs " + nWholeCompletedInAudience, check: (checkCompleted ? "OK" : "MISMATCH!") });
-
-        id = id + 1;
-        resultRows.push({ id: id, metric: "-- 3) ПОГОРОДНЫЕ ТОЖДЕСТВА (для каждого города отдельно) --", value: "", check: "" });
-        for (i = 0; i < ArrayCount(acc); i++)
+        resultRows.push({ id: id, section: "2. СПИСОК АУДИТОРИИ (та, что в отчёте) -- id/город/должность/мир-коды -- до " + MAX_DUMP_ROWS + " строк", field: "", value: "" });
+        for (i = 0; i < ArrayCount(audienceFilteredRows) && i < MAX_DUMP_ROWS; i++)
         {
-            row = acc[i];
+            row = audienceFilteredRows[i];
+            sCity = FindCity(cityRows, Int(row.id));
+            nProgramsCompleted = 0;
+            for (j = 0; j < ArrayCount(programIds); j++)
+            {
+                sDate = FindCompletionDate(dateRows, Int(row.id), programIds[j]);
+                if (sDate != "") { nProgramsCompleted = nProgramsCompleted + 1; }
+            }
             id = id + 1;
             resultRows.push({
                 id: id,
-                metric: "[" + row.city + "] total == mandatory + пройдено-в-аудитории",
-                value: row.total + " == " + row.mandatory + " + " + row.completedInAudience,
-                check: (row.total == (row.mandatory + row.completedInAudience) ? "OK" : "MISMATCH!")
+                section: "2. АУДИТОРИЯ",
+                field: "id=" + row.id + ", город=[" + sCity + "]",
+                value: "мир-коды=[" + GetMirCodesText(mirCodeRows, Int(row.id)) + "], пройдено программ (из " + ArrayCount(programIds) + "): " + nProgramsCompleted
             });
+        }
+        if (ArrayCount(audienceFilteredRows) > MAX_DUMP_ROWS)
+        {
             id = id + 1;
-            resultRows.push({
-                id: id,
-                metric: "[" + row.city + "] fact >= пройдено-в-аудитории",
-                value: row.fact + " >= " + row.completedInAudience,
-                check: (row.fact >= row.completedInAudience ? "OK" : "MISMATCH!")
-            });
+            resultRows.push({ id: id, section: "2. АУДИТОРИЯ", field: "-- обрезано, показаны первые " + MAX_DUMP_ROWS + " из " + ArrayCount(audienceFilteredRows) + " --", value: "" });
         }
 
         id = id + 1;
-        resultRows.push({ id: id, metric: "-- 4) СПРАВОЧНО: сами числа по городам (для визуальной сверки с реальными данными) --", value: "", check: "" });
-        for (i = 0; i < ArrayCount(acc); i++)
+        resultRows.push({ id: id, section: "3. СПИСОК ПРОШЕДШИХ (Факт-база, есть хотя бы 1 завершённая программа) -- до " + MAX_DUMP_ROWS + " строк", field: "", value: "" });
+        j = 0;
+        for (i = 0; i < ArrayCount(factBaseFilteredRows) && j < MAX_DUMP_ROWS; i++)
         {
-            row = acc[i];
-            id = id + 1;
-            resultRows.push({
-                id: id,
-                metric: row.city,
-                value: "total=" + row.total + " mandatory=" + row.mandatory + " fact=" + row.fact + " completedInAudience=" + row.completedInAudience,
-                check: ""
-            });
+            row = factBaseFilteredRows[i];
+            nProgramsCompleted = 0;
+            var k;
+            for (k = 0; k < ArrayCount(programIds); k++)
+            {
+                sDate = FindCompletionDate(dateRows, Int(row.id), programIds[k]);
+                if (sDate != "") { nProgramsCompleted = nProgramsCompleted + 1; }
+            }
+            if (nProgramsCompleted > 0)
+            {
+                sCity = FindCity(cityRows, Int(row.id));
+                id = id + 1;
+                resultRows.push({
+                    id: id,
+                    section: "3. ФАКТ",
+                    field: "id=" + row.id + ", город=[" + sCity + "]",
+                    value: "пройдено программ (из " + ArrayCount(programIds) + "): " + nProgramsCompleted
+                });
+                j = j + 1;
+            }
         }
 
         RESULT = resultRows;
-        LogAlert(2, "Run(). Готово. checkTotal=" + checkTotal + " checkMandatory=" + checkMandatory
-            + " checkFact=" + checkFact + " checkCompleted=" + checkCompleted
-            + " checkAudienceDup=" + checkAudienceDup + " checkFactBaseDup=" + checkFactBaseDup);
+        LogAlert(2, "Run(). Готово, строк в результате: " + ArrayCount(RESULT));
     }
     catch (_ex)
     {
-        RESULT = [{ id: 0, metric: "ОШИБКА", value: ExtractUserError(_ex), check: "" }];
+        RESULT = [{ id: 0, section: "ОШИБКА", field: "ОШИБКА ВЕРХНЕГО УРОВНЯ", value: ExtractUserError(_ex) }];
         LogAlert(4, "Run(). ОШИБКА: " + ExtractUserError(_ex));
     }
     LogAlert(2, "Run(). КОНЕЦ");
@@ -595,7 +509,7 @@ Run();
 
 COLUMNS = [
     { "data": "id", "editable": true, "hidden": true, "sortable": false },
-    { "data": "metric", "title": "Показатель", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "50%" },
-    { "data": "value", "title": "Значение", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "35%" },
-    { "data": "check", "title": "Проверка", "type": "string", "editable": false, "sortable": false, "width": "15%" }
+    { "data": "section", "title": "Раздел", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "35%" },
+    { "data": "field", "title": "Поле", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "30%" },
+    { "data": "value", "title": "Значение", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "35%" }
 ];
