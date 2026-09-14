@@ -363,7 +363,7 @@ function Run()
     var activeRows, audienceRowsNoManualFilters, audienceFilteredRows, factBaseFilteredRows;
     var macroRows, cityRows, mirCodeRows, dateRows;
     var iAudiencePositionCommonId, iAudienceMirCodeId, sAudienceMirCodeText, sAudiencePositionText;
-    var resultRows, id, row, sCity, sHasCompletedAny, sDate, nProgramsCompleted;
+    var resultRows, id, row, sCity, sHasCompletedAny, sDate, nProgramsCompleted, k;
 
     RESULT = [];
 
@@ -474,7 +474,6 @@ function Run()
         {
             row = factBaseFilteredRows[i];
             nProgramsCompleted = 0;
-            var k;
             for (k = 0; k < ArrayCount(programIds); k++)
             {
                 sDate = FindCompletionDate(dateRows, Int(row.id), programIds[k]);
