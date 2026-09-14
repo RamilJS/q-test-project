@@ -1,92 +1,256 @@
 // =====================================================================
-// HREDU-182. "Процент обученных" -- выборка для Табличных данных.
+// HREDU-183. Шаг 1: модальное окно с фильтрами.
 //
-// ТЗ (из письма Антонова + "ТЗ Отчёт по матрицам", присланы пользователем 10.09
-// и 14.09.2026) + РЕАЛЬНЫЙ ПРИМЕР ОТЧЁТА, присланный 14.09.2026 ("Макрорегион ВОСТОК",
-// лист с колонками Город/Общее кол-во сотрудников/План/Факт/Процент/Обязательно к
-// прохождению, построчно по городам + итоговая строка "Общий итог").
+// ИСПРАВЛЕНИЕ (09.09.2026, аварийное): предыдущая версия ЛОМАЛА весь файл целиком --
+// даже стартовый display_form не открывался. Главный подозреваемый: UrlEncodeSafe()
+// использовала regex-литерал (/ /g) в запасной ветке -- скриптовый движок WebTutor,
+// судя по всему, НЕ поддерживает синтаксис регулярных выражений, и это ломает разбор
+// (компиляцию) всего файла целиком, а не только ветку "apply", где эта функция
+// реально вызывается. Regex убран (используется split/join без regex).
 //
-// РЕШЕНО С ПОЛЬЗОВАТЕЛЕМ (14.09.2026, через AskUserQuestion): реальный отчёт -- это
-// ТАБЛИЦА С РАЗБИВКОЙ ПО ГОРОДАМ (как в примере), а НЕ одна строка показателей на всю
-// матрицу (как можно было бы прочитать из ТЗ п.4 буквально -- там про "поле" в
-// единственном числе, но пример явно про таблицу).
+// ЗАЩИТА ОТ ПОВТОРЕНИЯ ТАКОГО ЖЕ СБОЯ: весь основной код теперь обёрнут в один
+// try/catch -- если где-то ещё есть невидимая проблема, вместо "ничего не происходит"
+// ты увидишь alert() с точным текстом ошибки (через ExtractUserError). Плюс по твоей
+// просьбе добавлены чек-пойнты DebugAlert() на каждом шаге -- если DEBUG = true, они
+// покажут alert() на каждой стадии, чтобы точно видеть, до какого места код доходит.
+// Когда всё заработает и надоест -- поставь DEBUG = false, чек-пойнты замолчат, но
+// try/catch-защита останется (она не зависит от DEBUG).
 //
-// Поле "город" -- custom_elem с именем "sity" (ПОДТВЕРЖДЕНО пользователем 14.09.2026,
-// прислал реальный XML документа collaborator: <custom_elem><name>sity</name>
-// <value>Санкт-Петербург</value></custom_elem>). ВНИМАНИЕ: имя технического поля
-// именно "sity" (с опечаткой, не "city") -- это НЕ опечатка в этом файле, так称
-// называется реальное поле в системе.
+// Устроено по образцу рабочего "Удаленное действие кнопки" (визард создания
+// заявки на подбор):
+//   - PARAMETERS.GetOptProperty("form_fields") / ("form_fields_default") --
+//     JSON-массивы полей формы, читаются через getParam()/getFormField().
+//   - oForm.command = "display_form" -- команда показать модальное окно.
+//   - Кнопки с submit_type определяют, что произойдёт при нажатии (обрабатывается
+//     через switch(sSubmitType) ниже).
 //
-// ЛОГИКА ПОДСЧЁТА (полностью повторяет HREDU-183_tep_reports.js -- см. "РЕШЕНИЯ" в его
-// шапке -- только теперь всё разбито по городам вместо одного общего числа):
-//   Общее (total)      -- аудитория матрицы (position_common_id+mir_code_id С САМОЙ
-//                          матрицы) + ручные фильтры пользователя, сгруппировано по
-//                          городу.
-//   План (plan)         -- = Общее (упрощение, период прохождения ещё не реализован,
-//                          см. открытый вопрос в HREDU-183_tep_reports.js).
-//   Факт (fact)          -- прошедшие тренинг, БЕЗ ограничения аудиторией матрицы
-//                          (см. ТЗ п.3 "не зависимо от условий матрицы"), но с теми же
-//                          ручными фильтрами, сгруппировано по городу.
-//   Обязательно (mandatory) -- аудитория матрицы МИНУС прошедшие (пустая дата).
-//   Процент (percent)    -- факт/план (округление до целого %, "-" если план = 0).
-//     Уточнено с пользователем 10.09.2026 (см. HREDU-183_tep_reports.js) -- в тексте ТЗ
-//     написано "план/факт", реально считаем факт/план, подтверждено сверкой с примером
-//     (Новосибирск: 10/11=91%, Красноярск: 9/10=90%, Итог: 70/72=97% -- ВСЕ совпадают
-//     ТОЛЬКО с факт/план, не план/факт).
+// Параметры удалённого действия (настраиваются в LPE у кнопки): form_fields --
+// обычно пусто; form_fields_default -- обычно [].
 //
-// ГРУППИРОВКА ПО ГОРОДУ -- ОТКРЫТЫЙ ВОПРОС (см. ниже "ДОПУЩЕНИЯ"): строки таблицы --
-// это города, где есть хотя бы 1 сотрудник в АУДИТОРИИ МАТРИЦЫ (т.е. Общее > 0).
-// Город, где есть только "факт" (кто-то когда-то прошёл обучение, но сейчас не входит
-// в аудиторию матрицы) -- НЕ получает отдельную строку в этой версии (см. ДОПУЩЕНИЯ).
+// Поля фильтра:
+//   matrix_id           -- foreign_elem, catalog: "cc_learning_matrice".
+//   macroregion          -- select, список из GetMacroregionEntries() (SQL DISTINCT).
+//   mir_code_id          -- foreign_elem, catalog: "cc_mir_code" -- резолвится в текст
+//                           через ResolveMirCodeText().
+//   position_common_id   -- foreign_elem, catalog: "position_common".
+//   program_id           -- foreign_elem, catalog: "education_method".
 //
-// ДОПУЩЕНИЯ (уточнить с пользователем при первом реальном прогоне):
-//   1. Строки = города из АУДИТОРИИ матрицы (после ручных фильтров). Если Факт для
-//      города, которого нет в этом списке, "потеряется" -- нужно решить, показывать ли
-//      для него отдельную строку с Общее=0.
-//   2. Сотрудники БЕЗ заполненного города (custom_elem "sity" пустой) -- попадают в
-//      отдельную строку "(без города)", чтобы не терять данные молча.
-//   3. Итоговая строка "Общий итог" -- сумма по всем городам (включая "(без города)").
-//   4. Сортировка строк -- по алфавиту (простое сравнение строк, БЕЗ гарантии точной
-//      русской локали в этом движке) + "Общий итог" всегда последней строкой.
+// ШАГ "apply" (09.09.2026) -- redirect на страницу отчёта с фильтрами в query string.
 //
-// Параметры/фильтры (matrix_id, macroregion, mir_code, position_common_id, program_id)
-// читаются ИЗ URL -- точно так же, как в HREDU-183_tep_reports.js. macroregion в этой
-// выборке работает как ПРЕДФИЛЬТР (например "Восток" -- сузить список городов до
-// одного макрорегиона, как в примере), а группировка идёт уже ПО ГОРОДУ внутри него.
+// ПЕРЕНОСИМОСТЬ (10.09.2026): раньше redirect шёл на ЗАХАРДКОЖЕННЫЙ адрес (тестовую
+// страницу matrix_test) -- значит одну и ту же модалку нельзя было повесить на другую
+// страницу без правки кода. Теперь redirect идёт на ТУ ЖЕ страницу, откуда модалку
+// открыли (через cur_page_url/Request.Url, см. GetCleanTargetUrl-логику в ветке
+// "apply" -- старые значения фильтров сначала стираются через RemoveQueryParam(),
+// потом дописываются новые). Значит ЭТУ ЖЕ модалку (без изменений в коде) можно
+// вешать кнопкой на любую новую страницу -- в том числе на страницы 4 ТЭП-отчётов
+// (HREDU-183_tep_reports.js) -- она сама вернёт на ту страницу, откуда её открыли,
+// с новыми фильтрами.
 //
-// ВАЖНО про RESULT: как и в остальных выборках -- RESULT это ПРЯМО массив строк.
+// ПОДТВЕРЖДЕНО (09.09.2026, реальный тест): контракт oForm.command="close_form" +
+// oForm.confirm_result={command:"redirect",url:...} работает, редирект происходит.
+// Табличные данные читают GET-параметры не через подстановку в UI (в Env/Context её
+// нет), а сама выборка читает их из Request.Url и парсит вручную -- см.
+// HREDU-183_diagnostic_get_params.js.
+//
+// ИСПРАВЛЕНО (09.09.2026, кодирование): раньше кодировали через encodeURIComponent()
+// (стандартный JS -- UTF-8: кириллица уезжала как %D0%A3%D0%A4%D0%9E). Но родная
+// функция платформы для декодирования на стороне выборки -- UrlDecode() -- судя по
+// примеру в документации (%E0%EF%F0%EE%EB -> "апрол"), ждёт ОДНОБАЙТНУЮ кодировку,
+// не UTF-8: декодирование UTF-8-строки через неё дало бы кракозябру. Поэтому теперь
+// кодируем ТОЖЕ родной функцией платформы -- UrlEncodeQuery(obj) -- она сама собирает
+// "имя1=значение1&имя2=значение2&..." из объекта, в той же схеме, что понимает
+// UrlDecode() на другом конце.
+//
+// ДОБАВЛЕНО (10.09.2026, запоминание фильтров): после ЛЮБОЙ перезагрузки страницы
+// модалка при открытии (ветка "step_0") показывала пустые поля -- пользователю
+// приходилось выбирать все фильтры заново, даже если он просто обновил страницу.
+// Решение -- та же техника, что уже подтверждена в выборке отчёта (см.
+// HREDU-181_vostok_polny_spisok_draft.js): САМА МОДАЛКА при открытии читает
+// Request.Url текущей страницы (куда фильтры уже попали через предыдущий "Применить")
+// и подставляет их как значения полей ПО УМОЛЧАНИЮ, вместо хардкода value: "". Раз
+// сама страница и есть источник состояния (через query string), отдельное хранение
+// (LOCAL-переменные, куки, что-то ещё) не нужно.
+//
+// ДОБАВЛЕНО (10.09.2026, режим ТЭП-отчёта -- "result_type"): 6-е поле формы, select
+// с 4 пунктами (Общее кол-во/План/Факт/Обязательно к прохождению -- значения
+// total/plan/fact/mandatory, см. HREDU-183_tep_reports.js). Это НЕ фильтр сотрудников,
+// а переключатель того, какой из 4 отчётов показывать. Раньше это было фиксированное
+// значение параметра result_type на вкладке "Параметры" у КАЖДОГО из 4 отдельных
+// виджетов "Табличные данные" -- пользователь не мог его менять сам. Теперь режим
+// выбирается прямо в этой модалке (вместе с остальными фильтрами, одной кнопкой
+// "Применить") и попадает в URL так же, как остальные 5 полей -- а значит НА СТРАНИЦЕ
+// ТЭП-ОТЧЁТА ТЕПЕРЬ ДОСТАТОЧНО ОДНОГО ВИДЖЕТА "Табличные данные" (не четырёх) --
+// HREDU-183_tep_reports.js сам читает result_type из URL и переключает поведение.
+//
+// НЮАНС с мир-кодом: в URL для отчёта передаётся ТЕКСТОВЫЙ код (mir_code=LAMA,
+// нужен отчёту для фильтрации сотрудников), а полю-picker'у mir_code_id для
+// восстановления нужен ID документа cc_mir_code, не текст -- обратно текст в ID без
+// дополнительного похода в базу не превратить надёжно (могут быть тёзки по названию).
+// Поэтому в query string теперь дублируем ОБА значения: mir_code (текст, для отчёта,
+// как и раньше) и mir_code_id (ID, только для восстановления поля в модалке) -- отчёт
+// (HREDU-181_vostok_polny_spisok_draft.js) продолжает читать mir_code как раньше,
+// его трогать не пришлось.
 // =====================================================================
 
-DEBUG = true;              // На проде поставить false после тестирования
-LOG_NAME = "agent";        // TODO: заполнить после создания документа в админке
-CUR_OBJECT_ID = 0;         // TODO: заполнить ID документа выборки после её создания в админке (LogAlert защищена try/catch -- забытый 0 не обрушит Run())
+DEBUG = true;
 
-//-------------------------------------------------------------------------
-//              Область функций
-//-------------------------------------------------------------------------
-
-function LogAlert(typeLog, message)
+/*
+ * Чек-пойнт для отладки -- alert() с номером шага, только если DEBUG = true.
+ * Обёрнут в try/catch, чтобы сама отладочная печать не могла обрушить скрипт,
+ * если в каком-то контексте alert()/LogAlert недоступны.
+ * @param {string} sStep
+ */
+function DebugAlert(sStep)
 {
+    if (!DEBUG)
+    {
+        return;
+    }
     try
     {
-        tools.call_code_library_method("vtbl_log_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
+        alert("[DEBUG] " + sStep);
     }
-    catch (_exLog)
+    catch (_exDebug)
     {
-        // ничего -- сбой логирования не должен ронять основной код
+        // ничего -- отладочная печать не должна ронять основной код
     }
 }
 
-function GetRequestUrlSafe()
-{
-    try { return String(Request.Url); }
-    catch (_ex) { return ""; }
+function getParam(sName, sDefault) {
+    var sValue = PARAMETERS.GetOptProperty(sName);
+    if (sDefault != undefined && (sValue == undefined || sValue == "")) {
+        sValue = sDefault;
+    }
+    return sValue;
 }
 
+function getFormField(sName, sDefault) {
+    var sValue = ArrayOptFind(aFormFields, ("This.name == " + XQueryLiteral(sName)));
+    sValue = (sValue != undefined ? sValue.value : sValue);
+    if (sDefault != undefined && (sValue == undefined || sValue == "")) {
+        sValue = sDefault;
+    }
+    return sValue;
+}
+
+function getFormFieldDefault(sName, sDefault) {
+    var sValue = ArrayOptFind(aFormFieldsDef, ("This.name == " + XQueryLiteral(sName)));
+    sValue = (sValue != undefined ? sValue.value : sValue);
+    if (sDefault != undefined && (sValue == undefined || sValue == "")) {
+        sValue = sDefault;
+    }
+    return sValue;
+}
+
+/*
+ * Строит список entries для select-поля "Макрорегион" -- DISTINCT по реальным
+ * значениям custom_elem f_2ewj у активных сотрудников (не хардкод).
+ * @returns {Object[]}   -   Массив {name, value}, первый пункт -- "Все".
+ */
+function GetMacroregionEntries()
+{
+    var sqlText, rows, entries, i, sVal;
+    entries = [{ name: "Все", value: "" }];
+    try
+    {
+        sqlText = "";
+        sqlText = sqlText + "select distinct c.data.value('(*/custom_elems/custom_elem[name=''f_2ewj'']/value)[1]', 'varchar(max)') as macroregion\r\n";
+        sqlText = sqlText + "from collaborators cs\r\n";
+        sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
+        sqlText = sqlText + "where cs.is_dismiss != 1";
+        rows = ArraySelectAll(XQuery("sql:" + sqlText));
+        for (i = 0; i < ArrayCount(rows); i++)
+        {
+            sVal = String(rows[i].macroregion);
+            if (sVal != "")
+            {
+                entries.push({ name: sVal, value: sVal });
+            }
+        }
+    }
+    catch (_ex)
+    {
+        entries = [{ name: "-- ошибка загрузки списка: " + ExtractUserError(_ex) + " --", value: "" }];
+    }
+    return entries;
+}
+
+/*
+ * Резолвит ID объекта cc_mir_codes (то, что реально возвращает foreign_elem) в его
+ * текстовый код (то, что реально лежит в custom_elem f_mir_codes у сотрудников).
+ * @param {number} iMirCodeID   -   ID документа cc_mir_codes.
+ * @returns {string}            -   Код (например "LASK") или "" если не найден/не выбран.
+ */
+function ResolveMirCodeText(iMirCodeID)
+{
+    if (OptInt(iMirCodeID, 0) <= 0)
+    {
+        return "";
+    }
+    try
+    {
+        return String(tools.open_doc(Int(iMirCodeID)).TopElem.name);
+    }
+    catch (_ex)
+    {
+        return "";
+    }
+}
+
+/*
+ * Достаёт полный URL текущей страницы (с фильтрами, которые туда попали через
+ * предыдущий "Применить"). ИСПРАВЛЕНО (10.09.2026, реальный тест показал пустые
+ * значения): Request.Url надёжно сработал в ВЫБОРКЕ (см. HREDU-181_vostok_polny_spisok_draft.js,
+ * HREDU-183_diagnostic_get_params.js), но в контексте УДАЛЁННОГО ДЕЙСТВИЯ (эта модалка
+ * вызывается по кнопке через ajax) он, судя по всему, отражает адрес самого ajax-запроса
+ * к серверу, а не видимый адрес страницы в браузере -- это другой контекст выполнения,
+ * та же история, что уже была с PARAMETERS/ScopeWVars (доступны только в одном из двух
+ * контекстов, не в обоих).
+ *
+ * Способ 1 (предпочтительный): параметр удалённого действия "cur_page_url", привязанный
+ * в LPE к подстановке {{curEnv.curEnvUrl}} ("Полный URL страницы" -- см. список Env, что
+ * ты присылал раньше). НАСТРОЙ этот параметр в LPE у кнопки: добавь параметр с именем
+ * cur_page_url, тип "Текст с подстановками", значение {{curEnv.curEnvUrl}}.
+ * Способ 2 (запасной): Request.Url -- оставлен на случай, если способ 1 почему-то не
+ * настроен или тоже не сработает.
+ * @returns {string}
+ */
+function GetCurPageUrlSafe()
+{
+    var sUrl;
+
+    sUrl = getParam("cur_page_url", "");
+    if (sUrl != "")
+    {
+        return sUrl;
+    }
+
+    try
+    {
+        return String(Request.Url);
+    }
+    catch (_ex)
+    {
+        return "";
+    }
+}
+
+/*
+ * Вырезает значение GET-параметра из полного URL строки -- та же функция, что уже
+ * подтверждена диагностикой и используется в выборке отчёта (HREDU-183_diagnostic_get_params.js,
+ * HREDU-181_vostok_polny_spisok_draft.js). Без regex и без методов строк (.indexOf/.substring
+ * здесь не существуют) -- через штатный строковый API платформы.
+ * @param {string} sUrl         -   Полный URL (например Request.Url).
+ * @param {string} sParamName   -   Имя параметра, например "matrix_id".
+ * @returns {string}             -   Значение параметра или "" если не найден.
+ */
 function GetQueryParam(sUrl, sParamName)
 {
     var sAmpMarker, sQMarkMarker, iParamPos, iValueStart, iAmpPos, iValueEnd, sRawValue, iUrlLen;
+
     iUrlLen = StrLen(sUrl);
+
     sAmpMarker = "&" + sParamName + "=";
     iParamPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
     if (iParamPos != undefined)
@@ -97,482 +261,342 @@ function GetQueryParam(sUrl, sParamName)
     {
         sQMarkMarker = "?" + sParamName + "=";
         iParamPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
-        if (iParamPos == undefined) { return ""; }
+        if (iParamPos == undefined)
+        {
+            return "";
+        }
         iValueStart = iParamPos + StrLen(sQMarkMarker);
     }
+
     iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
     iValueEnd = (iAmpPos != undefined ? iAmpPos : iUrlLen);
+
     sRawValue = StrRangePos(sUrl, iValueStart, iValueEnd);
-    try { return UrlDecode(sRawValue); }
-    catch (_exDecode) { return sRawValue; }
-}
-
-function GetMatrixRows(matrixName)
-{
-    return ArraySelectAll(XQuery("for $elem in cc_learning_matrices where $elem/name = " + XQueryLiteral(matrixName) + " return $elem"));
-}
-
-function GetMatrixElementRows(matrixIds)
-{
-    return ArraySelectAll(XQuery("for $elem in cc_learning_matrice_elements where MatchSome($elem/cc_learning_matrice_id, (" + ArrayMerge(matrixIds, "This", ",") + ")) and $elem/is_active=true() return $elem"));
-}
-
-function GetProgramIds(matrixRows, elementRows)
-{
-    var matrixProgramIds, elementProgramIds, allProgramIds, i;
-    matrixProgramIds = ArrayExtract(matrixRows, "Int(This.education_method_id)");
-    elementProgramIds = ArrayExtract(elementRows, "Int(This.education_method_id)");
-    allProgramIds = [];
-    for (i = 0; i < ArrayCount(matrixProgramIds); i++) { allProgramIds.push(matrixProgramIds[i]); }
-    for (i = 0; i < ArrayCount(elementProgramIds); i++) { allProgramIds.push(elementProgramIds[i]); }
-    return ArraySelectDistinct(allProgramIds, "This");
-}
-
-function ResolveProgramIds(matrixId, matrixName)
-{
-    var matrixRows, matrixIds, elementRows, programIds;
-    matrixRows = GetMatrixRows(matrixName);
-    matrixIds = ArrayExtract(matrixRows, "Int(This.id)");
-    if (ArrayCount(matrixIds) == 0)
-    {
-        throw ("Не найдено ни одной записи cc_learning_matrice с названием [" + matrixName + "]");
-    }
-    elementRows = GetMatrixElementRows(matrixIds);
-    programIds = GetProgramIds(matrixRows, elementRows);
-    if (ArrayCount(programIds) == 0)
-    {
-        throw ("У матрицы [" + matrixName + "] не найдено ни одной активной программы");
-    }
-    return programIds;
-}
-
-function GetActiveCollaboratorRows()
-{
-    return ArraySelectAll(XQuery("for $elem in collaborators where $elem/is_dismiss=false() return $elem"));
-}
-
-function GetPositionIdsByCommonPosition(iCommonPositionFilter)
-{
-    var positionRows, positionIds, i;
-    positionRows = ArraySelectAll(XQuery("for $elem in positions where $elem/position_common_id = " + iCommonPositionFilter + " return $elem"));
-    positionIds = [];
-    for (i = 0; i < ArrayCount(positionRows); i++) { positionIds.push(Int(positionRows[i].id)); }
-    return positionIds;
-}
-
-function IdArrayContains(idArray, value)
-{
-    var i;
-    for (i = 0; i < ArrayCount(idArray); i++)
-    {
-        if (Int(idArray[i]) == Int(value)) { return true; }
-    }
-    return false;
-}
-
-function GetMacroregionRows()
-{
-    var sqlText;
-    sqlText = "";
-    sqlText = sqlText + "select cs.id,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_2ewj'']/value)[1]', 'varchar(max)') as macroregion\r\n";
-    sqlText = sqlText + "from collaborators cs\r\n";
-    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText = sqlText + "where cs.is_dismiss != 1";
-    return ArraySelectAll(XQuery("sql:" + sqlText));
-}
-
-/*
- * НОВОЕ (14.09.2026): город -- custom_elem "sity" (имя поля подтверждено пользователем
- * реальным XML документа collaborator). Та же схема, что GetMacroregionRows()/
- * GetMirCodeRows() -- один SQL на всех активных сотрудников сразу.
- * @returns {Object[]}   -   Массив {id, sity}.
- */
-function GetCityRows()
-{
-    LogAlert(1, "GetCityRows(). НАЧАЛО");
-    var sqlText, rows;
-    sqlText = "";
-    sqlText = sqlText + "select cs.id,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''sity'']/value)[1]', 'varchar(max)') as sity\r\n";
-    sqlText = sqlText + "from collaborators cs\r\n";
-    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText = sqlText + "where cs.is_dismiss != 1";
-    rows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetCityRows(). Строк: " + ArrayCount(rows));
-    LogAlert(1, "GetCityRows(). КОНЕЦ");
-    return rows;
-}
-
-/*
- * Находит город конкретного сотрудника; "(без города)" если поле пустое/не найдено
- * (см. ДОПУЩЕНИЕ №2 в шапке файла -- чтобы не терять данные молча).
- * @param {Object[]} cityRows
- * @param {number} collaboratorID
- * @returns {string}
- */
-function FindCity(cityRows, collaboratorID)
-{
-    var cityRow, sCity;
-    cityRow = ArrayOptFind(cityRows, "Int(This.id) == Int(collaboratorID)");
-    sCity = (cityRow != undefined && cityRow.sity != undefined ? String(cityRow.sity) : "");
-    return (sCity != "" ? sCity : "(без города)");
-}
-
-function GetMirCodeRows()
-{
-    var sqlText;
-    sqlText = "";
-    sqlText = sqlText + "select cs.id,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_codes'']/value)[1]', 'varchar(max)') as mir_codes\r\n";
-    sqlText = sqlText + "from collaborators cs\r\n";
-    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText = sqlText + "where cs.is_dismiss != 1";
-    return ArraySelectAll(XQuery("sql:" + sqlText));
-}
-
-function ExtractMirCodes(rawValue)
-{
-    var parts, fields, codes, i;
-    codes = [];
-    parts = ArrayDirect(ArraySelect(String(rawValue).split("|"), "This != ''"));
-    for (i = 0; i < ArrayCount(parts); i++)
-    {
-        fields = ArrayDirect(ArraySelect(String(parts[i]).split("#"), "This != ''"));
-        if (ArrayCount(fields) > 0) { codes.push(String(fields[0])); }
-    }
-    return codes;
-}
-
-function CollaboratorHasMirCode(mirCodeRows, collaboratorID, mirCodeFilter)
-{
-    var row, codes;
-    row = ArrayOptFind(mirCodeRows, "Int(This.id) == Int(collaboratorID)");
-    if (row == undefined) { return false; }
-    codes = ExtractMirCodes(row.mir_codes);
-    return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
-}
-
-function ResolveMirCodeText(iMirCodeID)
-{
-    if (OptInt(iMirCodeID, 0) <= 0) { return ""; }
-    try { return String(tools.open_doc(Int(iMirCodeID)).TopElem.name); }
-    catch (_ex) { return ""; }
-}
-
-function GetMatrixAudienceCollaboratorRows(matrixDoc, collaboratorRows)
-{
-    LogAlert(1, "GetMatrixAudienceCollaboratorRows(). НАЧАЛО");
-    var iAudiencePositionCommonId, iAudienceMirCodeId, sAudienceMirCodeText;
-    var allowedPositionIds, mirCodeRows, filteredRows, i;
-
-    iAudiencePositionCommonId = OptInt(matrixDoc.position_common_id, 0);
-    iAudienceMirCodeId = OptInt(matrixDoc.mir_code_id, 0);
-    sAudienceMirCodeText = ResolveMirCodeText(iAudienceMirCodeId);
-
-    filteredRows = collaboratorRows;
-
-    if (iAudiencePositionCommonId > 0)
-    {
-        allowedPositionIds = GetPositionIdsByCommonPosition(iAudiencePositionCommonId);
-        collaboratorRows = filteredRows;
-        filteredRows = [];
-        for (i = 0; i < ArrayCount(collaboratorRows); i++)
-        {
-            if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0))) { filteredRows.push(collaboratorRows[i]); }
-        }
-    }
-
-    if (sAudienceMirCodeText != "")
-    {
-        mirCodeRows = GetMirCodeRows();
-        collaboratorRows = filteredRows;
-        filteredRows = [];
-        for (i = 0; i < ArrayCount(collaboratorRows); i++)
-        {
-            if (CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRows[i].id), sAudienceMirCodeText)) { filteredRows.push(collaboratorRows[i]); }
-        }
-    }
-
-    LogAlert(1, "GetMatrixAudienceCollaboratorRows(). КОНЕЦ. Итого в аудитории: " + ArrayCount(filteredRows));
-    return filteredRows;
-}
-
-/*
- * Применяет 4 ручных фильтра пользователя -- идентично HREDU-183_tep_reports.js.
- */
-function ApplyManualFilters(collaboratorRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows)
-{
-    var allowedPositionIds, mirCodeRows, filteredRows, i, macroRow;
-
-    filteredRows = collaboratorRows;
-
-    if (iPositionFilter > 0)
-    {
-        allowedPositionIds = GetPositionIdsByCommonPosition(iPositionFilter);
-        collaboratorRows = filteredRows;
-        filteredRows = [];
-        for (i = 0; i < ArrayCount(collaboratorRows); i++)
-        {
-            if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0))) { filteredRows.push(collaboratorRows[i]); }
-        }
-    }
-
-    if (sMacroregionFilter != "")
-    {
-        collaboratorRows = filteredRows;
-        filteredRows = [];
-        for (i = 0; i < ArrayCount(collaboratorRows); i++)
-        {
-            macroRow = ArrayOptFind(macroRows, "Int(This.id) == Int(collaboratorRows[i].id)");
-            if (macroRow != undefined && String(macroRow.macroregion) == sMacroregionFilter) { filteredRows.push(collaboratorRows[i]); }
-        }
-    }
-
-    if (sMirCodeFilter != "")
-    {
-        mirCodeRows = GetMirCodeRows();
-        collaboratorRows = filteredRows;
-        filteredRows = [];
-        for (i = 0; i < ArrayCount(collaboratorRows); i++)
-        {
-            if (CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRows[i].id), sMirCodeFilter)) { filteredRows.push(collaboratorRows[i]); }
-        }
-    }
-
-    return filteredRows;
-}
-
-function GetCompletionDateRows(programIds)
-{
-    var sqlText;
-    sqlText = "";
-    sqlText = sqlText + "select ec.collaborator_id, e.education_method_id, min(ec.start_date) as first_date\r\n";
-    sqlText = sqlText + "from event_collaborators ec\r\n";
-    sqlText = sqlText + "join events e on e.id = ec.event_id\r\n";
-    sqlText = sqlText + "where e.education_method_id in (" + ArrayMerge(programIds, "This", ",") + ")\r\n";
-    sqlText = sqlText + "group by ec.collaborator_id, e.education_method_id";
-    return ArraySelectAll(XQuery("sql:" + sqlText));
-}
-
-function FindCompletionDate(dateRows, collaboratorID, programID)
-{
-    var dateRow;
-    dateRow = ArrayOptFind(dateRows, "Int(This.collaborator_id) == Int(collaboratorID) && Int(This.education_method_id) == Int(programID)");
-    return (dateRow != undefined ? StrDate(Date(dateRow.first_date), false) : "");
-}
-
-/*
- * Находит (или создаёт) накопитель по городу в аккумулирующем массиве -- т.к. ArraySelect
- * по строке-выражению не годится для ИЗМЕНЯЕМОГО накопителя, ищем циклом.
- * @param {Object[]} acc
- * @param {string} sCity
- * @returns {Object}
- */
-function GetOrCreateCityAcc(acc, sCity)
-{
-    var i;
-    for (i = 0; i < ArrayCount(acc); i++)
-    {
-        if (acc[i].city == sCity) { return acc[i]; }
-    }
-    var newAcc;
-    newAcc = { city: sCity, total: 0, mandatory: 0, fact: 0 };
-    acc.push(newAcc);
-    return newAcc;
-}
-
-/*
- * Округление факт/план в проценты (до целого, обычное арифметическое округление).
- * "-" если план = 0 (см. ДОПУЩЕНИЕ -- в реальных данных пока не встречалось, но
- * возможно в теории, если у города вся аудитория уже "выпала" -- на деле план всегда
- * = общее в этой версии, так что план=0 означает и общее=0, т.е. города вообще нет
- * в аудитории -- такая строка сюда не попадёт, см. ДОПУЩЕНИЕ №1).
- * @param {number} nFact
- * @param {number} nPlan
- * @returns {string}
- */
-function FormatPercent(nFact, nPlan)
-{
-    if (nPlan <= 0) { return "-"; }
-    return String(Int((nFact / nPlan) * 100 + 0.5)) + "%";
-}
-
-//-------------------------------------------------------------------------
-//              Точка входа
-//-------------------------------------------------------------------------
-
-function Run()
-{
-    LogAlert(2, "Run(). НАЧАЛО (Процент обученных)");
-    var sFullUrl, matrixId, matrixDoc, matrixName, iProgramFilter, sMacroregionFilter, sMirCodeFilter, iPositionFilter;
-    var programIds, filteredProgramIds, i, j;
-    var activeRows, audienceRows, audienceFilteredRows, factBaseFilteredRows;
-    var macroRows, mirCodeRows, cityRows, dateRows;
-    var acc, cityAcc, sCity, sDate, row;
-    var totalAcc, resultRows, id;
-
-    RESULT = [];
 
     try
     {
-        sFullUrl = GetRequestUrlSafe();
-        LogAlert(1, "Run(). Request.Url = [" + sFullUrl + "]");
-
-        matrixId = OptInt(GetQueryParam(sFullUrl, "matrix_id"), 0);
-        iProgramFilter = OptInt(GetQueryParam(sFullUrl, "program_id"), 0);
-        sMacroregionFilter = GetQueryParam(sFullUrl, "macroregion");
-        sMirCodeFilter = GetQueryParam(sFullUrl, "mir_code");
-        iPositionFilter = OptInt(GetQueryParam(sFullUrl, "position_common_id"), 0);
-
-        LogAlert(1, "Run(). matrixId=" + matrixId + " programFilter=" + iProgramFilter
-            + " macroregionFilter=[" + sMacroregionFilter + "] mirCodeFilter=[" + sMirCodeFilter
-            + "] positionCommonIdFilter=" + iPositionFilter);
-
-        if (matrixId == 0)
-        {
-            throw ("Не передан matrix_id -- выбранная пользователем матрица обучения");
-        }
-
-        matrixDoc = tools.open_doc(matrixId).TopElem;
-        matrixName = String(matrixDoc.name);
-
-        programIds = ResolveProgramIds(matrixId, matrixName);
-
-        if (iProgramFilter > 0)
-        {
-            filteredProgramIds = [];
-            for (i = 0; i < ArrayCount(programIds); i++)
-            {
-                if (Int(programIds[i]) == iProgramFilter) { filteredProgramIds.push(programIds[i]); }
-            }
-            programIds = filteredProgramIds;
-            if (ArrayCount(programIds) == 0)
-            {
-                throw ("Программа [" + iProgramFilter + "] не найдена среди программ выбранной матрицы");
-            }
-        }
-
-        activeRows = GetActiveCollaboratorRows();
-        macroRows = GetMacroregionRows();
-        cityRows = GetCityRows();
-        dateRows = GetCompletionDateRows(programIds);
-
-        // --- Пул "аудитория матрицы" (для total/plan/mandatory) ---
-        audienceRows = GetMatrixAudienceCollaboratorRows(matrixDoc, activeRows);
-        audienceFilteredRows = ApplyManualFilters(audienceRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
-        LogAlert(1, "Run(). Сотрудников в аудитории (после ручных фильтров): " + ArrayCount(audienceFilteredRows));
-
-        // --- Пул "без аудитории" (для fact) ---
-        factBaseFilteredRows = ApplyManualFilters(activeRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
-        LogAlert(1, "Run(). Сотрудников БЕЗ аудитории (после ручных фильтров, база для Факт): " + ArrayCount(factBaseFilteredRows));
-
-        acc = [];
-
-        // total/mandatory -- по каждому (сотрудник аудитории x программа)
-        for (i = 0; i < ArrayCount(audienceFilteredRows); i++)
-        {
-            sCity = FindCity(cityRows, Int(audienceFilteredRows[i].id));
-            cityAcc = GetOrCreateCityAcc(acc, sCity);
-            for (j = 0; j < ArrayCount(programIds); j++)
-            {
-                sDate = FindCompletionDate(dateRows, Int(audienceFilteredRows[i].id), programIds[j]);
-                cityAcc.total = cityAcc.total + 1;
-                if (sDate == "") { cityAcc.mandatory = cityAcc.mandatory + 1; }
-            }
-        }
-
-        // fact -- по каждому (сотрудник БЕЗ аудитории x программа), только пройденные;
-        // ДОПУЩЕНИЕ №1 (см. шапку файла): город учитывается, только если для него УЖЕ
-        // есть накопитель из пула аудитории (GetOrCreateCityAcc создаст новый, если нет --
-        // то есть фактически город БЕЗ аудитории тоже получит свою строку с total=0 --
-        // это осознанный выбор: лучше показать "лишнюю" строку с Общее=0, чем молча
-        // потерять реальных прошедших обучение людей).
-        for (i = 0; i < ArrayCount(factBaseFilteredRows); i++)
-        {
-            sCity = FindCity(cityRows, Int(factBaseFilteredRows[i].id));
-            cityAcc = GetOrCreateCityAcc(acc, sCity);
-            for (j = 0; j < ArrayCount(programIds); j++)
-            {
-                sDate = FindCompletionDate(dateRows, Int(factBaseFilteredRows[i].id), programIds[j]);
-                if (sDate != "") { cityAcc.fact = cityAcc.fact + 1; }
-            }
-        }
-
-        // Сортировка по алфавиту -- ОБЫЧНЫМ ЦИКЛОМ (пузырьком), а не через возможную
-        // функцию-хелпер вроде ArraySort(): такая функция НИ РАЗУ не встречалась и не
-        // подтверждалась в этом тикете (в отличие от ArraySelectDistinct/ArrayExtract/
-        // ArrayMerge и т.д.), а гадать с непроверенными функциями платформы уже дорого
-        // обходилось (regex, function-as-value, .indexOf/.substring -- см. историю
-        // тикета) -- поэтому используем только то, что 100% работает: простые циклы
-        // и операторы сравнения.
-        var iOuter, iInner, tmpAcc;
-        for (iOuter = 0; iOuter < ArrayCount(acc) - 1; iOuter++)
-        {
-            for (iInner = 0; iInner < ArrayCount(acc) - 1 - iOuter; iInner++)
-            {
-                if (acc[iInner].city > acc[iInner + 1].city)
-                {
-                    tmpAcc = acc[iInner];
-                    acc[iInner] = acc[iInner + 1];
-                    acc[iInner + 1] = tmpAcc;
-                }
-            }
-        }
-
-        resultRows = [];
-        id = 0;
-        totalAcc = { total: 0, mandatory: 0, fact: 0 };
-        for (i = 0; i < ArrayCount(acc); i++)
-        {
-            id = id + 1;
-            row = acc[i];
-            resultRows.push({
-                id: id,
-                city: row.city,
-                total: row.total,
-                plan: row.total, // План = Общее, см. "РЕШЕНИЯ" в шапке
-                fact: row.fact,
-                percent: FormatPercent(row.fact, row.total),
-                mandatory: row.mandatory
-            });
-            totalAcc.total = totalAcc.total + row.total;
-            totalAcc.mandatory = totalAcc.mandatory + row.mandatory;
-            totalAcc.fact = totalAcc.fact + row.fact;
-        }
-
-        id = id + 1;
-        resultRows.push({
-            id: id,
-            city: "Общий итог",
-            total: totalAcc.total,
-            plan: totalAcc.total,
-            fact: totalAcc.fact,
-            percent: FormatPercent(totalAcc.fact, totalAcc.total),
-            mandatory: totalAcc.mandatory
-        });
-
-        RESULT = resultRows;
-        LogAlert(2, "Run(). Готово. Городов: " + (ArrayCount(resultRows) - 1) + " + итоговая строка");
+        return UrlDecode(sRawValue);
     }
-    catch (_ex)
+    catch (_exDecode)
     {
-        RESULT = [];
-        ERROR = 1;
-        MESSAGE = ExtractUserError(_ex);
-        LogAlert(4, "Run(). ОШИБКА: " + MESSAGE);
+        return sRawValue;
     }
-    LogAlert(2, "Run(). КОНЕЦ");
 }
 
-Run();
+/*
+ * ИСПРАВЛЕНО (10.09.2026, аварийное -- "GetFE Error ... objects/0000/00.xml"): поля
+ * matrix_id/mir_code_id/position_common_id/program_id -- это picker'ы типа
+ * "foreign_elem". Когда фильтр НЕ выбран, наш код (ветка "apply") кладёт в URL
+ * буквально "...=0" (дефолт OptInt(x, 0)). При повторном открытии модалки мы читаем
+ * это "0" из URL и подставляем в value: picker-поля -- а платформа воспринимает "0"
+ * НЕ как "ничего не выбрано", а как РЕАЛЬНЫЙ ID документа, и пытается открыть
+ * документ №0 (x-local://wt_data/objects/0000/00.xml) -- такого не существует, отсюда
+ * нативная ошибка платформы "GetFE Error returned: ... End of file (OpenDoc(),
+ * wt\web\lpapi.html, line 1289)" при повторном открытии модалки (после первого
+ * "Применить" без position_common_id/program_id). Раньше эти поля просто не получали
+ * value: (было "" по умолчанию), поэтому баг не проявлялся -- он появился ИМЕННО из-за
+ * фичи "запоминание фильтров". Фикс: "0" из URL для полей-picker'ов всегда превращаем
+ * обратно в "" перед тем, как класть в value:.
+ * @param {string} sValue
+ * @returns {string}
+ */
+function SanitizeIdFieldValue(sValue)
+{
+    if (sValue == "0" || sValue == undefined)
+    {
+        return "";
+    }
+    return sValue;
+}
 
-COLUMNS = [
-    { "data": "id", "editable": true, "hidden": true, "sortable": false },
-    { "data": "city", "title": "Город", "type": "string", "editable": false, "sortable": true },
-    { "data": "total", "title": "Общее кол-во сотрудников", "type": "integer", "editable": false, "sortable": true },
-    { "data": "plan", "title": "План", "type": "integer", "editable": false, "sortable": true },
-    { "data": "fact", "title": "Факт", "type": "integer", "editable": false, "sortable": true },
-    { "data": "percent", "title": "Процент", "type": "string", "editable": false, "sortable": false },
-    { "data": "mandatory", "title": "Обязательно к прохождению", "type": "integer", "editable": false, "sortable": true }
-];
+/*
+ * ДОБАВЛЕНО (10.09.2026, переносимость на разные страницы): убирает из URL старое
+ * значение указанного GET-параметра (если оно там есть), не трогая остальную часть
+ * адреса. Нужно, чтобы модалка могла делать redirect на ТУ ЖЕ страницу, на которой её
+ * открыли (а не на захардкоженный адрес) -- сначала стираем старые фильтры из текущего
+ * URL, потом дописываем новые (см. "ПЕРЕНОСИМОСТЬ" в шапке файла). Без regex -- через
+ * тот же штатный строковый API, что и GetQueryParam().
+ * @param {string} sUrl
+ * @param {string} sParamName
+ * @returns {string}   -   URL без этого параметра (если параметра не было -- вернёт как есть).
+ */
+function RemoveQueryParam(sUrl, sParamName)
+{
+    var sAmpMarker, sQMarkMarker, iMarkerPos, iValueStart, iAmpPos, iUrlLen, sBefore, sAfter;
+
+    iUrlLen = StrLen(sUrl);
+
+    // Случай 1: параметр не первый -- ищем "&имя=" и убираем его целиком вместе со
+    // значением, до следующего "&" или до конца строки.
+    sAmpMarker = "&" + sParamName + "=";
+    iMarkerPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
+    if (iMarkerPos != undefined)
+    {
+        iValueStart = iMarkerPos + StrLen(sAmpMarker);
+        iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
+        sBefore = StrRangePos(sUrl, 0, iMarkerPos);
+        sAfter = (iAmpPos != undefined ? StrRangePos(sUrl, iAmpPos, iUrlLen) : "");
+        return sBefore + sAfter;
+    }
+
+    // Случай 2: параметр первый сразу после "?" -- "?" оставляем, а если следом шёл
+    // "&" следующего параметра -- он становится новой границей после "?".
+    sQMarkMarker = "?" + sParamName + "=";
+    iMarkerPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
+    if (iMarkerPos != undefined)
+    {
+        iValueStart = iMarkerPos + StrLen(sQMarkMarker);
+        iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
+        sBefore = StrRangePos(sUrl, 0, iMarkerPos + 1); // включая сам "?"
+        sAfter = (iAmpPos != undefined ? StrRangePos(sUrl, iAmpPos + 1, iUrlLen) : "");
+        return sBefore + sAfter;
+    }
+
+    // Параметра не было -- ничего менять не нужно.
+    return sUrl;
+}
+
+DebugAlert("0. Файл начал выполняться");
+
+try
+{
+    DebugAlert("1. Читаем form_fields/form_fields_default");
+    aFormFields = ParseJson(getParam("form_fields", "[]"));
+    aFormFieldsDef = ParseJson(getParam("form_fields_default", "[]"));
+    sSubmitType = getFormField("__submit_type__", getFormFieldDefault("__submit_type__", "step_0"));
+    DebugAlert("2. sSubmitType = [" + sSubmitType + "]");
+
+    oForm = new Object();
+    oForm.command = "display_form";
+    oForm.height = 320;
+    oForm.title = "Фильтры отчёта (Восток)";
+    oForm.message = null;
+
+    DebugAlert("3. Строим GetMacroregionEntries()");
+    aMacroregionEntries = GetMacroregionEntries();
+    DebugAlert("4. GetMacroregionEntries() построен, пунктов: " + ArrayCount(aMacroregionEntries));
+
+    // ДОБАВЛЕНО (10.09.2026, запоминание фильтров): читаем текущий URL страницы --
+    // если фильтры туда уже попали через предыдущий "Применить", используем их как
+    // значения по умолчанию вместо "". Если Request недоступен (sModalPageUrl == "") --
+    // GetQueryParam() всё равно вернёт "" на любое имя, ничего не ломается.
+    DebugAlert("3b. Читаем текущий URL страницы для восстановления фильтров (сначала параметр cur_page_url, потом Request.Url)");
+    sModalPageUrl = GetCurPageUrlSafe();
+    DebugAlert("3b2. Итоговый URL, который используем: [" + sModalPageUrl + "]");
+    sDefaultMatrixID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "matrix_id"));
+    sDefaultMacroregion = GetQueryParam(sModalPageUrl, "macroregion");
+    sDefaultMirCodeID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "mir_code_id"));
+    sDefaultPositionCommonID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "position_common_id"));
+    sDefaultProgramID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "program_id"));
+
+    // ДОБАВЛЕНО (10.09.2026, режим ТЭП-отчёта): "result_type" -- НЕ фильтр сотрудников,
+    // а переключатель того, КАКОЙ из 4 отчётов ТЭП показывать (Общее/План/Факт/
+    // Обязательно, см. HREDU-183_tep_reports.js). Раньше это было фиксированное
+    // значение на вкладке "Параметры" отдельного виджета (нужно было 4 разных виджета) --
+    // теперь пользователь выбирает режим прямо в этой модалке, вместе с остальными
+    // фильтрами, и он же попадает в URL -- значит на странице достаточно ОДНОГО виджета
+    // "Табличные данные" (HREDU-183_tep_reports.js сам переключает поведение по URL).
+    // Дефолт -- "total" (Общее), а не "" -- select-полю нужно совпадающее значение
+    // из entries ниже, иначе платформа может повести себя непредсказуемо (по аналогии
+    // с историей про "0" для picker-полей, см. SanitizeIdFieldValue выше).
+    sDefaultResultType = GetQueryParam(sModalPageUrl, "result_type");
+    if (sDefaultResultType == "")
+    {
+        sDefaultResultType = "total";
+    }
+
+    DebugAlert("3c. Значения по умолчанию из URL: matrix_id=[" + sDefaultMatrixID + "] macroregion=[" + sDefaultMacroregion
+        + "] mir_code_id=[" + sDefaultMirCodeID + "] position_common_id=[" + sDefaultPositionCommonID
+        + "] program_id=[" + sDefaultProgramID + "] result_type=[" + sDefaultResultType + "]");
+
+    oForm.form_fields = [
+        {
+            name: "matrix_id",
+            label: "Матрица обучения *",
+            title: "Выберите матрицу обучения",
+            type: "foreign_elem",
+            value: sDefaultMatrixID,
+            mandatory: true,
+            multiple: false,
+            catalog: "cc_learning_matrice",
+            query_qual: ""
+        },
+        {
+            name: "macroregion",
+            label: "Макрорегион",
+            type: "select",
+            value: sDefaultMacroregion,
+            entries: aMacroregionEntries,
+            mandatory: false,
+            visibility: false
+        },
+        {
+            name: "mir_code_id",
+            label: "Мир-код",
+            title: "Выберите мир-код",
+            type: "foreign_elem",
+            value: sDefaultMirCodeID,
+            mandatory: false,
+            multiple: false,
+            catalog: "cc_mir_code",
+            query_qual: ""
+        },
+        {
+            name: "position_common_id",
+            label: "Типовая должность",
+            title: "Выберите типовую должность",
+            type: "foreign_elem",
+            value: sDefaultPositionCommonID,
+            mandatory: false,
+            multiple: false,
+            catalog: "position_common",
+            query_qual: ""
+        },
+        {
+            name: "program_id",
+            label: "Учебная программа",
+            title: "Выберите учебную программу",
+            type: "foreign_elem",
+            value: sDefaultProgramID,
+            mandatory: false,
+            multiple: false,
+            catalog: "education_method",
+            query_qual: ""
+        },
+        {
+            // ИСПРАВЛЕНО (14.09.2026): mandatory БЫЛ true -- но эту же модалку теперь
+            // вешаем ещё и на страницы, которые result_type вообще НЕ используют
+            // ("Восток полный список", "Процент обученных" -- см. HREDU-182_procent_obuchennyh.js,
+            // он этот параметр не читает). Обязательный выбор непонятного поля на
+            // странице, где оно ни на что не влияет, -- плохой UX. Сделано необязательным,
+            // дефолт "Общее кол-во" (total) -- странице, которой всё равно, лишний
+            // параметр в URL не мешает.
+            name: "result_type",
+            label: "Режим отчёта (только для страниц ТЭП)",
+            type: "select",
+            value: sDefaultResultType,
+            entries: [
+                { name: "Общее кол-во", value: "total" },
+                { name: "План", value: "plan" },
+                { name: "Факт", value: "fact" },
+                { name: "Обязательно к прохождению", value: "mandatory" }
+            ],
+            mandatory: false
+        }
+    ];
+    DebugAlert("5. oForm.form_fields собран, полей: " + ArrayCount(oForm.form_fields));
+
+    for (oField in oForm.form_fields)
+    {
+        oField.value = getFormField(oField.name, oField.value);
+    }
+    DebugAlert("6. Значения полей проставлены из aFormFields");
+
+    oForm.buttons = [];
+    oForm.no_buttons = false;
+
+    switch (sSubmitType)
+    {
+        case "apply":
+        {
+            DebugAlert("7a. Ветка apply -- читаем значения полей");
+            iMatrixID = OptInt(getFormField("matrix_id", ""), 0);
+            sMacroregion = String(getFormField("macroregion", ""));
+            iMirCodeID = OptInt(getFormField("mir_code_id", ""), 0);
+            iPositionCommonID = OptInt(getFormField("position_common_id", ""), 0);
+            iProgramID = OptInt(getFormField("program_id", ""), 0);
+            sResultType = String(getFormField("result_type", "total"));
+            DebugAlert("7b. matrix_id=" + iMatrixID + " macroregion=[" + sMacroregion + "] mir_code_id=" + iMirCodeID + " position_common_id=" + iPositionCommonID + " program_id=" + iProgramID + " result_type=[" + sResultType + "]");
+
+            sMirCodeText = ResolveMirCodeText(iMirCodeID);
+            DebugAlert("7c. mir_code резолвлен в текст: [" + sMirCodeText + "]");
+
+            // ИЗМЕНЕНО (10.09.2026, ПЕРЕНОСИМОСТЬ на разные страницы): раньше redirect шёл
+            // на захардкоженный тестовый адрес -- значит эту же модалку нельзя было
+            // повесить на другую страницу (например, на страницы ТЭП-отчётов) без правки
+            // кода. Теперь берём ТЕКУЩУЮ страницу (sModalPageUrl, уже прочитан выше для
+            // восстановления значений полей), стираем из неё старые значения фильтров
+            // (если модалку открывали не в первый раз) и дописываем новые -- так одна и
+            // та же модалка работает на любой странице, куда её повесят, и всегда
+            // возвращает на ту же страницу, откуда её открыли.
+            sCleanBaseUrl = sModalPageUrl;
+            sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "matrix_id");
+            sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "macroregion");
+            sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "mir_code_id");
+            sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "mir_code");
+            sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "position_common_id");
+            sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "program_id");
+            sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "result_type");
+            DebugAlert("7c2. Текущая страница без старых фильтров: [" + sCleanBaseUrl + "]");
+
+            // Родная функция платформы -- сама собирает "имя1=значение1&имя2=значение2&..."
+            // и кодирует значения в той же схеме, что понимает UrlDecode() на стороне выборки.
+            // mir_code_id ДОБАВЛЕН (10.09.2026) -- отчёту не нужен (он фильтрует по тексту
+            // mir_code, как и раньше), нужен ТОЛЬКО модалке, чтобы при следующем открытии
+            // восстановить значение picker'а по ID, а не по тексту (см. "НЮАНС с мир-кодом"
+            // в шапке файла).
+            oQueryParams = {
+                matrix_id: String(iMatrixID),
+                macroregion: sMacroregion,
+                mir_code: sMirCodeText,
+                mir_code_id: String(iMirCodeID),
+                position_common_id: String(iPositionCommonID),
+                program_id: String(iProgramID),
+                result_type: sResultType
+            };
+            sQueryString = UrlEncodeQuery(oQueryParams);
+
+            // Разделитель зависит от того, остался ли в sCleanBaseUrl хоть один "?"
+            // (страница почти наверняка сохранит свой собственный параметр вроде
+            // mode=... -- мы стираем только 6 фильтров, не всю строку запроса).
+            sSeparator = (StrOptSubStrPos(sCleanBaseUrl, "?", false) != undefined ? "&" : "?");
+            sFullUrl = sCleanBaseUrl + sSeparator + sQueryString;
+            DebugAlert("7d. Итоговый URL redirect: " + sFullUrl);
+
+            oForm = {
+                command: "close_form",
+                confirm_result: {
+                    command: "redirect",
+                    url: sFullUrl
+                }
+            };
+
+            // ЗАПАСНОЙ ВАРИАНТ (проверочный alert вместо редиректа) -- если после починки
+            // регэкспа модалка открывается, но именно redirect не срабатывает -- раскомментируй
+            // этот блок вместо oForm выше, чтобы отдельно проверить, что сами значения полей
+            // (picker'ы/select) верны, независимо от механизма передачи в отчёт:
+            //
+            // oForm = {
+            //     command: "alert",
+            //     msg: ("Выбранные фильтры (проверочный вывод):<br/><pre>" + sFullUrl + "</pre>"),
+            //     title: "Фильтры применены (пока без связи с отчётом)"
+            // };
+
+            DebugAlert("7e. Ветка apply завершена, RESULT будет = close_form/redirect");
+            break;
+        }
+        case "step_0":
+        default:
+        {
+            DebugAlert("8. Ветка step_0/default -- добавляем кнопки Применить/Отмена");
+            oForm.buttons.push(
+                { name: "submit", submit_type: "apply", label: "Применить", type: "submit" },
+                { name: "cancel", label: "Отмена", type: "cancel" }
+            );
+            break;
+        }
+    }
+
+    RESULT = oForm;
+    DebugAlert("9. RESULT успешно собран, sSubmitType был [" + sSubmitType + "]");
+}
+catch (_exMain)
+{
+    // ГЛАВНАЯ ЗАЩИТА (09.09.2026): если где-то в коде выше вылетит ЛЮБАЯ ошибка --
+    // вместо "ничего не происходит"/пустого падения покажем alert с точным текстом.
+    RESULT = {
+        command: "alert",
+        msg: ("Ошибка в модалке фильтров (HREDU-183_filtry_modal_shag1.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
+        title: "ОШИБКА"
+    };
+}
