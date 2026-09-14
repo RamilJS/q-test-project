@@ -405,6 +405,44 @@ function FormatPercent(nFact, nPlan)
 }
 
 /*
+ * ИСПРАВЛЕНИЕ (14.09.2026, БАГ С "&macroregion="): реальный тест показал, что итоговая
+ * ссылка искажается ПРИ ОТОБРАЖЕНИИ виджетом "Табличные данные" -- "&macroregion="
+ * превращалось в "%C2%AForegion=" (т.е. "&macr" пропадало, вместо него -- символ "¯",
+ * U+00AF). Причина: "macr" -- это ИМЕННО ТАКОЕ имя у "легаси" HTML-сущности безточки
+ * с запятой (как &amp, &lt, &nbsp) -- она означает символ "¯" (macron) и НЕ требует ";"
+ * на конце. Судя по всему, виджет вставляет значение поля "link"/*_link ПРЯМО в атрибут
+ * href как HTML-текст, без экранирования "&" в "&amp;" -- поэтому браузер видит в
+ * "&macroregion=" сначала "&macr" (валидная сущность!) и стирает её, заменяя на "¯",
+ * а не сам символ "&". Никакого отношения к UrlEncodeQuery()/percent-encoding это не
+ * имеет -- проблема на уровне HTML, а не URL. Фикс: экранируем "&" САМИ в "&amp;" перед
+ * тем, как класть готовую ссылку в поле RESULT -- тогда браузер сначала раскодирует
+ * "&amp;" обратно в "&", и только ПОСЛЕ этого получившийся URL uже не содержит "&macr"
+ * как отдельную подстроку для сущности. Без regex -- см. HtmlEscapeAmp() ниже, тот же
+ * строковый API (StrOptSubStrPos/StrRangePos/StrLen), что и в GetQueryParam().
+ * @param {string} sUrl
+ * @returns {string}
+ */
+function HtmlEscapeAmp(sUrl)
+{
+    var sResult, iPos, iUrlLen, iSearchStart;
+    sResult = "";
+    iSearchStart = 0;
+    iUrlLen = StrLen(sUrl);
+    while (true)
+    {
+        iPos = StrOptSubStrPos(sUrl, "&", false, iSearchStart);
+        if (iPos == undefined)
+        {
+            sResult = sResult + StrRangePos(sUrl, iSearchStart, iUrlLen);
+            break;
+        }
+        sResult = sResult + StrRangePos(sUrl, iSearchStart, iPos) + "&amp;";
+        iSearchStart = iPos + 1;
+    }
+    return sResult;
+}
+
+/*
  * Строит ссылку на страницу ТЭП-отчётов (HREDU-183_tep_reports.js) с нужным
  * набором параметров -- ровно те же параметры, что читает сама ТЭП-выборка
  * (см. GetQueryParam(...) в HREDU-183_tep_reports.js): matrix_id, macroregion,
@@ -437,7 +475,9 @@ function BuildTepLink(iMatrixId, sMacroregionFilter, sMirCodeFilter, iPositionFi
     };
     sQueryString = UrlEncodeQuery(oQueryParams);
     sSeparator = (StrOptSubStrPos(TEP_REPORT_PAGE_URL, "?", false) != undefined ? "&" : "?");
-    return TEP_REPORT_PAGE_URL + sSeparator + sQueryString;
+    // HtmlEscapeAmp() -- см. комментарий над ней: "&" экранируем в "&amp;", потому что
+    // виджет вставляет это значение прямо в HTML (href) без собственного экранирования.
+    return HtmlEscapeAmp(TEP_REPORT_PAGE_URL + sSeparator + sQueryString);
 }
 
 //-------------------------------------------------------------------------
@@ -573,17 +613,18 @@ function Run()
                 id: id,
                 city: row.city,
                 total: row.total,
-                total_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "total", row.city),
                 plan: row.total, // План = Общее, см. "РЕШЕНИЯ" в шапке
-                plan_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "plan", row.city),
                 fact: row.fact,
-                fact_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "fact", row.city),
                 percent: FormatPercent(row.fact, row.total),
                 mandatory: row.mandatory,
-                mandatory_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "mandatory", row.city),
-                // Строчный link (ПРОВЕРЕННЫЙ платформенный паттерн -- клик по ЛЮБОМУ месту
-                // строки таблицы, кроме отдельно кликабельных ячеек, если они поддерживаются).
-                // По умолчанию ведёт в режиме "total" -- как наиболее общий вход в разбор города.
+                // ПОДТВЕРЖДЕНО (14.09.2026, реальный тест пользователя): виджет "Табличные
+                // данные" различает клик ТОЛЬКО по строке целиком -- один "link" на всю
+                // строку, независимо от того, по какой колонке/числу кликнули. Отдельных
+                // ссылок на план/факт/обязательно НЕ делаем (см. РЕШЕНИЕ в шапке файла) --
+                // клик по строке города всегда ведёт в ТЭП-отчёт в режиме "total"; если
+                // нужен план/факт/обязательно -- пользователь переключает режим на самой
+                // целевой странице через поле "Режим отчёта" в HREDU-183_filtry_modal_shag1.js
+                // (оно там уже есть).
                 link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "total", row.city)
             });
             totalAcc.total = totalAcc.total + row.total;
@@ -598,14 +639,10 @@ function Run()
             id: id,
             city: "Общий итог",
             total: totalAcc.total,
-            total_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "total", ""),
             plan: totalAcc.total,
-            plan_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "plan", ""),
             fact: totalAcc.fact,
-            fact_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "fact", ""),
             percent: FormatPercent(totalAcc.fact, totalAcc.total),
             mandatory: totalAcc.mandatory,
-            mandatory_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "mandatory", ""),
             link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "total", "")
         });
 
@@ -624,34 +661,23 @@ function Run()
 
 Run();
 
-// TODO (14.09.2026, КЛИКАБЕЛЬНОСТЬ -- ОТКРЫТЫЙ ВОПРОС): в RESULT у каждой строки уже
-// есть "link" (ПРОВЕРЕННЫЙ платформенный паттерн -- клик по строке целиком, см. пример
-// "ВТБЛ. 2025. Подтверждение потребности в обучении. Карточка мероприятия") + ЧЕТЫРЕ
-// дополнительных поля total_link/plan_link/fact_link/mandatory_link -- по одной ссылке
-// на каждую метрику (на случай, если у виджета "Табличные данные" ЕСТЬ отдельный тип
-// колонки для ссылки НА КОНКРЕТНУЮ ЯЧЕЙКУ, а не только на строку целиком). Этот второй
-// механизм НЕ ПОДТВЕРЖДЁН -- в присланных примерах была только целая строка. Нужно
-// проверить в админке виджета "Табличные данные": есть ли у колонки тип вроде "link"/
-// "url", куда можно указать поле-источник ссылки (аналогично тому, как "type": "link"
-// возможно объявляется для строки). Если такого типа колонки нет -- уберите ниже
-// закомментированные *_link-колонки и оставьте только общий "link" (клик по строке),
-// а различие между планом/фактом/итд для пользователя будет объясняться подсказкой/
-// легендой рядом с таблицей, а не отдельной ссылкой на каждое число.
+// ЗАКРЫТО (14.09.2026, КЛИКАБЕЛЬНОСТЬ): реальный тест пользователя подтвердил, что
+// виджет "Табличные данные" различает клик ТОЛЬКО по строке целиком -- отдельной ссылки
+// "на конкретную ячейку/число" у него нет (независимо от того, по какой колонке
+// кликнули, срабатывает один и тот же "link" всей строки). Поэтому четыре поля
+// total_link/plan_link/fact_link/mandatory_link и соответствующие им закомментированные
+// варианты колонок -- УБРАНЫ как мёртвый код (см. историю тикета -- раньше они были
+// здесь как непроверенная гипотеза). РЕШЕНИЕ: один клик по строке города -> ТЭП-отчёт в
+// режиме "total"; план/факт/обязательно пользователь смотрит НЕ переходом по клику, а
+// либо прямо в этой таблице (числа уже видны), либо переключает "Режим отчёта" вручную
+// в фильтрах на целевой странице (см. HREDU-183_filtry_modal_shag1.js).
 COLUMNS = [
     { "data": "id", "editable": true, "hidden": true, "sortable": false },
     { "data": "link", "hidden": true, "editable": false, "sortable": false }, // проверенный row-level link
     { "data": "city", "title": "Город", "type": "string", "editable": false, "sortable": true },
     { "data": "total", "title": "Общее кол-во сотрудников", "type": "integer", "editable": false, "sortable": true },
-    // { "data": "total", "title": "Общее кол-во сотрудников", "type": "link", "link_field": "total_link", "editable": false, "sortable": true },
     { "data": "plan", "title": "План", "type": "integer", "editable": false, "sortable": true },
-    // { "data": "plan", "title": "План", "type": "link", "link_field": "plan_link", "editable": false, "sortable": true },
     { "data": "fact", "title": "Факт", "type": "integer", "editable": false, "sortable": true },
-    // { "data": "fact", "title": "Факт", "type": "link", "link_field": "fact_link", "editable": false, "sortable": true },
     { "data": "percent", "title": "Процент", "type": "string", "editable": false, "sortable": false },
-    { "data": "mandatory", "title": "Обязательно к прохождению", "type": "integer", "editable": false, "sortable": true },
-    // { "data": "mandatory", "title": "Обязательно к прохождению", "type": "link", "link_field": "mandatory_link", "editable": false, "sortable": true },
-    { "data": "total_link", "hidden": true, "editable": false, "sortable": false },
-    { "data": "plan_link", "hidden": true, "editable": false, "sortable": false },
-    { "data": "fact_link", "hidden": true, "editable": false, "sortable": false },
-    { "data": "mandatory_link", "hidden": true, "editable": false, "sortable": false }
+    { "data": "mandatory", "title": "Обязательно к прохождению", "type": "integer", "editable": false, "sortable": true }
 ];
