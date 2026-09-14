@@ -1,75 +1,51 @@
 // =====================================================================
-// HREDU-182. "Процент обученных" -- выборка для Табличных данных.
+// HREDU-182. Диагностика: сверка арифметики отчёта "Процент обученных"
+// (HREDU-182_procent_obuchennyh.js) для ОДНОЙ И ТОЙ ЖЕ матрицы+фильтров.
 //
-// ТЗ (из письма Антонова + "ТЗ Отчёт по матрицам", присланы пользователем 10.09
-// и 14.09.2026) + РЕАЛЬНЫЙ ПРИМЕР ОТЧЁТА, присланный 14.09.2026 ("Макрорегион ВОСТОК",
-// лист с колонками Город/Общее кол-во сотрудников/План/Факт/Процент/Обязательно к
-// прохождению, построчно по городам + итоговая строка "Общий итог").
+// ЗАЧЕМ (запрошено пользователем 14.09.2026, "не уверен, что данные которые строит
+// отчёт корректны"): по аналогии с уже проверенной техникой для ТЭП-отчётов
+// (HREDU-183_diagnostic_tep_crosscheck.js, все 3 тождества дали "OK" на реальных
+// данных 44/44/98/8) -- строим ДВА НЕЗАВИСИМЫХ расчёта в одном скрипте и сверяем их,
+// вместо того чтобы гадать глазами по таблице:
 //
-// РЕШЕНО С ПОЛЬЗОВАТЕЛЕМ (14.09.2026, через AskUserQuestion): реальный отчёт -- это
-// ТАБЛИЦА С РАЗБИВКОЙ ПО ГОРОДАМ (как в примере), а НЕ одна строка показателей на всю
-// матрицу (как можно было бы прочитать из ТЗ п.4 буквально -- там про "поле" в
-// единственном числе, но пример явно про таблицу).
+//   Расчёт А (ПО ГОРОДАМ) -- 1:1 копия логики HREDU-182_procent_obuchennyh.js: два
+//   цикла (аудитория -> total/mandatory, без-аудитории -> fact), группировка по городу
+//   через FindCity()/GetOrCreateCityAcc(), + добавлено ОДНО новое накопление --
+//   completed_in_audience ПО ГОРОДУ (сколько из аудитории этого города уже прошли) --
+//   этого числа нет в самом отчёте, оно нужно только для тождества здесь.
 //
-// Поле "город" -- custom_elem с именем "sity" (ПОДТВЕРЖДЕНО пользователем 14.09.2026,
-// прислал реальный XML документа collaborator: <custom_elem><name>sity</name>
-// <value>Санкт-Петербург</value></custom_elem>). ВНИМАНИЕ: имя технического поля
-// именно "sity" (с опечаткой, не "city") -- это НЕ опечатка в этом файле, так
-// называется реальное поле в системе.
+//   Расчёт Б (ЦЕЛИКОМ ПО МАТРИЦЕ, БЕЗ городов) -- та же логика, что уже подтверждена в
+//   HREDU-183_diagnostic_tep_crosscheck.js (CountPairs() по всей аудитории/факт-базе
+//   сразу, без группировки) -- считает total/mandatory/fact/completed_in_audience
+//   ОДНИМ проходом, никак не завязанным на понятие "город".
 //
-// ЛОГИКА ПОДСЧЁТА (полностью повторяет HREDU-183_tep_reports.js -- см. "РЕШЕНИЯ" в его
-// шапке -- только теперь всё разбито по городам вместо одного общего числа):
-//   Общее (total)      -- аудитория матрицы (position_common_id+mir_code_id С САМОЙ
-//                          матрицы) + ручные фильтры пользователя, сгруппировано по
-//                          городу.
-//   План (plan)         -- = Общее (упрощение, период прохождения ещё не реализован,
-//                          см. открытый вопрос в HREDU-183_tep_reports.js).
-//   Факт (fact)          -- прошедшие тренинг, БЕЗ ограничения аудиторией матрицы
-//                          (см. ТЗ п.3 "не зависимо от условий матрицы"), но с теми же
-//                          ручными фильтрами, сгруппировано по городу.
-//   Обязательно (mandatory) -- аудитория матрицы МИНУС прошедшие (пустая дата).
-//   Процент (percent)    -- факт/план (округление до целого %, "-" если план = 0).
-//     Уточнено с пользователем 10.09.2026 (см. HREDU-183_tep_reports.js) -- в тексте ТЗ
-//     написано "план/факт", реально считаем факт/план, подтверждено сверкой с примером
-//     (Новосибирск: 10/11=91%, Красноярск: 9/10=90%, Итог: 70/72=97% -- ВСЕ совпадают
-//     ТОЛЬКО с факт/план, не план/факт).
+// ПРОВЕРКИ:
+//   1) ИТОГОВАЯ СВЕРКА: сумма по городам (расчёт А) должна СОВПАСТЬ с числом по всей
+//      матрице (расчёт Б) для каждой из 4 величин (total/mandatory/fact/
+//      completed_in_audience). Если совпало -- разбивка по городам не теряет и не
+//      дублирует людей относительно уже провalidated расчёта из HREDU-183.
+//   2) ПОГОРОДНЫЕ ТОЖДЕСТВА (те же 2 из 3, что в HREDU-183 -- "план==total" тут не
+//      нужно повторять для каждого города, это тривиально по построению):
+//        а) total(город) == mandatory(город) + completed_in_audience(город)
+//        б) fact(город) >= completed_in_audience(город)
+//   3) ПРОВЕРКА НА ДУБЛИ: XQuery иногда может вернуть один и тот же collaborator
+//      несколько раз (например при неаккуратном join) -- считаем count(distinct id) и
+//      сверяем с обычным count(). Несовпадение -- сигнал задвоения исходных данных
+//      (не ошибка бизнес-логики, а проблема данных/запроса).
 //
-// ГРУППИРОВКА ПО ГОРОДУ -- ОТКРЫТЫЙ ВОПРОС (см. ниже "ДОПУЩЕНИЯ"): строки таблицы --
-// это города, где есть хотя бы 1 сотрудник в АУДИТОРИИ МАТРИЦЫ (т.е. Общее > 0).
-// Город, где есть только "факт" (кто-то когда-то прошёл обучение, но сейчас не входит
-// в аудиторию матрицы) -- НЕ получает отдельную строку в этой версии (см. ДОПУЩЕНИЯ).
+// Если ВСЁ "OK" -- это сильное свидетельство, что арифметика разбивки по городам верна
+// (сама бизнес-логика total/plan/fact/mandatory/percent уже была отдельно подтверждена
+// сверкой с реальным примером таблицы -- см. шапку HREDU-182_procent_obuchennyh.js).
 //
-// ДОПУЩЕНИЯ (уточнить с пользователем при первом реальном прогоне):
-//   1. Строки = города из АУДИТОРИИ матрицы (после ручных фильтров). Если Факт для
-//      города, которого нет в этом списке, "потеряется" -- нужно решить, показывать ли
-//      для него отдельную строку с Общее=0.
-//   2. Сотрудники БЕЗ заполненного города (custom_elem "sity" пустой) -- попадают в
-//      отдельную строку "(без города)", чтобы не терять данные молча.
-//   3. Итоговая строка "Общий итог" -- сумма по всем городам (включая "(без города)").
-//   4. Сортировка строк -- по алфавиту (простое сравнение строк, БЕЗ гарантии точной
-//      русской локали в этом движке) + "Общий итог" всегда последней строкой.
-//
-// Параметры/фильтры (matrix_id, macroregion, mir_code, position_common_id, program_id)
-// читаются ИЗ URL -- точно так же, как в HREDU-183_tep_reports.js. macroregion в этой
-// выборке работает как ПРЕДФИЛЬТР (например "Восток" -- сузить список городов до
-// одного макрорегиона, как в примере), а группировка идёт уже ПО ГОРОДУ внутри него.
-//
-// ВАЖНО про RESULT: как и в остальных выборках -- RESULT это ПРЯМО массив строк.
+// КАК ЗАПУСТИТЬ: как обычная выборка "Табличные данные", НА СТРАНИЦЕ, где в URL уже
+// есть matrix_id и остальные фильтры (после "Применить" в HREDU-183_filtry_modal_shag1.js
+// или HREDU_182_filtry_percent.js -- любая из двух модалок подойдёт, читаются только
+// 5 общих фильтров, result_type не используется).
 // =====================================================================
 
-DEBUG = true;              // На проде поставить false после тестирования
-LOG_NAME = "agent";        // TODO: заполнить после создания документа в админке
-CUR_OBJECT_ID = 0;         // TODO: заполнить ID документа выборки после её создания в админке (LogAlert защищена try/catch -- забытый 0 не обрушит Run())
-
-// TODO (14.09.2026, ОБЯЗАТЕЛЬНО ЗАПОЛНИТЬ ПЕРЕД ИСПОЛЬЗОВАНИЕМ КЛИКАБЕЛЬНОСТИ): реальный
-// адрес страницы ТЭП-отчётов (та же страница, где сейчас 4 виджета ТЭП + кнопка
-// "Настроить фильтры" на HREDU-183_filtry_modal_shag1.js). В тестах использовался
-// "mode=matrix_test" -- если это НЕ финальная production-страница, замени на неё.
-TEP_REPORT_PAGE_URL = "/view_doc.html?mode=matrix_test";
-
-//-------------------------------------------------------------------------
-//              Область функций
-//-------------------------------------------------------------------------
+DEBUG = true;
+LOG_NAME = "agent";
+CUR_OBJECT_ID = 0; // TODO: заполнить после создания документа в админке (LogAlert защищена try/catch)
 
 function LogAlert(typeLog, message)
 {
@@ -82,6 +58,11 @@ function LogAlert(typeLog, message)
         // ничего -- сбой логирования не должен ронять основной код
     }
 }
+
+//-------------------------------------------------------------------------
+//              Продублированные функции (см. HREDU-182_procent_obuchennyh.js /
+//              HREDU-183_diagnostic_tep_crosscheck.js -- без повторной документации)
+//-------------------------------------------------------------------------
 
 function GetRequestUrlSafe()
 {
@@ -188,35 +169,18 @@ function GetMacroregionRows()
     return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-/*
- * НОВОЕ (14.09.2026): город -- custom_elem "sity" (имя поля подтверждено пользователем
- * реальным XML документа collaborator). Та же схема, что GetMacroregionRows()/
- * GetMirCodeRows() -- один SQL на всех активных сотрудников сразу.
- * @returns {Object[]}   -   Массив {id, sity}.
- */
 function GetCityRows()
 {
-    LogAlert(1, "GetCityRows(). НАЧАЛО");
-    var sqlText, rows;
+    var sqlText;
     sqlText = "";
     sqlText = sqlText + "select cs.id,\r\n";
     sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''sity'']/value)[1]', 'varchar(max)') as sity\r\n";
     sqlText = sqlText + "from collaborators cs\r\n";
     sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
     sqlText = sqlText + "where cs.is_dismiss != 1";
-    rows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetCityRows(). Строк: " + ArrayCount(rows));
-    LogAlert(1, "GetCityRows(). КОНЕЦ");
-    return rows;
+    return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-/*
- * Находит город конкретного сотрудника; "(без города)" если поле пустое/не найдено
- * (см. ДОПУЩЕНИЕ №2 в шапке файла -- чтобы не терять данные молча).
- * @param {Object[]} cityRows
- * @param {number} collaboratorID
- * @returns {string}
- */
 function FindCity(cityRows, collaboratorID)
 {
     var cityRow, sCity;
@@ -268,7 +232,6 @@ function ResolveMirCodeText(iMirCodeID)
 
 function GetMatrixAudienceCollaboratorRows(matrixDoc, collaboratorRows)
 {
-    LogAlert(1, "GetMatrixAudienceCollaboratorRows(). НАЧАЛО");
     var iAudiencePositionCommonId, iAudienceMirCodeId, sAudienceMirCodeText;
     var allowedPositionIds, mirCodeRows, filteredRows, i;
 
@@ -300,13 +263,9 @@ function GetMatrixAudienceCollaboratorRows(matrixDoc, collaboratorRows)
         }
     }
 
-    LogAlert(1, "GetMatrixAudienceCollaboratorRows(). КОНЕЦ. Итого в аудитории: " + ArrayCount(filteredRows));
     return filteredRows;
 }
 
-/*
- * Применяет 4 ручных фильтра пользователя -- идентично HREDU-183_tep_reports.js.
- */
 function ApplyManualFilters(collaboratorRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows)
 {
     var allowedPositionIds, mirCodeRows, filteredRows, i, macroRow;
@@ -369,11 +328,32 @@ function FindCompletionDate(dateRows, collaboratorID, programID)
 }
 
 /*
- * Находит (или создаёт) накопитель по городу в аккумулирующем массиве -- т.к. ArraySelect
- * по строке-выражению не годится для ИЗМЕНЯЕМОГО накопителя, ищем циклом.
- * @param {Object[]} acc
- * @param {string} sCity
- * @returns {Object}
+ * Считает кол-во пар "сотрудник x программа" и, отдельно, кол-во таких пар с уже
+ * заполненной датой прохождения -- РАСЧЁТ Б (целиком, без городов). Идентична функции
+ * из HREDU-183_diagnostic_tep_crosscheck.js.
+ * @returns {Object}   -   { totalPairs, completedPairs }
+ */
+function CountPairs(collaboratorRows, programIds, dateRows)
+{
+    var i, j, totalPairs, completedPairs, sDate;
+    totalPairs = 0;
+    completedPairs = 0;
+    for (i = 0; i < ArrayCount(collaboratorRows); i++)
+    {
+        for (j = 0; j < ArrayCount(programIds); j++)
+        {
+            totalPairs = totalPairs + 1;
+            sDate = FindCompletionDate(dateRows, Int(collaboratorRows[i].id), programIds[j]);
+            if (sDate != "") { completedPairs = completedPairs + 1; }
+        }
+    }
+    return { totalPairs: totalPairs, completedPairs: completedPairs };
+}
+
+/*
+ * РАСЧЁТ А (по городам) -- находит/создаёт накопитель города; добавлено новое поле
+ * completedInAudience (нет в самом отчёте HREDU-182_procent_obuchennyh.js -- нужно
+ * только здесь, для тождества "total == mandatory + completedInAudience" по городу).
  */
 function GetOrCreateCityAcc(acc, sCity)
 {
@@ -383,101 +363,28 @@ function GetOrCreateCityAcc(acc, sCity)
         if (acc[i].city == sCity) { return acc[i]; }
     }
     var newAcc;
-    newAcc = { city: sCity, total: 0, mandatory: 0, fact: 0 };
+    newAcc = { city: sCity, total: 0, mandatory: 0, fact: 0, completedInAudience: 0 };
     acc.push(newAcc);
     return newAcc;
 }
 
 /*
- * Округление факт/план в проценты (до целого, обычное арифметическое округление).
- * "-" если план = 0 (см. ДОПУЩЕНИЕ -- в реальных данных пока не встречалось, но
- * возможно в теории, если у города вся аудитория уже "выпала" -- на деле план всегда
- * = общее в этой версии, так что план=0 означает и общее=0, т.е. города вообще нет
- * в аудитории -- такая строка сюда не попадёт, см. ДОПУЩЕНИЕ №1).
- * @param {number} nFact
- * @param {number} nPlan
- * @returns {string}
+ * Кол-во РАЗЛИЧНЫХ (distinct) id в массиве строк-сотрудников -- для проверки на дубли
+ * (см. "ПРОВЕРКА НА ДУБЛИ" в шапке файла). Без regex/непроверенных функций -- обычный
+ * цикл + поиск в уже накопленном списке (тот же приём, что и GetOrCreateCityAcc).
+ * @param {Object[]} collaboratorRows
+ * @returns {number}
  */
-function FormatPercent(nFact, nPlan)
+function CountDistinctIds(collaboratorRows)
 {
-    if (nPlan <= 0) { return "-"; }
-    return String(Int((nFact / nPlan) * 100 + 0.5)) + "%";
-}
-
-/*
- * ИСПРАВЛЕНИЕ (14.09.2026, БАГ С "&macroregion="): реальный тест показал, что итоговая
- * ссылка искажается ПРИ ОТОБРАЖЕНИИ виджетом "Табличные данные" -- "&macroregion="
- * превращалось в "%C2%AForegion=" (т.е. "&macr" пропадало, вместо него -- символ "¯",
- * U+00AF). Причина: "macr" -- это ИМЕННО ТАКОЕ имя у "легаси" HTML-сущности безточки
- * с запятой (как &amp, &lt, &nbsp) -- она означает символ "¯" (macron) и НЕ требует ";"
- * на конце. Судя по всему, виджет вставляет значение поля "link"/*_link ПРЯМО в атрибут
- * href как HTML-текст, без экранирования "&" в "&amp;" -- поэтому браузер видит в
- * "&macroregion=" сначала "&macr" (валидная сущность!) и стирает её, заменяя на "¯",
- * а не сам символ "&". Никакого отношения к UrlEncodeQuery()/percent-encoding это не
- * имеет -- проблема на уровне HTML, а не URL. Фикс: экранируем "&" САМИ в "&amp;" перед
- * тем, как класть готовую ссылку в поле RESULT -- тогда браузер сначала раскодирует
- * "&amp;" обратно в "&", и только ПОСЛЕ этого получившийся URL uже не содержит "&macr"
- * как отдельную подстроку для сущности. Без regex -- см. HtmlEscapeAmp() ниже, тот же
- * строковый API (StrOptSubStrPos/StrRangePos/StrLen), что и в GetQueryParam().
- * @param {string} sUrl
- * @returns {string}
- */
-function HtmlEscapeAmp(sUrl)
-{
-    var sResult, iPos, iUrlLen, iSearchStart;
-    sResult = "";
-    iSearchStart = 0;
-    iUrlLen = StrLen(sUrl);
-    while (true)
+    var seenIds, i, id;
+    seenIds = [];
+    for (i = 0; i < ArrayCount(collaboratorRows); i++)
     {
-        iPos = StrOptSubStrPos(sUrl, "&", false, iSearchStart);
-        if (iPos == undefined)
-        {
-            sResult = sResult + StrRangePos(sUrl, iSearchStart, iUrlLen);
-            break;
-        }
-        sResult = sResult + StrRangePos(sUrl, iSearchStart, iPos) + "&amp;";
-        iSearchStart = iPos + 1;
+        id = Int(collaboratorRows[i].id);
+        if (!IdArrayContains(seenIds, id)) { seenIds.push(id); }
     }
-    return sResult;
-}
-
-/*
- * Строит ссылку на страницу ТЭП-отчётов (HREDU-183_tep_reports.js) с нужным
- * набором параметров -- ровно те же параметры, что читает сама ТЭП-выборка
- * (см. GetQueryParam(...) в HREDU-183_tep_reports.js): matrix_id, macroregion,
- * mir_code, position_common_id, program_id, result_type + НОВЫЙ параметр city
- * (см. HREDU-183_tep_reports.js -- добавлен туда для этого дрилл-дауна).
- *
- * sCity = "" (пустая строка) -> ссылка ведёт на ВЕСЬ матрикс без фильтра по городу
- * (используется для строки "Общий итог").
- *
- * @param {number} iMatrixId
- * @param {string} sMacroregionFilter
- * @param {string} sMirCodeFilter
- * @param {number} iPositionFilter
- * @param {number} iProgramFilter
- * @param {string} sResultType   -   "total"|"plan"|"fact"|"mandatory"
- * @param {string} sCity
- * @returns {string}
- */
-function BuildTepLink(iMatrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, sResultType, sCity)
-{
-    var oQueryParams, sQueryString, sSeparator;
-    oQueryParams = {
-        matrix_id: String(iMatrixId),
-        macroregion: sMacroregionFilter,
-        mir_code: sMirCodeFilter,
-        position_common_id: String(iPositionFilter),
-        program_id: String(iProgramFilter),
-        result_type: sResultType,
-        city: sCity
-    };
-    sQueryString = UrlEncodeQuery(oQueryParams);
-    sSeparator = (StrOptSubStrPos(TEP_REPORT_PAGE_URL, "?", false) != undefined ? "&" : "?");
-    // HtmlEscapeAmp() -- см. комментарий над ней: "&" экранируем в "&amp;", потому что
-    // виджет вставляет это значение прямо в HTML (href) без собственного экранирования.
-    return HtmlEscapeAmp(TEP_REPORT_PAGE_URL + sSeparator + sQueryString);
+    return ArrayCount(seenIds);
 }
 
 //-------------------------------------------------------------------------
@@ -486,13 +393,17 @@ function BuildTepLink(iMatrixId, sMacroregionFilter, sMirCodeFilter, iPositionFi
 
 function Run()
 {
-    LogAlert(2, "Run(). НАЧАЛО (Процент обученных)");
+    LogAlert(2, "Run(). НАЧАЛО (диагностика сверки Процент обученных)");
     var sFullUrl, matrixId, matrixDoc, matrixName, iProgramFilter, sMacroregionFilter, sMirCodeFilter, iPositionFilter;
     var programIds, filteredProgramIds, i, j;
     var activeRows, audienceRows, audienceFilteredRows, factBaseFilteredRows;
-    var macroRows, mirCodeRows, cityRows, dateRows;
+    var macroRows, cityRows, dateRows;
     var acc, cityAcc, sCity, sDate, row;
-    var totalAcc, resultRows, id;
+    var sumTotal, sumMandatory, sumFact, sumCompletedInAudience;
+    var wholeCounts, factWholeCounts, nWholeTotal, nWholeMandatory, nWholeFact, nWholeCompletedInAudience;
+    var checkTotal, checkMandatory, checkFact, checkCompleted;
+    var nAudienceDistinct, nAudienceRaw, nFactBaseDistinct, nFactBaseRaw, checkAudienceDup, checkFactBaseDup;
+    var resultRows, id;
 
     RESULT = [];
 
@@ -507,13 +418,9 @@ function Run()
         sMirCodeFilter = GetQueryParam(sFullUrl, "mir_code");
         iPositionFilter = OptInt(GetQueryParam(sFullUrl, "position_common_id"), 0);
 
-        LogAlert(1, "Run(). matrixId=" + matrixId + " programFilter=" + iProgramFilter
-            + " macroregionFilter=[" + sMacroregionFilter + "] mirCodeFilter=[" + sMirCodeFilter
-            + "] positionCommonIdFilter=" + iPositionFilter);
-
         if (matrixId == 0)
         {
-            throw ("Не передан matrix_id -- выбранная пользователем матрица обучения");
+            throw ("Не передан matrix_id -- открой эту диагностику на странице, где в URL уже есть фильтры (после \"Применить\" в любой из двух модалок)");
         }
 
         matrixDoc = tools.open_doc(matrixId).TopElem;
@@ -529,10 +436,6 @@ function Run()
                 if (Int(programIds[i]) == iProgramFilter) { filteredProgramIds.push(programIds[i]); }
             }
             programIds = filteredProgramIds;
-            if (ArrayCount(programIds) == 0)
-            {
-                throw ("Программа [" + iProgramFilter + "] не найдена среди программ выбранной матрицы");
-            }
         }
 
         activeRows = GetActiveCollaboratorRows();
@@ -540,18 +443,15 @@ function Run()
         cityRows = GetCityRows();
         dateRows = GetCompletionDateRows(programIds);
 
-        // --- Пул "аудитория матрицы" (для total/plan/mandatory) ---
+        // --- Пул "аудитория матрицы" (для total/mandatory/completedInAudience) ---
         audienceRows = GetMatrixAudienceCollaboratorRows(matrixDoc, activeRows);
         audienceFilteredRows = ApplyManualFilters(audienceRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
-        LogAlert(1, "Run(). Сотрудников в аудитории (после ручных фильтров): " + ArrayCount(audienceFilteredRows));
 
         // --- Пул "без аудитории" (для fact) ---
         factBaseFilteredRows = ApplyManualFilters(activeRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
-        LogAlert(1, "Run(). Сотрудников БЕЗ аудитории (после ручных фильтров, база для Факт): " + ArrayCount(factBaseFilteredRows));
 
+        // ===================== РАСЧЁТ А: ПО ГОРОДАМ =====================
         acc = [];
-
-        // total/mandatory -- по каждому (сотрудник аудитории x программа)
         for (i = 0; i < ArrayCount(audienceFilteredRows); i++)
         {
             sCity = FindCity(cityRows, Int(audienceFilteredRows[i].id));
@@ -561,15 +461,9 @@ function Run()
                 sDate = FindCompletionDate(dateRows, Int(audienceFilteredRows[i].id), programIds[j]);
                 cityAcc.total = cityAcc.total + 1;
                 if (sDate == "") { cityAcc.mandatory = cityAcc.mandatory + 1; }
+                else { cityAcc.completedInAudience = cityAcc.completedInAudience + 1; }
             }
         }
-
-        // fact -- по каждому (сотрудник БЕЗ аудитории x программа), только пройденные;
-        // ДОПУЩЕНИЕ №1 (см. шапку файла): город учитывается, только если для него УЖЕ
-        // есть накопитель из пула аудитории (GetOrCreateCityAcc создаст новый, если нет --
-        // то есть фактически город БЕЗ аудитории тоже получит свою строку с total=0 --
-        // это осознанный выбор: лучше показать "лишнюю" строку с Общее=0, чем молча
-        // потерять реальных прошедших обучение людей).
         for (i = 0; i < ArrayCount(factBaseFilteredRows); i++)
         {
             sCity = FindCity(cityRows, Int(factBaseFilteredRows[i].id));
@@ -581,103 +475,127 @@ function Run()
             }
         }
 
-        // Сортировка по алфавиту -- ОБЫЧНЫМ ЦИКЛОМ (пузырьком), а не через возможную
-        // функцию-хелпер вроде ArraySort(): такая функция НИ РАЗУ не встречалась и не
-        // подтверждалась в этом тикете (в отличие от ArraySelectDistinct/ArrayExtract/
-        // ArrayMerge и т.д.), а гадать с непроверенными функциями платформы уже дорого
-        // обходилось (regex, function-as-value, .indexOf/.substring -- см. историю
-        // тикета) -- поэтому используем только то, что 100% работает: простые циклы
-        // и операторы сравнения.
-        var iOuter, iInner, tmpAcc;
-        for (iOuter = 0; iOuter < ArrayCount(acc) - 1; iOuter++)
+        sumTotal = 0; sumMandatory = 0; sumFact = 0; sumCompletedInAudience = 0;
+        for (i = 0; i < ArrayCount(acc); i++)
         {
-            for (iInner = 0; iInner < ArrayCount(acc) - 1 - iOuter; iInner++)
-            {
-                if (acc[iInner].city > acc[iInner + 1].city)
-                {
-                    tmpAcc = acc[iInner];
-                    acc[iInner] = acc[iInner + 1];
-                    acc[iInner + 1] = tmpAcc;
-                }
-            }
+            sumTotal = sumTotal + acc[i].total;
+            sumMandatory = sumMandatory + acc[i].mandatory;
+            sumFact = sumFact + acc[i].fact;
+            sumCompletedInAudience = sumCompletedInAudience + acc[i].completedInAudience;
         }
+
+        // ===================== РАСЧЁТ Б: ЦЕЛИКОМ, БЕЗ ГОРОДОВ =====================
+        wholeCounts = CountPairs(audienceFilteredRows, programIds, dateRows);
+        nWholeTotal = wholeCounts.totalPairs;
+        nWholeMandatory = wholeCounts.totalPairs - wholeCounts.completedPairs;
+        nWholeCompletedInAudience = wholeCounts.completedPairs;
+
+        factWholeCounts = CountPairs(factBaseFilteredRows, programIds, dateRows);
+        nWholeFact = factWholeCounts.completedPairs;
+
+        LogAlert(1, "Run(). А: sumTotal=" + sumTotal + " sumMandatory=" + sumMandatory + " sumFact=" + sumFact
+            + " sumCompletedInAudience=" + sumCompletedInAudience);
+        LogAlert(1, "Run(). Б: nWholeTotal=" + nWholeTotal + " nWholeMandatory=" + nWholeMandatory + " nWholeFact=" + nWholeFact
+            + " nWholeCompletedInAudience=" + nWholeCompletedInAudience);
+
+        checkTotal = (sumTotal == nWholeTotal);
+        checkMandatory = (sumMandatory == nWholeMandatory);
+        checkFact = (sumFact == nWholeFact);
+        checkCompleted = (sumCompletedInAudience == nWholeCompletedInAudience);
+
+        // ===================== ПРОВЕРКА НА ДУБЛИ =====================
+        nAudienceRaw = ArrayCount(audienceFilteredRows);
+        nAudienceDistinct = CountDistinctIds(audienceFilteredRows);
+        checkAudienceDup = (nAudienceRaw == nAudienceDistinct);
+
+        nFactBaseRaw = ArrayCount(factBaseFilteredRows);
+        nFactBaseDistinct = CountDistinctIds(factBaseFilteredRows);
+        checkFactBaseDup = (nFactBaseRaw == nFactBaseDistinct);
 
         resultRows = [];
         id = 0;
-        totalAcc = { total: 0, mandatory: 0, fact: 0 };
+
+        id = id + 1;
+        resultRows.push({ id: id, metric: "matrix_id / название матрицы", value: matrixId + " / " + matrixName, check: "" });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "Фильтры (macroregion/mir_code/position_common_id/program_id)",
+            value: "[" + sMacroregionFilter + "] / [" + sMirCodeFilter + "] / " + iPositionFilter + " / " + iProgramFilter, check: "" });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "Программ в матрице (после фильтра program_id)", value: String(ArrayCount(programIds)), check: "" });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "Городов в разбивке (расчёт А, включая \"(без города)\", без \"Общий итог\")", value: String(ArrayCount(acc)), check: "" });
+
+        id = id + 1;
+        resultRows.push({ id: id, metric: "-- 1) ПРОВЕРКА НА ДУБЛИ (сырые строки XQuery vs distinct id) --", value: "", check: "" });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "Аудитория матрицы: строк / уникальных id", value: nAudienceRaw + " / " + nAudienceDistinct, check: (checkAudienceDup ? "OK" : "ДУБЛИ!") });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "База для Факт (без аудитории): строк / уникальных id", value: nFactBaseRaw + " / " + nFactBaseDistinct, check: (checkFactBaseDup ? "OK" : "ДУБЛИ!") });
+
+        id = id + 1;
+        resultRows.push({ id: id, metric: "-- 2) ИТОГОВАЯ СВЕРКА: сумма по городам (А) vs целиком по матрице (Б) --", value: "", check: "" });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "total: сумма по городам vs целиком", value: sumTotal + " vs " + nWholeTotal, check: (checkTotal ? "OK" : "MISMATCH!") });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "mandatory: сумма по городам vs целиком", value: sumMandatory + " vs " + nWholeMandatory, check: (checkMandatory ? "OK" : "MISMATCH!") });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "fact: сумма по городам vs целиком", value: sumFact + " vs " + nWholeFact, check: (checkFact ? "OK" : "MISMATCH!") });
+        id = id + 1;
+        resultRows.push({ id: id, metric: "(справочно) пройдено-в-аудитории: сумма по городам vs целиком", value: sumCompletedInAudience + " vs " + nWholeCompletedInAudience, check: (checkCompleted ? "OK" : "MISMATCH!") });
+
+        id = id + 1;
+        resultRows.push({ id: id, metric: "-- 3) ПОГОРОДНЫЕ ТОЖДЕСТВА (для каждого города отдельно) --", value: "", check: "" });
         for (i = 0; i < ArrayCount(acc); i++)
         {
-            id = id + 1;
             row = acc[i];
+            id = id + 1;
             resultRows.push({
                 id: id,
-                city: row.city,
-                total: row.total,
-                plan: row.total, // План = Общее, см. "РЕШЕНИЯ" в шапке
-                fact: row.fact,
-                percent: FormatPercent(row.fact, row.total),
-                mandatory: row.mandatory,
-                // ПОДТВЕРЖДЕНО (14.09.2026, реальный тест пользователя): виджет "Табличные
-                // данные" различает клик ТОЛЬКО по строке целиком -- один "link" на всю
-                // строку, независимо от того, по какой колонке/числу кликнули. Отдельных
-                // ссылок на план/факт/обязательно НЕ делаем (см. РЕШЕНИЕ в шапке файла) --
-                // клик по строке города всегда ведёт в ТЭП-отчёт в режиме "total"; если
-                // нужен план/факт/обязательно -- пользователь переключает режим на самой
-                // целевой странице через поле "Режим отчёта" в HREDU-183_filtry_modal_shag1.js
-                // (оно там уже есть).
-                link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "total", row.city)
+                metric: "[" + row.city + "] total == mandatory + пройдено-в-аудитории",
+                value: row.total + " == " + row.mandatory + " + " + row.completedInAudience,
+                check: (row.total == (row.mandatory + row.completedInAudience) ? "OK" : "MISMATCH!")
             });
-            totalAcc.total = totalAcc.total + row.total;
-            totalAcc.mandatory = totalAcc.mandatory + row.mandatory;
-            totalAcc.fact = totalAcc.fact + row.fact;
+            id = id + 1;
+            resultRows.push({
+                id: id,
+                metric: "[" + row.city + "] fact >= пройдено-в-аудитории",
+                value: row.fact + " >= " + row.completedInAudience,
+                check: (row.fact >= row.completedInAudience ? "OK" : "MISMATCH!")
+            });
         }
 
         id = id + 1;
-        // sCity = "" для "Общий итог" -- ссылка ведёт на ВЕСЬ матрикс (без фильтра по
-        // городу), а не на конкретный город.
-        resultRows.push({
-            id: id,
-            city: "Общий итог",
-            total: totalAcc.total,
-            plan: totalAcc.total,
-            fact: totalAcc.fact,
-            percent: FormatPercent(totalAcc.fact, totalAcc.total),
-            mandatory: totalAcc.mandatory,
-            link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramFilter, "total", "")
-        });
+        resultRows.push({ id: id, metric: "-- 4) СПРАВОЧНО: сами числа по городам (для визуальной сверки с реальными данными) --", value: "", check: "" });
+        for (i = 0; i < ArrayCount(acc); i++)
+        {
+            row = acc[i];
+            id = id + 1;
+            resultRows.push({
+                id: id,
+                metric: row.city,
+                value: "total=" + row.total + " mandatory=" + row.mandatory + " fact=" + row.fact + " completedInAudience=" + row.completedInAudience,
+                check: ""
+            });
+        }
 
         RESULT = resultRows;
-        LogAlert(2, "Run(). Готово. Городов: " + (ArrayCount(resultRows) - 1) + " + итоговая строка");
+        LogAlert(2, "Run(). Готово. checkTotal=" + checkTotal + " checkMandatory=" + checkMandatory
+            + " checkFact=" + checkFact + " checkCompleted=" + checkCompleted
+            + " checkAudienceDup=" + checkAudienceDup + " checkFactBaseDup=" + checkFactBaseDup);
     }
     catch (_ex)
     {
-        RESULT = [];
-        ERROR = 1;
-        MESSAGE = ExtractUserError(_ex);
-        LogAlert(4, "Run(). ОШИБКА: " + MESSAGE);
+        RESULT = [{ id: 0, metric: "ОШИБКА", value: ExtractUserError(_ex), check: "" }];
+        LogAlert(4, "Run(). ОШИБКА: " + ExtractUserError(_ex));
     }
     LogAlert(2, "Run(). КОНЕЦ");
 }
 
 Run();
 
-// ЗАКРЫТО (14.09.2026, КЛИКАБЕЛЬНОСТЬ): реальный тест пользователя подтвердил, что
-// виджет "Табличные данные" различает клик ТОЛЬКО по строке целиком -- отдельной ссылки
-// "на конкретную ячейку/число" у него нет (независимо от того, по какой колонке
-// кликнули, срабатывает один и тот же "link" всей строки). Поэтому четыре поля
-// total_link/plan_link/fact_link/mandatory_link и соответствующие им закомментированные
-// варианты колонок -- УБРАНЫ как мёртвый код (см. историю тикета -- раньше они были
-// здесь как непроверенная гипотеза). РЕШЕНИЕ: один клик по строке города -> ТЭП-отчёт в
-// режиме "total"; план/факт/обязательно пользователь смотрит НЕ переходом по клику, а
-// либо прямо в этой таблице (числа уже видны), либо переключает "Режим отчёта" вручную
-// в фильтрах на целевой странице (см. HREDU-183_filtry_modal_shag1.js).
 COLUMNS = [
     { "data": "id", "editable": true, "hidden": true, "sortable": false },
-    { "data": "link", "hidden": true, "editable": false, "sortable": false }, // проверенный row-level link
-    { "data": "city", "title": "Город", "type": "string", "editable": false, "sortable": true },
-    { "data": "total", "title": "Общее кол-во сотрудников", "type": "integer", "editable": false, "sortable": true },
-    { "data": "plan", "title": "План", "type": "integer", "editable": false, "sortable": true },
-    { "data": "fact", "title": "Факт", "type": "integer", "editable": false, "sortable": true },
-    { "data": "percent", "title": "Процент", "type": "string", "editable": false, "sortable": false },
-    { "data": "mandatory", "title": "Обязательно к прохождению", "type": "integer", "editable": false, "sortable": true }
+    { "data": "metric", "title": "Показатель", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "50%" },
+    { "data": "value", "title": "Значение", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "35%" },
+    { "data": "check", "title": "Проверка", "type": "string", "editable": false, "sortable": false, "width": "15%" }
 ];
