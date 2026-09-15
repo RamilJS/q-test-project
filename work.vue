@@ -1,90 +1,49 @@
-// HREDU-183. ТЭП_общее_кол-во / ТЭП_план / ТЭП_факт / ТЭП_обязательно -- выборка для
-// Табличных данных. Один файл, четыре режима через параметр result_type -- по образцу
-// education_accept_event_card (там тоже один result_type переключает поведение одной
-// выборки). Построено на основе HREDU-181_vostok_polny_spisok_draft.js -- та же матрица/
-// программы/сотрудники/даты/фильтры, плюс новое: аудитория матрицы и разбиение по
-// результату (см. ниже).
+// =====================================================================
+// HREDU-183. Диагностика: сверка арифметики между 4 режимами ТЭП (total/plan/fact/
+// mandatory) для ОДНОЙ И ТОЙ ЖЕ матрицы+фильтров за ОДИН прогон -- отвечает на вопрос
+// "как точно проверить, что все 4 отчёта считаются правильно" (задан пользователем
+// 10.09.2026, "как точно проверить я не знаю").
 //
-// ТЗ (HREDU-183, полный текст прислан пользователем 10.09.2026):
-//   Общее кол-во сотрудников -- все, кто подходят под матрицу (должность + мир-код).
-//   План -- кол-во сотрудников которые подходят под матрицу и у кого уже наступил
-//     период прохождения тренинга.
-//   Факт -- кол-во сотрудников, прошедших тренинг (НЕ ЗАВИСИМО от условий матрицы).
-//   Обязательно к прохождению -- все, кто подходят под матрицу и при этом ещё не
-//     проходили тренинг.
-//   % обученных -- факт/план (уточнено с пользователем 10.09.2026 -- в тексте ТЗ
-//     написано "план/факт", но по смыслу метрики и по факту подтверждения это факт/план;
-//     сам % не входит в эту выборку -- это отдельный лёгкий расчёт для "Процент обученных",
-//     не список сотрудников).
+// ИДЕЯ: вместо того чтобы сверять 4 РАЗНЫХ виджета вручную (сложно сопоставить, легко
+// упустить разницу в фильтрах между ними) -- один скрипт СРАЗУ считает все 4 числа по
+// ОДНОЙ И ТОЙ ЖЕ логике (см. HREDU-183_tep_reports.js -- функции продублированы 1:1,
+// чтобы диагностика была независимым повторным расчётом, а не вызовом того же кода) и
+// проверяет 3 арифметических тождества, которые ОБЯЗАНЫ выполняться при текущей бизнес-
+// логике (см. "РЕШЕНИЯ" в шапке HREDU-183_tep_reports.js):
 //
-// РЕШЕНИЯ, ПРИНЯТЫЕ С ПОЛЬЗОВАТЕЛЕМ (10.09.2026):
-//   1. Аудитория матрицы (position_common_id + mir_code_id НА САМОЙ cc_learning_matrice,
-//      не на выбранных пользователем фильтрах) -- РЕАЛИЗУЕМ сейчас. Подтверждено
-//      диагностикой (HREDU-183_diagnostic_matrix_audience_fields.js, реальный прогон):
-//      у cc_learning_matrice есть свои поля mir_code_id и position_common_id (см. пример:
-//      матрица id=7682761831139375285 имеет mir_code_id=6940453875862016547,
-//      position_common_id=6389124187847681444). Это МАНДАТОРНОЕ условие "кому вообще
-//      адресована матрица" -- отдельная вещь от РУЧНЫХ фильтров пользователя (те же имена
-//      полей, но разный смысл): ручные фильтры дополнительно СУЖАЮТ то, что уже прошло
-//      через аудиторию, а не заменяют её.
-//   2. "Период прохождения тренинга" (нужен для честного "План") -- НЕ РЕАЛИЗОВАН. На
-//      матрице/элементе есть start_study_period=1/end_study_period=4 (числа, не даты --
-//      см. диагностику), но неясно: единицы измерения и от какой даты сотрудника
-//      отсчитывать. Пользователь решил не тратить на это время сейчас -- УПРОЩЕНИЕ:
-//      План = Общее (без доп. фильтра по периоду). Это совпадает с тем, что мы уже видели
-//      на тестовых данных пользователя раньше в этом тикете (план и общее количество были
-//      равны). ОТКРЫТЫЙ ВОПРОС, вернуться при необходимости -- аналогично открытым
-//      вопросам №1-3 в HREDU-181_vostok_polny_spisok_draft.js.
-//   3. Факт -- "не зависимо от условий матрицы" ПОНИМАЕТСЯ БУКВАЛЬНО: НЕ применяем
-//      фильтр аудитории матрицы для этого режима (сотрудник мог когда-то пройти программу
-//      матрицы, даже если сейчас должность/мир-код уже не подходят под матрицу). Базовый
-//      пул для факта -- все активные сотрудники (как и раньше в HREDU-181), плюс ручные
-//      фильтры пользователя (macroregion/mir_code/position_common_id/program_id) всё
-//      равно применяются -- это их выбор, не аудитория матрицы.
-//   4. Обязательно -- аудитория матрицы (как Общее) МИНУС те, кто прошёл (т.е. строки
-//      с пустой датой прохождения).
+//   1) total == mandatory + completed_in_audience
+//      (Общее = аудитория матрицы. Обязательно = аудитория БЕЗ пройденных. Значит
+//       Общее = Обязательно + пройденные-В-ПРЕДЕЛАХ-аудитории. completed_in_audience --
+//       это ПРОМЕЖУТОЧНОЕ число: сколько из аудитории уже прошли, его НЕТ ни в одном
+//       из 4 реальных отчётов-виджетов, оно посчитано только здесь для сверки.)
+//   2) plan == total
+//      (текущее упрощение -- План = Общее, см. "РЕШЕНИЯ" пункт 2 в шапке
+//       HREDU-183_tep_reports.js -- период прохождения ещё не реализован).
+//   3) fact >= completed_in_audience
+//      (Факт считается БЕЗ ограничения аудиторией матрицы -- значит его база шире,
+//       чем аудитория, и он обязан включать как минимум всех прошедших ИЗ аудитории;
+//       строгое равенство тут НЕ ожидается -- в факте могут быть ещё и те, кто прошёл
+//       программу, но уже не подходит под аудиторию матрицы сейчас).
 //
-// ИТОГОВАЯ АРХИТЕКТУРА: сначала строим ряды "сотрудник x программа" ТОЧНО как в
-// HREDU-181 (программы матрицы, активные сотрудники, дата прохождения, все 4 ручных
-// фильтра из URL). Разница только в ДВУХ местах:
-//   а) для result_type != "fact" -- ПЕРЕД ручными фильтрами дополнительно применяем
-//      аудиторию матрицы (GetMatrixAudienceCollaboratorRows());
-//   б) ПОСЛЕ того, как готовые строки (с completion_date) собраны -- для "fact" оставляем
-//      только строки с НЕпустой датой, для "mandatory" -- только с ПУСТОЙ датой,
-//      для "total"/"plan" -- оставляем все строки без изменений.
+// Если хоть одно тождество не выполняется -- где-то разошлась логика (например
+// фильтры аудитории не совпадают между режимами) -- ЭТО и есть сигнал реальной ошибки.
+// Если все 3 тождества сошлись -- это сильное свидетельство, что арифметика верна
+// (хотя, конечно, не гарантия, что сама бизнес-логика соответствует ТЗ -- это
+// отдельный вопрос, который уже обсуждался и зафиксирован в "РЕШЕНИЯ").
 //
-// Параметр result_type -- один из: "total" | "plan" | "fact" | "mandatory".
-//   ИЗМЕНЕНО (10.09.2026): раньше читался ТОЛЬКО как фиксированное значение на вкладке
-//   "Параметры" отдельного виджета (по виджету на режим). Теперь читается СНАЧАЛА из
-//   URL (как остальные фильтры) -- это открывает дорогу к переключению режима самим
-//   пользователем на фронтенде (вкладки/ссылки/поле в модалке -- способ ещё
-//   обсуждается). Если в URL параметра нет -- запасной путь: старое фиксированное
-//   значение LPE (обратная совместимость с уже настроенными виджетами), иначе "total".
-//   Подробности -- в начале Run().
-// Фильтры (matrix_id, macroregion, mir_code, position_common_id, program_id) читаются
-// ТАК ЖЕ, как в HREDU-181 -- из Request.Url (см. HREDU-183_diagnostic_get_params.js) --
-// это работает надёжно в контексте ВЫБОРКИ (не удалённого действия, там был другой
-// механизм через {{curEnv.curEnvUrl}}, здесь он не нужен).
-//
-// ВАЖНО про RESULT: как и в HREDU-181 -- RESULT это ПРЯМО массив строк, без обёртки.
+// КАК ЗАПУСТИТЬ: как обычная выборка "Табличные данные" (как HREDU-183_tep_reports.js),
+// на СТРАНИЦЕ ТЭП-отчёта, где в URL уже есть matrix_id и остальные фильтры (после
+// "Применить" в модалке) -- скрипт читает их точно так же. result_type НЕ ИСПОЛЬЗУЕТСЯ
+// (диагностика всегда считает ВСЕ 4 числа сразу). Колонки результата: metric / value /
+// check (человекочитаемый статус тождества, только у итоговых строк).
+// =====================================================================
 
-DEBUG = true;              // На проде поставить false после тестирования
-LOG_NAME = "agent";        // TODO: уточнить после создания документа в админке
-CUR_OBJECT_ID = 0;         // TODO: заполнить ID документа выборки после её создания в админке
-
-//-------------------------------------------------------------------------
-//              Область функций
-//-------------------------------------------------------------------------
+DEBUG = true;
+LOG_NAME = "agent";
+CUR_OBJECT_ID = 0; // не забыть заполнить реальным ID после создания документа в админке -- LogAlert теперь защищена try/catch, так что забытый 0 больше не обрушит весь скрипт
 
 function LogAlert(typeLog, message)
 {
-    // ЗАЩИЩЕНО (10.09.2026, по мотивам реальной поломки): если LOG_NAME/CUR_OBJECT_ID
-    // ещё не настроены (например CUR_OBJECT_ID=0 -- заглушка "TODO: заполнить после
-    // создания документа в админке"), вызов может упасть с ошибкой -- а LogAlert()
-    // вызывается ДО главного try/catch в Run(), поэтому необработанное исключение тут
-    // рушило ВЕСЬ Run() целиком: RESULT никогда не устанавливался, таблица оставалась
-    // пустой БЕЗ какого-либо сообщения об ошибке (именно это и произошло на реальном
-    // тесте). Логирование -- вспомогательная вещь, её сбой не должен ронять сам отчёт.
     try
     {
         tools.call_code_library_method("vtbl_log_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
@@ -95,38 +54,22 @@ function LogAlert(typeLog, message)
     }
 }
 
-/*
- * Достаёт полный URL текущей страницы (см. HREDU-181_vostok_polny_spisok_draft.js --
- * тот же приём, подтверждён диагностикой). В контексте ВЫБОРКИ Request.Url надёжен.
- * @returns {string}
- */
+//-------------------------------------------------------------------------
+//              Продублированные функции из HREDU-183_tep_reports.js
+//              (см. комментарии в оригинале -- здесь без повторной документации
+//              каждой функции, только там, где логика диагностики отличается)
+//-------------------------------------------------------------------------
+
 function GetRequestUrlSafe()
 {
-    try
-    {
-        return String(Request.Url);
-    }
-    catch (_ex)
-    {
-        return "";
-    }
+    try { return String(Request.Url); }
+    catch (_ex) { return ""; }
 }
 
-/*
- * Вырезает значение GET-параметра из полного URL строки -- без regex, без методов
- * строк (их нет в этом движке), через штатный API платформы (StrOptSubStrPos/
- * StrRangePos/StrLen), декодирование через UrlDecode(). Идентична версии в
- * HREDU-181_vostok_polny_spisok_draft.js.
- * @param {string} sUrl
- * @param {string} sParamName
- * @returns {string}
- */
 function GetQueryParam(sUrl, sParamName)
 {
     var sAmpMarker, sQMarkMarker, iParamPos, iValueStart, iAmpPos, iValueEnd, sRawValue, iUrlLen;
-
     iUrlLen = StrLen(sUrl);
-
     sAmpMarker = "&" + sParamName + "=";
     iParamPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
     if (iParamPos != undefined)
@@ -137,257 +80,90 @@ function GetQueryParam(sUrl, sParamName)
     {
         sQMarkMarker = "?" + sParamName + "=";
         iParamPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
-        if (iParamPos == undefined)
-        {
-            return "";
-        }
+        if (iParamPos == undefined) { return ""; }
         iValueStart = iParamPos + StrLen(sQMarkMarker);
     }
-
     iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
     iValueEnd = (iAmpPos != undefined ? iAmpPos : iUrlLen);
-
     sRawValue = StrRangePos(sUrl, iValueStart, iValueEnd);
-
-    try
-    {
-        return UrlDecode(sRawValue);
-    }
-    catch (_exDecode)
-    {
-        return sRawValue;
-    }
+    try { return UrlDecode(sRawValue); }
+    catch (_exDecode) { return sRawValue; }
 }
 
-/*
- * Находит все записи cc_learning_matrice с указанным названием (см. открытый вопрос №1
- * в HREDU-181_vostok_polny_spisok_draft.js -- матрица может быть "размножена").
- * @param {string} matrixName
- * @returns {Object[]}
- */
 function GetMatrixRows(matrixName)
 {
-    LogAlert(1, "GetMatrixRows(). НАЧАЛО. matrixName=" + matrixName);
-    var matrixRows;
-    matrixRows = ArraySelectAll(XQuery("for $elem in cc_learning_matrices where $elem/name = " + XQueryLiteral(matrixName) + " return $elem"));
-    LogAlert(1, "GetMatrixRows(). Найдено записей: " + ArrayCount(matrixRows));
-    LogAlert(1, "GetMatrixRows(). КОНЕЦ");
-    return matrixRows;
+    return ArraySelectAll(XQuery("for $elem in cc_learning_matrices where $elem/name = " + XQueryLiteral(matrixName) + " return $elem"));
 }
 
-/*
- * Находит активные элементы (программы) для указанных записей матрицы.
- * @param {number[]} matrixIds
- * @returns {Object[]}
- */
 function GetMatrixElementRows(matrixIds)
 {
-    LogAlert(1, "GetMatrixElementRows(). НАЧАЛО");
-    var elementRows;
-    elementRows = ArraySelectAll(XQuery("for $elem in cc_learning_matrice_elements where MatchSome($elem/cc_learning_matrice_id, (" + ArrayMerge(matrixIds, "This", ",") + ")) and $elem/is_active=true() return $elem"));
-    LogAlert(1, "GetMatrixElementRows(). Найдено элементов: " + ArrayCount(elementRows));
-    LogAlert(1, "GetMatrixElementRows(). КОНЕЦ");
-    return elementRows;
+    return ArraySelectAll(XQuery("for $elem in cc_learning_matrice_elements where MatchSome($elem/cc_learning_matrice_id, (" + ArrayMerge(matrixIds, "This", ",") + ")) and $elem/is_active=true() return $elem"));
 }
 
 /*
- * Собирает уникальный список ID программ (education_method) -- и с самой матрицы,
- * и с её элементов.
- * @param {Object[]} matrixRows
- * @param {Object[]} elementRows
- * @returns {number[]}
- */
-/*
- * ИСПРАВЛЕНО (15.09.2026, аварийное -- "Int(), Unknown source"): матрица может не иметь
- * собственного education_method_id (программы заданы только в её элементах
- * cc_learning_matrice_element -- законный, ожидаемый кейс, реальный тест пользователя
- * это подтвердил). Раньше "Int(This.education_method_id)" падал на Int(undefined).
- * Теперь -- OptInt(..., 0) + отбрасываем нули при сборке allProgramIds (0 -- это "поле
- * не заполнено", а не реальный id программы).
+ * ИСПРАВЛЕНО (15.09.2026, аварийное -- "Int(), Unknown source"): см. HREDU-182_procent_obuchennyh.js --
+ * матрица может не иметь собственного education_method_id (программы только в элементах,
+ * законный кейс) -- Int(undefined) падал. Теперь OptInt(..., 0) + отбрасываем нули.
  */
 function GetProgramIds(matrixRows, elementRows)
 {
-    LogAlert(1, "GetProgramIds(). НАЧАЛО");
-    var matrixProgramIds, elementProgramIds, allProgramIds, programIds, i;
+    var matrixProgramIds, elementProgramIds, allProgramIds, i;
     matrixProgramIds = ArrayExtract(matrixRows, "OptInt(This.education_method_id, 0)");
     elementProgramIds = ArrayExtract(elementRows, "OptInt(This.education_method_id, 0)");
     allProgramIds = [];
-    for (i = 0; i < ArrayCount(matrixProgramIds); i++)
-    {
-        if (Int(matrixProgramIds[i]) > 0) { allProgramIds.push(matrixProgramIds[i]); }
-    }
-    for (i = 0; i < ArrayCount(elementProgramIds); i++)
-    {
-        if (Int(elementProgramIds[i]) > 0) { allProgramIds.push(elementProgramIds[i]); }
-    }
-    programIds = ArraySelectDistinct(allProgramIds, "This");
-    LogAlert(1, "GetProgramIds(). Уникальных программ (после отбрасывания пустых education_method_id): " + ArrayCount(programIds));
-    LogAlert(1, "GetProgramIds(). КОНЕЦ");
-    return programIds;
+    for (i = 0; i < ArrayCount(matrixProgramIds); i++) { if (Int(matrixProgramIds[i]) > 0) { allProgramIds.push(matrixProgramIds[i]); } }
+    for (i = 0; i < ArrayCount(elementProgramIds); i++) { if (Int(elementProgramIds[i]) > 0) { allProgramIds.push(elementProgramIds[i]); } }
+    return ArraySelectDistinct(allProgramIds, "This");
 }
 
-/*
- * Строит справочник { id, title } по программам обучения.
- * @param {number[]} programIds
- * @returns {Object[]}
- */
-function GetProgramTitles(programIds)
-{
-    LogAlert(1, "GetProgramTitles(). НАЧАЛО");
-    var titles, i, programID, educationMethodDoc;
-    titles = [];
-    for (i = 0; i < ArrayCount(programIds); i++)
-    {
-        programID = programIds[i];
-        educationMethodDoc = tools.open_doc(programID).TopElem;
-        titles.push({ id: String(programID), title: String(educationMethodDoc.name) });
-    }
-    LogAlert(1, "GetProgramTitles(). КОНЕЦ");
-    return titles;
-}
-
-/*
- * Читает всех действующих сотрудников (базовый пул, ДО аудитории матрицы и ДО ручных
- * фильтров).
- * @returns {Object[]}
- */
 function GetActiveCollaboratorRows()
 {
-    LogAlert(1, "GetActiveCollaboratorRows(). НАЧАЛО");
-    var collaboratorRows;
-    collaboratorRows = ArraySelectAll(XQuery("for $elem in collaborators where $elem/is_dismiss=false() return $elem"));
-    LogAlert(1, "GetActiveCollaboratorRows(). Найдено сотрудников: " + ArrayCount(collaboratorRows));
-    LogAlert(1, "GetActiveCollaboratorRows(). КОНЕЦ");
-    return collaboratorRows;
+    return ArraySelectAll(XQuery("for $elem in collaborators where $elem/is_dismiss=false() return $elem"));
 }
 
-/*
- * Находит ID документов коллекции "positions", у которых position_common_id совпадает
- * с переданным ID (см. подробное объяснение схемы в HREDU-181_vostok_polny_spisok_draft.js).
- * @param {number} iCommonPositionFilter
- * @returns {number[]}
- */
 function GetPositionIdsByCommonPosition(iCommonPositionFilter)
 {
-    LogAlert(1, "GetPositionIdsByCommonPosition(). НАЧАЛО. iCommonPositionFilter=" + iCommonPositionFilter);
     var positionRows, positionIds, i;
     positionRows = ArraySelectAll(XQuery("for $elem in positions where $elem/position_common_id = " + iCommonPositionFilter + " return $elem"));
     positionIds = [];
-    for (i = 0; i < ArrayCount(positionRows); i++)
-    {
-        positionIds.push(Int(positionRows[i].id));
-    }
-    LogAlert(1, "GetPositionIdsByCommonPosition(). Найдено конкретных должностей: " + ArrayCount(positionIds));
-    LogAlert(1, "GetPositionIdsByCommonPosition(). КОНЕЦ");
+    for (i = 0; i < ArrayCount(positionRows); i++) { positionIds.push(Int(positionRows[i].id)); }
     return positionIds;
 }
 
-/*
- * Проверяет вхождение числа в массив чисел обычным циклом (без ArraySelect()/строк-
- * выражений со ссылкой на внешние переменные -- см. объяснение в HREDU-181).
- * @param {number[]} idArray
- * @param {number} value
- * @returns {boolean}
- */
 function IdArrayContains(idArray, value)
 {
     var i;
     for (i = 0; i < ArrayCount(idArray); i++)
     {
-        if (Int(idArray[i]) == Int(value))
-        {
-            return true;
-        }
+        if (Int(idArray[i]) == Int(value)) { return true; }
     }
     return false;
 }
 
-/*
- * Достаёт макрорегион (custom_elem f_2ewj) по всем действующим сотрудникам одним SQL-запросом.
- * @returns {Object[]}
- */
 function GetMacroregionRows()
 {
-    LogAlert(1, "GetMacroregionRows(). НАЧАЛО");
-    var sqlText, macroRows;
+    var sqlText;
     sqlText = "";
     sqlText = sqlText + "select cs.id,\r\n";
     sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_2ewj'']/value)[1]', 'varchar(max)') as macroregion\r\n";
     sqlText = sqlText + "from collaborators cs\r\n";
     sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
     sqlText = sqlText + "where cs.is_dismiss != 1";
-    macroRows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetMacroregionRows(). Строк: " + ArrayCount(macroRows));
-    LogAlert(1, "GetMacroregionRows(). КОНЕЦ");
-    return macroRows;
+    return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-/*
- * ДОБАВЛЕНО (14.09.2026, для drill-down из "Процент обученных"): город -- custom_elem
- * "sity" (имя технического поля подтверждено пользователем реальным XML документа
- * collaborator -- см. HREDU-182_procent_obuchennyh.js). Нужен, чтобы клик по конкретной
- * строке-городу в таблице "Процент обученных" открывал список ТОЛЬКО по этому городу,
- * а не по всей матрице.
- * @returns {Object[]}   -   Массив {id, sity}.
- */
-function GetCityRows()
-{
-    LogAlert(1, "GetCityRows(). НАЧАЛО");
-    var sqlText, rows;
-    sqlText = "";
-    sqlText = sqlText + "select cs.id,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''sity'']/value)[1]', 'varchar(max)') as sity\r\n";
-    sqlText = sqlText + "from collaborators cs\r\n";
-    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText = sqlText + "where cs.is_dismiss != 1";
-    rows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetCityRows(). Строк: " + ArrayCount(rows));
-    LogAlert(1, "GetCityRows(). КОНЕЦ");
-    return rows;
-}
-
-/*
- * Находит город конкретного сотрудника; "(без города)" если поле пустое/не найдено --
- * та же условность, что в HREDU-182_procent_obuchennyh.js (чтобы совпадало с тем, как
- * группировка строилась там, и фильтр "city=(без города)" из ссылки тоже сработал).
- * @param {Object[]} cityRows
- * @param {number} collaboratorID
- * @returns {string}
- */
-function FindCity(cityRows, collaboratorID)
-{
-    var cityRow, sCity;
-    cityRow = ArrayOptFind(cityRows, "Int(This.id) == Int(collaboratorID)");
-    sCity = (cityRow != undefined && cityRow.sity != undefined ? String(cityRow.sity) : "");
-    return (sCity != "" ? sCity : "(без города)");
-}
-
-/*
- * Достаёт сырое значение мир-кодов (custom_elem f_mir_codes) по всем действующим
- * сотрудникам одним SQL-запросом.
- * @returns {Object[]}
- */
 function GetMirCodeRows()
 {
-    LogAlert(1, "GetMirCodeRows(). НАЧАЛО");
-    var sqlText, rows;
+    var sqlText;
     sqlText = "";
     sqlText = sqlText + "select cs.id,\r\n";
     sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_codes'']/value)[1]', 'varchar(max)') as mir_codes\r\n";
     sqlText = sqlText + "from collaborators cs\r\n";
     sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
     sqlText = sqlText + "where cs.is_dismiss != 1";
-    rows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetMirCodeRows(). Строк: " + ArrayCount(rows));
-    LogAlert(1, "GetMirCodeRows(). КОНЕЦ");
-    return rows;
+    return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-/*
- * Разбирает сырое значение f_mir_codes ("#LASK#17#|#LASM#17#...") в массив кодов без процентов.
- * @param {string} rawValue
- * @returns {string[]}
- */
 function ExtractMirCodes(rawValue)
 {
     var parts, fields, codes, i;
@@ -396,75 +172,35 @@ function ExtractMirCodes(rawValue)
     for (i = 0; i < ArrayCount(parts); i++)
     {
         fields = ArrayDirect(ArraySelect(String(parts[i]).split("#"), "This != ''"));
-        if (ArrayCount(fields) > 0)
-        {
-            codes.push(String(fields[0]));
-        }
+        if (ArrayCount(fields) > 0) { codes.push(String(fields[0])); }
     }
     return codes;
 }
 
-/*
- * Проверяет, есть ли у сотрудника указанный мир-код среди любых его мир-кодов.
- * @param {Object[]} mirCodeRows
- * @param {number} collaboratorID
- * @param {string} mirCodeFilter
- * @returns {boolean}
- */
 function CollaboratorHasMirCode(mirCodeRows, collaboratorID, mirCodeFilter)
 {
     var row, codes;
     row = ArrayOptFind(mirCodeRows, "Int(This.id) == Int(collaboratorID)");
-    if (row == undefined)
-    {
-        return false;
-    }
+    if (row == undefined) { return false; }
     codes = ExtractMirCodes(row.mir_codes);
     return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
 }
 
-/*
- * Резолвит ID объекта cc_mir_codes в его текстовый код -- нужно, чтобы превратить
- * mir_code_id САМОЙ МАТРИЦЫ (аудитория) в текст для сравнения с f_mir_codes сотрудника
- * (та же функция, что в HREDU-183_filtry_modal_shag1.js).
- * @param {number} iMirCodeID
- * @returns {string}
- */
 function ResolveMirCodeText(iMirCodeID)
 {
-    if (OptInt(iMirCodeID, 0) <= 0)
-    {
-        return "";
-    }
-    try
-    {
-        return String(tools.open_doc(Int(iMirCodeID)).TopElem.name);
-    }
-    catch (_ex)
-    {
-        return "";
-    }
+    if (OptInt(iMirCodeID, 0) <= 0) { return ""; }
+    try { return String(tools.open_doc(Int(iMirCodeID)).TopElem.name); }
+    catch (_ex) { return ""; }
 }
 
-/*
- * НОВОЕ (10.09.2026): фильтрует сотрудников по АУДИТОРИИ МАТРИЦЫ -- собственным полям
- * position_common_id/mir_code_id записи cc_learning_matrice (ТЗ: "все, кто подходят под
- * матрицу (должность + мир-код)"). Если у матрицы поле не заполнено (0/пусто) -- по этой
- * оси ограничения нет (аналогично тому, как в ручных фильтрах 0 означает "без фильтра").
- * @param {Object} matrixDoc            -   TopElem документа cc_learning_matrice.
- * @param {Object[]} collaboratorRows   -   Кандидаты (обычно результат GetActiveCollaboratorRows()).
- * @returns {Object[]}
- */
 function GetMatrixAudienceCollaboratorRows(matrixDoc, collaboratorRows)
 {
-    LogAlert(1, "GetMatrixAudienceCollaboratorRows(). НАЧАЛО");
     var iAudiencePositionCommonId, iAudienceMirCodeId, sAudienceMirCodeText;
     var allowedPositionIds, mirCodeRows, filteredRows, i;
 
     iAudiencePositionCommonId = OptInt(matrixDoc.position_common_id, 0);
     iAudienceMirCodeId = OptInt(matrixDoc.mir_code_id, 0);
     sAudienceMirCodeText = ResolveMirCodeText(iAudienceMirCodeId);
-    LogAlert(1, "GetMatrixAudienceCollaboratorRows(). Аудитория матрицы: position_common_id=" + iAudiencePositionCommonId + " mir_code_id=" + iAudienceMirCodeId + " (текст=[" + sAudienceMirCodeText + "])");
 
     filteredRows = collaboratorRows;
 
@@ -475,12 +211,8 @@ function GetMatrixAudienceCollaboratorRows(matrixDoc, collaboratorRows)
         filteredRows = [];
         for (i = 0; i < ArrayCount(collaboratorRows); i++)
         {
-            if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0)))
-            {
-                filteredRows.push(collaboratorRows[i]);
-            }
+            if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0))) { filteredRows.push(collaboratorRows[i]); }
         }
-        LogAlert(1, "GetMatrixAudienceCollaboratorRows(). После фильтра по должности аудитории осталось: " + ArrayCount(filteredRows));
     }
 
     if (sAudienceMirCodeText != "")
@@ -490,46 +222,25 @@ function GetMatrixAudienceCollaboratorRows(matrixDoc, collaboratorRows)
         filteredRows = [];
         for (i = 0; i < ArrayCount(collaboratorRows); i++)
         {
-            if (CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRows[i].id), sAudienceMirCodeText))
-            {
-                filteredRows.push(collaboratorRows[i]);
-            }
+            if (CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRows[i].id), sAudienceMirCodeText)) { filteredRows.push(collaboratorRows[i]); }
         }
-        LogAlert(1, "GetMatrixAudienceCollaboratorRows(). После фильтра по мир-коду аудитории осталось: " + ArrayCount(filteredRows));
     }
 
-    LogAlert(1, "GetMatrixAudienceCollaboratorRows(). КОНЕЦ. Итого в аудитории: " + ArrayCount(filteredRows));
     return filteredRows;
 }
 
-/*
- * Находит минимальную дату прохождения по каждому сотруднику и программе.
- * @param {number[]} programIds
- * @returns {Object[]}
- */
 function GetCompletionDateRows(programIds)
 {
-    LogAlert(1, "GetCompletionDateRows(). НАЧАЛО");
-    var sqlText, dateRows;
+    var sqlText;
     sqlText = "";
     sqlText = sqlText + "select ec.collaborator_id, e.education_method_id, min(ec.start_date) as first_date\r\n";
     sqlText = sqlText + "from event_collaborators ec\r\n";
     sqlText = sqlText + "join events e on e.id = ec.event_id\r\n";
     sqlText = sqlText + "where e.education_method_id in (" + ArrayMerge(programIds, "This", ",") + ")\r\n";
     sqlText = sqlText + "group by ec.collaborator_id, e.education_method_id";
-    dateRows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetCompletionDateRows(). Строк: " + ArrayCount(dateRows));
-    LogAlert(1, "GetCompletionDateRows(). КОНЕЦ");
-    return dateRows;
+    return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-/*
- * Ищет дату прохождения конкретного сотрудника по конкретной программе.
- * @param {Object[]} dateRows
- * @param {number} collaboratorID
- * @param {number} programID
- * @returns {string}
- */
 function FindCompletionDate(dateRows, collaboratorID, programID)
 {
     var dateRow;
@@ -538,114 +249,96 @@ function FindCompletionDate(dateRows, collaboratorID, programID)
 }
 
 /*
- * Ищет макрорегион конкретного сотрудника.
+ * Применяет 4 ручных фильтра пользователя (macroregion/mir_code/position_common_id/
+ * program_id уже применён на programIds раньше) к списку сотрудников -- идентично
+ * блоку в Run() из HREDU-183_tep_reports.js, вынесено в функцию, т.к. тут применяется
+ * ДВАЖДЫ (для audience-пула и для fact-пула).
+ * @param {Object[]} collaboratorRows
+ * @param {number} iPositionFilter
+ * @param {string} sMacroregionFilter
+ * @param {string} sMirCodeFilter
  * @param {Object[]} macroRows
- * @param {number} collaboratorID
- * @returns {string}
- */
-function FindMacroregion(macroRows, collaboratorID)
-{
-    var macroRow;
-    macroRow = ArrayOptFind(macroRows, "Int(This.id) == Int(collaboratorID)");
-    return (macroRow != undefined && macroRow.macroregion != undefined ? String(macroRow.macroregion) : "");
-}
-
-/*
- * Ищет название программы по её ID.
- * @param {Object[]} programTitles
- * @param {number} programID
- * @returns {string}
- */
-function FindProgramTitle(programTitles, programID)
-{
-    var titleRow;
-    titleRow = ArrayOptFind(programTitles, "String(This.id) == String(programID)");
-    return (titleRow != undefined ? String(titleRow.title) : "");
-}
-
-/*
- * Собирает строки отчёта для ОДНОГО сотрудника -- по одной строке на каждую программу
- * матрицы (те же 6 полей, что в HREDU-181).
- * @param {Object} collaborator
- * @param {Object[]} macroRows
- * @param {Object[]} dateRows
- * @param {Object[]} programTitles
- * @param {number[]} programIds
  * @returns {Object[]}
  */
-function BuildReportRows(collaborator, macroRows, dateRows, programTitles, programIds)
+function ApplyManualFilters(collaboratorRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows)
 {
-    var rows, row, i, programID;
-    rows = [];
-    for (i = 0; i < ArrayCount(programIds); i++)
+    var allowedPositionIds, mirCodeRows, filteredRows, i, macroRow;
+
+    filteredRows = collaboratorRows;
+
+    if (iPositionFilter > 0)
     {
-        programID = programIds[i];
-        row = new Object();
-        row.fullname = String(collaborator.fullname);
-        row.position_name = String(collaborator.position_name);
-        row.subdivision_name = String(collaborator.position_parent_name);
-        row.macroregion = FindMacroregion(macroRows, Int(collaborator.id));
-        row.program_name = FindProgramTitle(programTitles, programID);
-        row.completion_date = FindCompletionDate(dateRows, Int(collaborator.id), programID);
-        rows.push(row);
+        allowedPositionIds = GetPositionIdsByCommonPosition(iPositionFilter);
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0))) { filteredRows.push(collaboratorRows[i]); }
+        }
     }
-    return rows;
+
+    if (sMacroregionFilter != "")
+    {
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            macroRow = ArrayOptFind(macroRows, "Int(This.id) == Int(collaboratorRows[i].id)");
+            if (macroRow != undefined && String(macroRow.macroregion) == sMacroregionFilter) { filteredRows.push(collaboratorRows[i]); }
+        }
+    }
+
+    if (sMirCodeFilter != "")
+    {
+        mirCodeRows = GetMirCodeRows();
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            if (CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRows[i].id), sMirCodeFilter)) { filteredRows.push(collaboratorRows[i]); }
+        }
+    }
+
+    return filteredRows;
 }
 
 /*
- * Резолвит выбранную матрицу (matrix_id) в список ID программ обучения.
- * @param {number} matrixId
- * @param {string} matrixName
- * @returns {number[]}
+ * Считает кол-во пар "сотрудник x программа" и, отдельно, кол-во таких пар с уже
+ * заполненной датой прохождения -- по списку сотрудников и списку программ.
+ * @returns {Object}   -   { totalPairs, completedPairs }
  */
-function ResolveProgramIds(matrixId, matrixName)
+function CountPairs(collaboratorRows, programIds, dateRows)
 {
-    LogAlert(1, "ResolveProgramIds(). НАЧАЛО. matrixId=" + matrixId);
-    var matrixRows, matrixIds, elementRows, programIds;
-
-    matrixRows = GetMatrixRows(matrixName);
-    matrixIds = ArrayExtract(matrixRows, "Int(This.id)");
-    if (ArrayCount(matrixIds) == 0)
+    var i, j, totalPairs, completedPairs, sDate;
+    totalPairs = 0;
+    completedPairs = 0;
+    for (i = 0; i < ArrayCount(collaboratorRows); i++)
     {
-        throw ("Не найдено ни одной записи cc_learning_matrice с названием [" + matrixName + "]");
+        for (j = 0; j < ArrayCount(programIds); j++)
+        {
+            totalPairs = totalPairs + 1;
+            sDate = FindCompletionDate(dateRows, Int(collaboratorRows[i].id), programIds[j]);
+            if (sDate != "") { completedPairs = completedPairs + 1; }
+        }
     }
-
-    elementRows = GetMatrixElementRows(matrixIds);
-    programIds = GetProgramIds(matrixRows, elementRows);
-    if (ArrayCount(programIds) == 0)
-    {
-        throw ("У матрицы [" + matrixName + "] не найдено ни одной активной программы");
-    }
-
-    LogAlert(1, "ResolveProgramIds(). КОНЕЦ");
-    return programIds;
+    return { totalPairs: totalPairs, completedPairs: completedPairs };
 }
 
-/*
- * Точка входа. Собирает данные ОДНОГО из 4 отчётов-представлений ТЭП, в зависимости от
- * result_type -- см. подробности архитектуры и принятых решений в шапке файла.
- * @returns {void}
- */
+//-------------------------------------------------------------------------
+//              Точка входа
+//-------------------------------------------------------------------------
+
 function Run()
 {
-    // ИСПРАВЛЕНО (14.09.2026, по мотивам реальной поломки в HREDU-183_tep_reports.js с
-    // CUR_OBJECT_ID): ссылка на "голый" глобал result_type ЗДЕСЬ, ДО try/catch, была
-    // рискованной -- result_type теперь необязательный LPE-параметр (см. изменение
-    // 10.09.2026, чтение сначала из URL), и если он вообще не привязан у виджета,
-    // обращение к необъявленному глобалу могло бы упасть необработанным исключением
-    // ДО того, как основной try/catch успел бы его поймать -- Run() оборвался бы молча,
-    // как уже было один раз с LogAlert()/CUR_OBJECT_ID. Убрал ссылку на result_type
-    // из этой самой первой строки -- реальное значение (sResultType) вычисляется и
-    // логируется чуть ниже, УЖЕ внутри try/catch.
-    LogAlert(2, "Run(). НАЧАЛО");
-    var sResultType, sFullUrl, matrixId, matrixDoc, matrixName;
-    var iProgramFilter, sMacroregionFilter, sMirCodeFilter, iPositionFilter, sCityFilter;
-    var programIds, programTitles, collaboratorRows, macroRows, mirCodeRows, cityRows, dateRows;
-    var collaboratorReportRows, i, j;
-    var filteredProgramIds, filteredCollaboratorRows, allowedPositionIds, filteredResultRows;
+    LogAlert(2, "Run(). НАЧАЛО (диагностика сверки ТЭП)");
+    var sFullUrl, matrixId, matrixDoc, matrixName, iProgramFilter, sMacroregionFilter, sMirCodeFilter, iPositionFilter;
+    var matrixRows, matrixIds, elementRows, programIds, filteredProgramIds, i;
+    var activeRows, audienceRows, macroRows, dateRows;
+    var audienceFilteredRows, factBaseFilteredRows;
+    var audienceCounts, factCounts;
+    var nTotal, nPlan, nMandatory, nCompletedInAudience, nFact;
+    var check1, check2, check3;
 
-    ERROR = 0;
-    MESSAGE = "";
     RESULT = [];
 
     try
@@ -653,211 +346,92 @@ function Run()
         sFullUrl = GetRequestUrlSafe();
         LogAlert(1, "Run(). Request.Url = [" + sFullUrl + "]");
 
-        // ИЗМЕНЕНО (10.09.2026, вынос режима на фронтенд + английские имена): раньше
-        // result_type был ТОЛЬКО фиксированным параметром выборки -- задавался один раз
-        // в LPE "Параметры" каждого из 4 виджетов, пользователь не мог его поменять сам.
-        // Теперь сначала читаем result_type из URL -- так же, как остальные фильтры --
-        // если он там есть, режим может переключать сам пользователь (например через
-        // поле в модалке фильтров или ссылки-вкладки на странице). Если в URL параметра
-        // нет -- запасной путь: старое фиксированное значение из LPE (обратная
-        // совместимость с уже настроенными виджетами), а если и его нет -- дефолт "total".
-        // Имена режимов ТЕПЕРЬ НА АНГЛИЙСКОМ (было "obshee"/"fakt"/"obyazatelno" --
-        // транслит с русского, неудобно читать): total | plan | fact | mandatory.
-        // Если у виджетов в админке result_type ещё настроен старыми именами -- их нужно
-        // переименовать (obshee->total, fakt->fact, obyazatelno->mandatory, plan остаётся).
-        sResultType = GetQueryParam(sFullUrl, "result_type");
-        if (sResultType == "")
-        {
-            try
-            {
-                sResultType = String(result_type);
-            }
-            catch (_exResultTypeParam)
-            {
-                sResultType = "";
-            }
-        }
-        if (sResultType == "" || sResultType == "undefined")
-        {
-            sResultType = "total";
-        }
-        if (sResultType != "total" && sResultType != "plan" && sResultType != "fact" && sResultType != "mandatory")
-        {
-            throw ("Неизвестный result_type=[" + sResultType + "] -- ожидается одно из: total, plan, fact, mandatory");
-        }
-        LogAlert(1, "Run(). sResultType=[" + sResultType + "]");
-
         matrixId = OptInt(GetQueryParam(sFullUrl, "matrix_id"), 0);
         iProgramFilter = OptInt(GetQueryParam(sFullUrl, "program_id"), 0);
         sMacroregionFilter = GetQueryParam(sFullUrl, "macroregion");
         sMirCodeFilter = GetQueryParam(sFullUrl, "mir_code");
         iPositionFilter = OptInt(GetQueryParam(sFullUrl, "position_common_id"), 0);
-        // ДОБАВЛЕНО (14.09.2026, drill-down из "Процент обученных"): необязательный
-        // фильтр по городу (custom_elem "sity") -- если ссылка со страницы "Процент
-        // обученных" пришла для конкретного города, здесь сузим список ТОЛЬКО до него.
-        // Если параметра нет -- ведёт себя как раньше (без изменений для существующих
-        // ссылок без city).
-        sCityFilter = GetQueryParam(sFullUrl, "city");
-
-        LogAlert(1, "Run(). matrixId=" + matrixId + " programFilter=" + iProgramFilter
-            + " macroregionFilter=[" + sMacroregionFilter + "] mirCodeFilter=[" + sMirCodeFilter
-            + "] positionCommonIdFilter=" + iPositionFilter + " cityFilter=[" + sCityFilter + "]");
 
         if (matrixId == 0)
         {
-            throw ("Не передан matrix_id -- выбранная пользователем матрица обучения");
+            throw ("Не передан matrix_id -- открой эту диагностику на странице ТЭП-отчёта ПОСЛЕ того, как применил фильтры хотя бы раз");
         }
 
         matrixDoc = tools.open_doc(matrixId).TopElem;
         matrixName = String(matrixDoc.name);
 
-        programIds = ResolveProgramIds(matrixId, matrixName);
+        matrixRows = GetMatrixRows(matrixName);
+        matrixIds = ArrayExtract(matrixRows, "Int(This.id)");
+        elementRows = GetMatrixElementRows(matrixIds);
+        programIds = GetProgramIds(matrixRows, elementRows);
 
         if (iProgramFilter > 0)
         {
             filteredProgramIds = [];
             for (i = 0; i < ArrayCount(programIds); i++)
             {
-                if (Int(programIds[i]) == iProgramFilter)
-                {
-                    filteredProgramIds.push(programIds[i]);
-                }
+                if (Int(programIds[i]) == iProgramFilter) { filteredProgramIds.push(programIds[i]); }
             }
             programIds = filteredProgramIds;
-            if (ArrayCount(programIds) == 0)
-            {
-                throw ("Программа [" + iProgramFilter + "] не найдена среди программ выбранной матрицы");
-            }
         }
 
-        programTitles = GetProgramTitles(programIds);
-        collaboratorRows = GetActiveCollaboratorRows();
-
-        // НОВОЕ (10.09.2026): аудитория матрицы -- ДЛЯ ВСЕХ РЕЖИМОВ, КРОМЕ "fact" (см.
-        // "РЕШЕНИЯ" в шапке файла -- факт буквально "не зависимо от условий матрицы").
-        if (sResultType != "fact")
-        {
-            collaboratorRows = GetMatrixAudienceCollaboratorRows(matrixDoc, collaboratorRows);
-            LogAlert(1, "Run(). После фильтра аудитории матрицы осталось сотрудников: " + ArrayCount(collaboratorRows));
-        }
-
-        // Дальше -- РУЧНЫЕ фильтры пользователя, точно как в HREDU-181 (без изменений).
-        if (iPositionFilter > 0)
-        {
-            allowedPositionIds = GetPositionIdsByCommonPosition(iPositionFilter);
-            filteredCollaboratorRows = [];
-            for (i = 0; i < ArrayCount(collaboratorRows); i++)
-            {
-                if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0)))
-                {
-                    filteredCollaboratorRows.push(collaboratorRows[i]);
-                }
-            }
-            collaboratorRows = filteredCollaboratorRows;
-            LogAlert(1, "Run(). После ручного фильтра по типовой должности осталось сотрудников: " + ArrayCount(collaboratorRows));
-        }
-
+        activeRows = GetActiveCollaboratorRows();
         macroRows = GetMacroregionRows();
-        if (sMacroregionFilter != "")
-        {
-            filteredCollaboratorRows = [];
-            for (i = 0; i < ArrayCount(collaboratorRows); i++)
-            {
-                if (FindMacroregion(macroRows, Int(collaboratorRows[i].id)) == sMacroregionFilter)
-                {
-                    filteredCollaboratorRows.push(collaboratorRows[i]);
-                }
-            }
-            collaboratorRows = filteredCollaboratorRows;
-            LogAlert(1, "Run(). После ручного фильтра по макрорегиону осталось сотрудников: " + ArrayCount(collaboratorRows));
-        }
-
-        if (sMirCodeFilter != "")
-        {
-            mirCodeRows = GetMirCodeRows();
-            filteredCollaboratorRows = [];
-            for (i = 0; i < ArrayCount(collaboratorRows); i++)
-            {
-                if (CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRows[i].id), sMirCodeFilter))
-                {
-                    filteredCollaboratorRows.push(collaboratorRows[i]);
-                }
-            }
-            collaboratorRows = filteredCollaboratorRows;
-            LogAlert(1, "Run(). После ручного фильтра по мир-коду осталось сотрудников: " + ArrayCount(collaboratorRows));
-        }
-
-        // ДОБАВЛЕНО (14.09.2026, drill-down из "Процент обученных"): необязательный
-        // фильтр по городу -- см. GetCityRows()/FindCity() выше.
-        if (sCityFilter != "")
-        {
-            cityRows = GetCityRows();
-            filteredCollaboratorRows = [];
-            for (i = 0; i < ArrayCount(collaboratorRows); i++)
-            {
-                if (FindCity(cityRows, Int(collaboratorRows[i].id)) == sCityFilter)
-                {
-                    filteredCollaboratorRows.push(collaboratorRows[i]);
-                }
-            }
-            collaboratorRows = filteredCollaboratorRows;
-            LogAlert(1, "Run(). После фильтра по городу осталось сотрудников: " + ArrayCount(collaboratorRows));
-        }
-
         dateRows = GetCompletionDateRows(programIds);
 
+        // --- Пул "аудитория матрицы" (используется для total/plan/mandatory) ---
+        audienceRows = GetMatrixAudienceCollaboratorRows(matrixDoc, activeRows);
+        audienceFilteredRows = ApplyManualFilters(audienceRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
+        audienceCounts = CountPairs(audienceFilteredRows, programIds, dateRows);
+
+        nTotal = audienceCounts.totalPairs;
+        nPlan = audienceCounts.totalPairs; // План = Общее, текущее упрощение
+        nMandatory = audienceCounts.totalPairs - audienceCounts.completedPairs;
+        nCompletedInAudience = audienceCounts.completedPairs;
+
+        // --- Пул "без аудитории" (используется для fact) ---
+        factBaseFilteredRows = ApplyManualFilters(activeRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroRows);
+        factCounts = CountPairs(factBaseFilteredRows, programIds, dateRows);
+        nFact = factCounts.completedPairs;
+
+        LogAlert(1, "Run(). nTotal=" + nTotal + " nPlan=" + nPlan + " nMandatory=" + nMandatory
+            + " nCompletedInAudience=" + nCompletedInAudience + " nFact=" + nFact);
+
+        check1 = (nTotal == (nMandatory + nCompletedInAudience));
+        check2 = (nPlan == nTotal);
+        check3 = (nFact >= nCompletedInAudience);
+
         RESULT = [];
-        for (i = 0; i < ArrayCount(collaboratorRows); i++)
-        {
-            collaboratorReportRows = BuildReportRows(collaboratorRows[i], macroRows, dateRows, programTitles, programIds);
-            for (j = 0; j < ArrayCount(collaboratorReportRows); j++)
-            {
-                RESULT.push(collaboratorReportRows[j]);
-            }
-        }
-        LogAlert(1, "Run(). Строк до фильтра по result_type: " + ArrayCount(RESULT));
+        RESULT.push({ id: 1, metric: "matrix_id / название матрицы", value: matrixId + " / " + matrixName, check: "" });
+        RESULT.push({ id: 2, metric: "Программ в матрице (после фильтра program_id)", value: String(ArrayCount(programIds)), check: "" });
+        RESULT.push({ id: 3, metric: "Сотрудников в аудитории матрицы (после ручных фильтров)", value: String(ArrayCount(audienceFilteredRows)), check: "" });
+        RESULT.push({ id: 4, metric: "Сотрудников БЕЗ аудитории (после ручных фильтров, база для Факт)", value: String(ArrayCount(factBaseFilteredRows)), check: "" });
+        RESULT.push({ id: 5, metric: "-- ИТОГОВЫЕ ЧИСЛА (сколько строк должно быть в каждом из 4 виджетов) --", value: "", check: "" });
+        RESULT.push({ id: 6, metric: "total (Общее кол-во)", value: String(nTotal), check: "" });
+        RESULT.push({ id: 7, metric: "plan (План)", value: String(nPlan), check: "" });
+        RESULT.push({ id: 8, metric: "fact (Факт)", value: String(nFact), check: "" });
+        RESULT.push({ id: 9, metric: "mandatory (Обязательно к прохождению)", value: String(nMandatory), check: "" });
+        RESULT.push({ id: 10, metric: "(справочно) пройдено В ПРЕДЕЛАХ аудитории -- ни в одном виджете не показывается", value: String(nCompletedInAudience), check: "" });
+        RESULT.push({ id: 11, metric: "-- ТОЖДЕСТВА (должны быть все OK) --", value: "", check: "" });
+        RESULT.push({ id: 12, metric: "1) total == mandatory + пройдено-в-аудитории", value: nTotal + " == " + nMandatory + " + " + nCompletedInAudience, check: (check1 ? "OK" : "MISMATCH!") });
+        RESULT.push({ id: 13, metric: "2) plan == total", value: nPlan + " == " + nTotal, check: (check2 ? "OK" : "MISMATCH!") });
+        RESULT.push({ id: 14, metric: "3) fact >= пройдено-в-аудитории", value: nFact + " >= " + nCompletedInAudience, check: (check3 ? "OK" : "MISMATCH!") });
 
-        // НОВОЕ (10.09.2026): финальное разбиение по result_type -- см. "ИТОГОВАЯ
-        // АРХИТЕКТУРА" в шапке файла. "total"/"plan" -- без изменений (План = Общее,
-        // см. "РЕШЕНИЯ" пункт 2).
-        if (sResultType == "fact")
-        {
-            filteredResultRows = [];
-            for (i = 0; i < ArrayCount(RESULT); i++)
-            {
-                if (RESULT[i].completion_date != "")
-                {
-                    filteredResultRows.push(RESULT[i]);
-                }
-            }
-            RESULT = filteredResultRows;
-        }
-        else if (sResultType == "mandatory")
-        {
-            filteredResultRows = [];
-            for (i = 0; i < ArrayCount(RESULT); i++)
-            {
-                if (RESULT[i].completion_date == "")
-                {
-                    filteredResultRows.push(RESULT[i]);
-                }
-            }
-            RESULT = filteredResultRows;
-        }
-
-        LogAlert(2, "Run(). Готово. result_type=" + sResultType + ", строк отчёта: " + ArrayCount(RESULT));
+        LogAlert(2, "Run(). Готово. check1=" + check1 + " check2=" + check2 + " check3=" + check3);
     }
     catch (_ex)
     {
-        ERROR = 1;
-        MESSAGE = ExtractUserError(_ex);
-        LogAlert(4, "Run(). ОШИБКА: " + MESSAGE);
+        RESULT = [{ id: 0, metric: "ОШИБКА", value: ExtractUserError(_ex), check: "" }];
+        LogAlert(4, "Run(). ОШИБКА: " + ExtractUserError(_ex));
     }
     LogAlert(2, "Run(). КОНЕЦ");
 }
 
-//-------------------------------------------------------------------------
-//              Область основного кода
-//-------------------------------------------------------------------------
-
 Run();
+
+COLUMNS = [
+    { "data": "id", "editable": true, "hidden": true, "sortable": false },
+    { "data": "metric", "title": "Показатель", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "55%" },
+    { "data": "value", "title": "Значение", "type": "string", "editable": false, "sortable": false, "multiline": true, "width": "30%" },
+    { "data": "check", "title": "Проверка", "type": "string", "editable": false, "sortable": false, "width": "15%" }
+];
