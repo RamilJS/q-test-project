@@ -269,7 +269,7 @@ try
     oForm = new Object();
     oForm.command = "display_form";
     oForm.height = 320;
-    oForm.title = "Выбор отчёта";
+    oForm.title = "Выбор отчета";
     oForm.message = null;
 
     // ДОБАВЛЕНО (10.09.2026, запоминание фильтров): читаем текущий URL страницы --
@@ -332,7 +332,7 @@ try
 
         {
             name: "matrix_id",
-            label: "Матрица обучения *",
+            label: "Матрица обучения",
             title: "Выберите матрицу обучения",
             type: "foreign_elem",
             value: sDefaultMatrixID,
@@ -418,7 +418,7 @@ try
             // параметр в URL не мешает.
             // ЕДИНСТВЕННОЕ ОСТАВШЕЕСЯ ВИДИМЫМ ПОЛЕ (17.09.2026, см. правку в шапке файла).
             name: "result_type",
-            label: "Режим отчёта (только для страниц ТЭП)",
+            label: "Выберите нужный отчет из списка",
             type: "select",
             value: sDefaultResultType,
             entries: [
