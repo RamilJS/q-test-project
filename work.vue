@@ -269,7 +269,7 @@ try
     oForm = new Object();
     oForm.command = "display_form";
     oForm.height = 320;
-    oForm.title = "Фильтры отчёта (Восток)";
+    oForm.title = "Выбор отчёта";
     oForm.message = null;
 
     // ДОБАВЛЕНО (10.09.2026, запоминание фильтров): читаем текущий URL страницы --
