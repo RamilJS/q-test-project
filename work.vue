@@ -1,8 +1,9 @@
-
 // HREDU-183. ТЭП_общее_кол-во / ТЭП_план / ТЭП_факт / ТЭП_обязательно -- выборка для
 // Табличных данных. Один файл, четыре режима через параметр result_type -- по образцу
 // education_accept_event_card (там тоже один result_type переключает поведение одной
-// выборки). 
+// выборки). Построено на основе HREDU-181_vostok_polny_spisok_draft.js -- та же матрица/
+// программы/сотрудники/даты/фильтры, плюс новое: аудитория матрицы и разбиение по
+// результату (см. ниже).
 //
 // ТЗ (HREDU-183, полный текст прислан пользователем 10.09.2026):
 //   Общее кол-во сотрудников -- все, кто подходят под матрицу (должность + мир-код).
@@ -16,74 +17,6 @@
 //     сам % не входит в эту выборку -- это отдельный лёгкий расчёт для "Процент обученных",
 //     не список сотрудников).
 //
-// РЕШЕНИЯ, ПРИНЯТЫЕ С ПОЛЬЗОВАТЕЛЕМ (10.09.2026), ЧАСТИЧНО ПЕРЕСМОТРЕНЫ (17.09.2026,
-// HREDU-215 "Правки 1" -- см. ниже):
-//   1. Аудитория (должность + мир-код) -- РЕАЛИЗУЕМ. ИЗМЕНЕНО (17.09.2026, HREDU-215
-//      "Правки 1", по прямому указанию тим-лида пользователя -- "ошиблись в архитектуре"):
-//      РАНЬШЕ поля position_common_id/mir_code_id жили НА САМОЙ МАТРИЦЕ (cc_learning_matrice),
-//      аудитория была ОДНА на всю матрицу. ТЕПЕРЬ эти поля УДАЛЕНЫ с типа документа
-//      "Матрицы обучения" и ДОБАВЛЕНЫ на тип документа "Элементы матриц обучения"
-//      (cc_learning_matrice_element, у которых уже были education_method_id/
-//      start_study_period/end_study_period) -- значит аудитория теперь СВОЯ У КАЖДОГО
-//      ЭЛЕМЕНТА (по факту -- у каждой программы, а если у одной программы несколько
-//      элементов с разными position_common_id -- у неё НЕСКОЛЬКО аудиторий, объединяемых
-//      через ИЛИ). См. BuildProgramAudienceIndex()/CollaboratorInProgramAudience() ниже.
-//      Это МАНДАТОРНОЕ условие "кому вообще адресована ЭТА программа" -- отдельная вещь
-//      от РУЧНЫХ фильтров пользователя (те же имена полей, но разный смысл): ручные
-//      фильтры дополнительно СУЖАЮТ то, что уже прошло через аудиторию, а не заменяют её.
-//   2. "Период прохождения тренинга" (нужен для честного "План") -- НЕ РЕАЛИЗОВАН. На
-//      элементе есть start_study_period=1/end_study_period=4 (числа, не даты -- см.
-//      диагностику), но неясно: единицы измерения и от какой даты сотрудника отсчитывать.
-//      Пользователь решил не тратить на это время сейчас -- УПРОЩЕНИЕ: План = Общее (без
-//      доп. фильтра по периоду). Это совпадает с тем, что мы уже видели на тестовых
-//      данных пользователя раньше в этом тикете (план и общее количество были равны).
-//      ОТКРЫТЫЙ ВОПРОС, вернуться при необходимости -- аналогично открытым вопросам
-//      №1-3 в HREDU-181_vostok_polny_spisok_draft.js.
-//   3. Факт -- ПЕРЕСМОТРЕНО ПОВТОРНО (17.09.2026, тот же день, что и п.1, но отдельным
-//      уточнением от пользователя -- см. AskUserQuestion): раньше "не зависимо от условий
-//      матрицы" понималось БУКВАЛЬНО -- фильтр аудитории для "fact" вообще не применялся
-//      (сотрудник мог быть кем угодно по должности). Реальный тест (матрица
-//      "Менеджер"/"Стандарт менеджер", город Воронеж) показал, что это даёт СТРАННЫЙ
-//      результат -- в "Факт" попадали сотрудники СОВСЕМ ДРУГИХ должностей (Экономисты),
-//      просто когда-то прошедшие ту же программу по не связанной с этой матрицей причине
-//      (программа -- общий каталог, не привязана к конкретной матрице). ПОДТВЕРЖДЕНО
-//      пользователем: "Факт" ТЕПЕРЬ ТОЖЕ должен ограничиваться аудиторией (должность+
-//      мир-код ХОТЯ БЫ ОДНОГО элемента этой программы) -- "не зависимо от условий
-//      матрицы" означает "не зависимо от ПЕРИОДА" (см. п.2 -- он всё равно не
-//      реализован), а НЕ "вообще без каких-либо условий". Базовый пул для факта -- все
-//      активные сотрудники (как и раньше), ручные фильтры пользователя применяются, ПЛЮС
-//      теперь и аудитория программы -- см. п. "б" ниже.
-//   4. Обязательно -- аудитория программы (как Общее) МИНУС те, кто прошёл (т.е. строки
-//      с пустой датой прохождения).
-//
-// ИТОГОВАЯ АРХИТЕКТУРА: сначала строим ряды "сотрудник x программа" ТОЧНО как в
-// HREDU-181 (программы матрицы, активные сотрудники, дата прохождения, все 4 ручных
-// фильтра из URL). Разница только в ДВУХ местах:
-//   а) ИЗМЕНЕНО (17.09.2026, дважды в один день -- см. п.3 выше): аудитория применяется
-//      НЕ к общему пулу сотрудников ДО построения строк (раньше -- GetMatrixAudienceCollaboratorRows(),
-//      убрана), а К КАЖДОЙ ГОТОВОЙ СТРОКЕ (сотрудник x программа) ПОСЛЕ построения --
-//      потому что у разных программ в одной и той же строке-сотруднике может быть РАЗНАЯ
-//      аудитория (см. row.in_audience в BuildReportRows(), фильтр в Run() сразу после
-//      сборки RESULT). Применяется ко ВСЕМ 4 режимам ОДИНАКОВО, включая "fact" (было
-//      исключение для "fact" -- убрано по итогам теста, см. п.3);
-//   б) ПОСЛЕ того, как готовые строки (с completion_date) собраны -- для "fact" оставляем
-//      только строки с НЕпустой датой, для "mandatory" -- только с ПУСТОЙ датой,
-//      для "total"/"plan" -- оставляем все строки без изменений.
-//
-// Параметр result_type -- один из: "total" | "plan" | "fact" | "mandatory".
-//   ИЗМЕНЕНО (10.09.2026): раньше читался ТОЛЬКО как фиксированное значение на вкладке
-//   "Параметры" отдельного виджета (по виджету на режим). Теперь читается СНАЧАЛА из
-//   URL (как остальные фильтры) -- это открывает дорогу к переключению режима самим
-//   пользователем на фронтенде (вкладки/ссылки/поле в модалке -- способ ещё
-//   обсуждается). Если в URL параметра нет -- запасной путь: старое фиксированное
-//   значение LPE (обратная совместимость с уже настроенными виджетами), иначе "total".
-//   Подробности -- в начале Run().
-// Фильтры (matrix_id, macroregion, mir_code, position_common_id, program_id) читаются
-// ТАК ЖЕ, как в HREDU-181 -- из Request.Url (см. HREDU-183_diagnostic_get_params.js) --
-// это работает надёжно в контексте ВЫБОРКИ (не удалённого действия, там был другой
-// механизм через {{curEnv.curEnvUrl}}, здесь он не нужен).
-//
-// ВАЖНО про RESULT: как и в HREDU-181 -- RESULT это ПРЯМО массив строк, без обёртки.
 
 DEBUG = true;              // На проде поставить false после тестирования
 LOG_NAME = "agent";        // TODO: уточнить после создания документа в админке
@@ -459,12 +392,80 @@ function GetCityRows()
  * @param {number} collaboratorID
  * @returns {string}
  */
-function FindCity(cityRows, collaboratorID)
+function FindCity(cityIndex, collaboratorID)
 {
     var cityRow, sCity;
-    cityRow = ArrayOptFind(cityRows, "Int(This.id) == Int(collaboratorID)");
+    cityRow = cityIndex[String(Int(collaboratorID))];
     sCity = (cityRow != undefined && cityRow.sity != undefined ? String(cityRow.sity) : "");
     return (sCity != "" ? sCity : "(без города)");
+}
+
+/*
+ * НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ (18.09.2026, реальный тест пользователя, см.
+ * PerfCheckpoint() в Run()): "Ручной фильтр по макрорегиону" занял ~3 сек, "Фильтр по
+ * городу" ~1 сек -- ПРИ ЭТОМ все SQL/XQuery-запросы (GetActiveCollaboratorRows(),
+ * GetMacroregionRows(), GetCityRows(), GetMirCodeRows(), GetCompletionDateRows()) заняли
+ * КАЖДЫЙ 0-1 сек. Т.е. БД тут ни при чём -- тормозит ИМЕННО ЭТОТ КОД. Причина: FindCity()/
+ * FindMacroregion()/FindCompletionDate() раньше делали ArrayOptFind() -- ЛИНЕЙНЫЙ поиск по
+ * ВСЕМУ массиву (macroRows/cityRows/dateRows -- это ВСЕ активные сотрудники компании, без
+ * какой-либо фильтрации в SQL) -- и вызывались ВНУТРИ ЦИКЛА по каждому сотруднику. Это
+ * классическая O(n^2)-ловушка: 1 проход по N сотрудникам x линейный поиск по N строкам на
+ * каждой итерации = N*N сравнений. При тысячах активных сотрудников в компании счёт идёт
+ * на миллионы сравнений -- отсюда секунды на пустом месте.
+ *
+ * ФИКС: строим индекс (обычный объект-словарь, ключ -- id сотрудника СТРОКОЙ) ОДИН РАЗ
+ * сразу после SQL-запроса (см. BuildRowIndexById()/BuildDateIndex() ниже и их вызовы в
+ * Run()), и дальше каждый поиск -- это O(1) обращение к object[key], а не ArrayOptFind()
+ * по всему массиву. Итог: тот же общий объём работы (нужно же в итоге "посетить" каждого
+ * сотрудника), но БЕЗ квадратичного роста -- O(n) на построение индекса + O(n) на сами
+ * поиски, вместо O(n^2).
+ *
+ * ЧЕСТНО ПРО РИСК: это ПЕРВОЕ место в тикете, где используется динамический доступ к
+ * свойству объекта по вычисляемому ключу (object[stringKey], а не object.fixedName) --
+ * раньше такой паттерн в проекте не проверялся. В отличие от регулярных выражений/
+ * .indexOf/.substring (те оказались вообще ОТСУТСТВУЮЩИМИ функциями движка) -- динамический
+ * доступ к свойству через [] это базовая, фундаментальная часть языка (её же требует
+ * ArrayOptFind() с XQuery-строкой "This.id", "This.macroregion" и т.д. -- значит объекты
+ * с именованными свойствами тут точно есть), поэтому риск отличается от прошлых
+ * "платформенных сюрпризов". Но т.к. 100%-й гарантии нет -- ОБЯЗАТЕЛЬНО проверь на
+ * реальных данных после этой правки: (а) что отчёт вообще продолжает показывать те же
+ * строки/значения, что и раньше (сравни с прошлым тестом -- те же 2 строки для того же
+ * фильтра), и (б) что новые PerfCheckpoint() для "построения индекса" в логе покажут
+ * заметно меньшее время на сами фильтры, чем 3 сек/1 сек, которые были до фикса. Если
+ * после этой правки отчёт вернёт ПУСТОЙ список или ошибку -- значит гипотеза не
+ * подтвердилась, тогда откатываемся на ArrayOptFind() и ищем другой способ ускорения
+ * (например, сортировка обоих массивов и слияние -- через ArraySort(), которая ТОЧНО
+ * работает, см. HREDU-176_integration_final_working.js).
+ * @param {Object[]} rows   -   Строки с полем "id" (macroRows/cityRows).
+ * @returns {Object}         -   Индекс { "<id>": row, ... }.
+ */
+function BuildRowIndexById(rows)
+{
+    var index, i;
+    index = {};
+    for (i = 0; i < ArrayCount(rows); i++)
+    {
+        index[String(Int(rows[i].id))] = rows[i];
+    }
+    return index;
+}
+
+/*
+ * То же самое, что BuildRowIndexById(), но для dateRows -- там ключ СОСТАВНОЙ (сотрудник +
+ * программа), см. "НАЙДЕНО ЗАМЕРОМ" выше.
+ * @param {Object[]} dateRows
+ * @returns {Object}   -   Индекс { "<collaboratorID>_<programID>": row, ... }.
+ */
+function BuildDateIndex(dateRows)
+{
+    var index, i, sKey;
+    index = {};
+    for (i = 0; i < ArrayCount(dateRows); i++)
+    {
+        sKey = String(Int(dateRows[i].collaborator_id)) + "_" + String(Int(dateRows[i].education_method_id));
+        index[sKey] = dateRows[i];
+    }
+    return index;
 }
 
 /*
@@ -671,23 +672,26 @@ function GetCompletionDateRows(programIds)
  * @param {number} programID
  * @returns {string}
  */
-function FindCompletionDate(dateRows, collaboratorID, programID)
+function FindCompletionDate(dateIndex, collaboratorID, programID)
 {
-    var dateRow;
-    dateRow = ArrayOptFind(dateRows, "Int(This.collaborator_id) == Int(collaboratorID) && Int(This.education_method_id) == Int(programID)");
+    var dateRow, sKey;
+    sKey = String(Int(collaboratorID)) + "_" + String(Int(programID));
+    dateRow = dateIndex[sKey];
     return (dateRow != undefined ? StrDate(Date(dateRow.first_date), false) : "");
 }
 
 /*
  * Ищет макрорегион конкретного сотрудника.
- * @param {Object[]} macroRows
+ * ИЗМЕНЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ) -- теперь O(1) через индекс, а не
+ * линейный ArrayOptFind() -- см. подробное объяснение над BuildRowIndexById().
+ * @param {Object} macroIndex   -   Индекс { "<id>": row }, см. BuildRowIndexById().
  * @param {number} collaboratorID
  * @returns {string}
  */
-function FindMacroregion(macroRows, collaboratorID)
+function FindMacroregion(macroIndex, collaboratorID)
 {
     var macroRow;
-    macroRow = ArrayOptFind(macroRows, "Int(This.id) == Int(collaboratorID)");
+    macroRow = macroIndex[String(Int(collaboratorID))];
     return (macroRow != undefined && macroRow.macroregion != undefined ? String(macroRow.macroregion) : "");
 }
 
@@ -721,17 +725,22 @@ function FindProgramTitle(programTitles, programID)
  * НЕ колонка для отображения (в LPE её просто не привязывают ни к чему) -- используется
  * только внутри Run() для финальной фильтрации total/plan/mandatory (для fact аудитория
  * не применяется вообще, как и раньше -- "не зависимо от условий матрицы").
+ * ИЗМЕНЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ): параметры macroRows/cityRows/dateRows
+ * переименованы в macroIndex/cityIndex/dateIndex -- теперь это не "сырые" массивы из SQL, а
+ * готовые индексы (объекты-словари, см. BuildRowIndexById()/BuildDateIndex()) для O(1)
+ * поиска внутри FindMacroregion()/FindCity()/FindCompletionDate() -- см. подробное
+ * объяснение находки над BuildRowIndexById().
  * @param {Object} collaborator
- * @param {Object[]} macroRows
- * @param {Object[]} cityRows
- * @param {Object[]} dateRows
+ * @param {Object} macroIndex
+ * @param {Object} cityIndex
+ * @param {Object} dateIndex
  * @param {Object[]} programTitles
  * @param {number[]} programIds
  * @param {Object[]} audienceIndex
  * @param {Object[]} mirCodeRows
  * @returns {Object[]}
  */
-function BuildReportRows(collaborator, macroRows, cityRows, dateRows, programTitles, programIds, audienceIndex, mirCodeRows)
+function BuildReportRows(collaborator, macroIndex, cityIndex, dateIndex, programTitles, programIds, audienceIndex, mirCodeRows)
 {
     var rows, row, i, programID, segments;
     rows = [];
@@ -743,10 +752,10 @@ function BuildReportRows(collaborator, macroRows, cityRows, dateRows, programTit
         row.fullname = String(collaborator.fullname);
         row.position_name = String(collaborator.position_name);
         row.subdivision_name = String(collaborator.position_parent_name);
-        row.macroregion = FindMacroregion(macroRows, Int(collaborator.id));
-        row.city = FindCity(cityRows, Int(collaborator.id));
+        row.macroregion = FindMacroregion(macroIndex, Int(collaborator.id));
+        row.city = FindCity(cityIndex, Int(collaborator.id));
         row.program_name = FindProgramTitle(programTitles, programID);
-        row.completion_date = FindCompletionDate(dateRows, Int(collaborator.id), programID);
+        row.completion_date = FindCompletionDate(dateIndex, Int(collaborator.id), programID);
         row.in_audience = CollaboratorInProgramAudience(collaborator, segments, mirCodeRows);
         rows.push(row);
     }
@@ -808,6 +817,7 @@ function Run()
     var iProgramFilter, sMacroregionFilter, sMirCodeFilter, iPositionFilter, sCityFilter;
     var matrixContext, elementRows, audienceIndex;
     var programIds, programTitles, collaboratorRows, macroRows, mirCodeRows, cityRows, dateRows;
+    var macroIndex, cityIndex, dateIndex; // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ) -- см. BuildRowIndexById()/BuildDateIndex()
     var collaboratorReportRows, i, j;
     var filteredProgramIds, filteredCollaboratorRows, allowedPositionIds, filteredResultRows;
 
@@ -951,19 +961,25 @@ function Run()
 
         macroRows = GetMacroregionRows();
         PerfCheckpoint("GetMacroregionRows() -- SQL по макрорегионам сотрудников");
+        // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ): строим индекс ОДИН РАЗ сразу
+        // после SQL -- дальше и ручной фильтр ниже, и BuildReportRows() (там пробегаем по
+        // ВСЕМ отфильтрованным сотрудникам ещё раз) используют O(1)-поиск по индексу
+        // вместо O(n) ArrayOptFind() -- см. подробное объяснение над BuildRowIndexById().
+        macroIndex = BuildRowIndexById(macroRows);
+        PerfCheckpoint("BuildRowIndexById(macroRows) -- построение индекса макрорегионов -- ЧИСТЫЙ КОД, O(n)");
         if (sMacroregionFilter != "")
         {
             filteredCollaboratorRows = [];
             for (i = 0; i < ArrayCount(collaboratorRows); i++)
             {
-                if (FindMacroregion(macroRows, Int(collaboratorRows[i].id)) == sMacroregionFilter)
+                if (FindMacroregion(macroIndex, Int(collaboratorRows[i].id)) == sMacroregionFilter)
                 {
                     filteredCollaboratorRows.push(collaboratorRows[i]);
                 }
             }
             collaboratorRows = filteredCollaboratorRows;
             LogAlert(1, "Run(). После ручного фильтра по макрорегиону осталось сотрудников: " + ArrayCount(collaboratorRows));
-            PerfCheckpoint("Ручной фильтр по макрорегиону (цикл по collaboratorRows) -- ЧИСТЫЙ КОД");
+            PerfCheckpoint("Ручной фильтр по макрорегиону (цикл по collaboratorRows, теперь через индекс) -- ЧИСТЫЙ КОД");
         }
 
         if (sMirCodeFilter != "")
@@ -987,6 +1003,8 @@ function Run()
         // только для фильтрации) данных бы не было, когда фильтр по городу не применён.
         cityRows = GetCityRows();
         PerfCheckpoint("GetCityRows() -- SQL по городам сотрудников");
+        cityIndex = BuildRowIndexById(cityRows);
+        PerfCheckpoint("BuildRowIndexById(cityRows) -- построение индекса городов -- ЧИСТЫЙ КОД, O(n)");
 
         // ДОБАВЛЕНО (14.09.2026, drill-down из "Процент обученных"): необязательный
         // фильтр по городу -- см. GetCityRows()/FindCity() выше.
@@ -995,23 +1013,25 @@ function Run()
             filteredCollaboratorRows = [];
             for (i = 0; i < ArrayCount(collaboratorRows); i++)
             {
-                if (FindCity(cityRows, Int(collaboratorRows[i].id)) == sCityFilter)
+                if (FindCity(cityIndex, Int(collaboratorRows[i].id)) == sCityFilter)
                 {
                     filteredCollaboratorRows.push(collaboratorRows[i]);
                 }
             }
             collaboratorRows = filteredCollaboratorRows;
             LogAlert(1, "Run(). После фильтра по городу осталось сотрудников: " + ArrayCount(collaboratorRows));
-            PerfCheckpoint("Фильтр по городу (FindCity() в цикле) -- ЧИСТЫЙ КОД");
+            PerfCheckpoint("Фильтр по городу (FindCity() в цикле, теперь через индекс) -- ЧИСТЫЙ КОД");
         }
 
         dateRows = GetCompletionDateRows(programIds);
         PerfCheckpoint("GetCompletionDateRows() -- SQL по датам прохождения программ");
+        dateIndex = BuildDateIndex(dateRows);
+        PerfCheckpoint("BuildDateIndex(dateRows) -- построение индекса дат прохождения -- ЧИСТЫЙ КОД, O(n)");
 
         RESULT = [];
         for (i = 0; i < ArrayCount(collaboratorRows); i++)
         {
-            collaboratorReportRows = BuildReportRows(collaboratorRows[i], macroRows, cityRows, dateRows, programTitles, programIds, audienceIndex, mirCodeRows);
+            collaboratorReportRows = BuildReportRows(collaboratorRows[i], macroIndex, cityIndex, dateIndex, programTitles, programIds, audienceIndex, mirCodeRows);
             for (j = 0; j < ArrayCount(collaboratorReportRows); j++)
             {
                 RESULT.push(collaboratorReportRows[j]);
