@@ -328,80 +328,93 @@ function GetCityRows()
 }
 
 /*
- * Находит город конкретного сотрудника; "(без города)" если поле пустое/не найдено
- * (см. ДОПУЩЕНИЕ №2 в шапке файла -- чтобы не терять данные молча).
- * @param {Object[]} cityRows
+ * НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ (18.09.2026, реальный тест пользователя): "Ручной
+ * фильтр по макрорегиону"/"Фильтр по городу" заняли секунды, ПРИ ЭТОМ все SQL/XQuery-
+ * запросы заняли доли секунды каждый -- БД ни при чём, тормозил ИМЕННО ЭТОТ КОД: линейный
+ * ArrayOptFind() по ВСЕМ активным сотрудникам компании внутри цикла по каждому сотруднику.
+ *
+ * ПЕРВАЯ ПОПЫТКА ФИКСА (18.09.2026, ОТКАЧЕНА В ТОТ ЖЕ ДЕНЬ): индекс через объект-словарь
+ * с динамическим ключом (object[String(id)]). РЕАЛЬНЫЙ ТЕСТ пользователя (на этом самом
+ * файле, "Процент обученных" перестал показывать таблицу) выдал ошибку "Unknown object
+ * property: <id>_<id>" -- динамический доступ к свойству объекта по ВЫЧИСЛЯЕМОМУ ключу
+ * НЕ ПОДДЕРЖИВАЕТСЯ этим движком. Подтверждённый факт, а не гипотеза.
+ *
+ * ИТОГОВЫЙ ФИКС (18.09.2026, ВТОРАЯ ПОПЫТКА), идентичен версии в HREDU-183_tep_reports.js:
+ * БИНАРНЫЙ ПОИСК по массиву, отсортированному через ArraySort() (подтверждена рабочей в
+ * HREDU-176_integration_final_working.js) -- только доступ к массиву по числовому индексу,
+ * без object[computedKey]. ОБЯЗАТЕЛЬНО проверь на реальных данных после этой правки --
+ * если ArraySort() тоже поведёт себя неожиданно, пришли точный текст ошибки.
+ * @param {Object[]} rows   -   Строки с полем "id" (macroRows/cityRows).
+ * @returns {Object[]}       -   Тот же массив строк, отсортированный по возрастанию id.
+ */
+function SortRowsById(rows)
+{
+    return ArraySort(rows, "Int(This.id)", "+");
+}
+
+/*
+ * Бинарный поиск строки с полем "id" == targetId в массиве, ОТСОРТИРОВАННОМ по возрастанию
+ * id (см. SortRowsById()). Идентична версии в HREDU-183_tep_reports.js.
+ * @param {Object[]} sortedRows
+ * @param {number} targetId
+ * @returns {Object}   -   Найденная строка или undefined.
+ */
+function BinarySearchById(sortedRows, targetId)
+{
+    var lo, hi, mid, midId, iTarget;
+    iTarget = Int(targetId);
+    lo = 0;
+    hi = ArrayCount(sortedRows) - 1;
+    while (lo <= hi)
+    {
+        mid = Int((lo + hi) / 2);
+        midId = Int(sortedRows[mid].id);
+        if (midId == iTarget) { return sortedRows[mid]; }
+        else if (midId < iTarget) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    return undefined;
+}
+
+/*
+ * Находит город конкретного сотрудника; "(без города)" если поле пустое/не найдено.
+ * ИЗМЕНЕНО (18.09.2026, см. объяснение над SortRowsById()) -- бинарный поиск вместо
+ * линейного ArrayOptFind()/динамического индекса.
+ * @param {Object[]} sortedCityRows
  * @param {number} collaboratorID
  * @returns {string}
  */
-function FindCity(cityIndex, collaboratorID)
+function FindCity(sortedCityRows, collaboratorID)
 {
     var cityRow, sCity;
-    cityRow = cityIndex[String(Int(collaboratorID))];
+    cityRow = BinarySearchById(sortedCityRows, collaboratorID);
     sCity = (cityRow != undefined && cityRow.sity != undefined ? String(cityRow.sity) : "");
     return (sCity != "" ? sCity : "(без города)");
 }
 
 /*
- * НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ (18.09.2026, реальный тест пользователя в
- * HREDU-183_tep_reports.js -- см. PerfCheckpoint() в Run() там же): "Ручной фильтр по
- * макрорегиону"/"Фильтр по городу" заняли секунды, ПРИ ЭТОМ все SQL/XQuery-запросы заняли
- * доли секунды каждый -- т.е. БД ни при чём, тормозил ИМЕННО ЭТОТ КОД: FindCity()/
- * FindMacroregion()/FindCompletionDate() делали ArrayOptFind() -- ЛИНЕЙНЫЙ поиск по ВСЕМУ
- * массиву (это ВСЕ активные сотрудники компании) -- внутри цикла по каждому сотруднику --
- * классическая O(n^2)-ловушка. У ЭТОГО файла та же самая архитектура (те же функции,
- * тот же способ поиска) -- значит тот же баг, только не был замерян отдельно (тест
- * пользователя прогонялся пока только на ТЭП). Чинится тем же способом -- см. подробности
- * в HREDU-183_tep_reports.js над её версией BuildRowIndexById().
- * ИЗМЕНЕНО (18.09.2026): FindCity()/FindMacroregion() теперь принимают ГОТОВЫЙ индекс
- * (объект-словарь { "<id>": row }, см. BuildRowIndexById() ниже) вместо "сырого" массива --
- * поиск стал O(1) вместо O(n).
- * @param {Object} macroIndex   -   Индекс { "<id>": row }, см. BuildRowIndexById().
+ * Ищет макрорегион конкретного сотрудника. ИЗМЕНЕНО (18.09.2026, см. объяснение над
+ * SortRowsById()) -- бинарный поиск вместо линейного ArrayOptFind()/динамического индекса.
+ * @param {Object[]} sortedMacroRows
  * @param {number} collaboratorID
  * @returns {string}
  */
-function FindMacroregion(macroIndex, collaboratorID)
+function FindMacroregion(sortedMacroRows, collaboratorID)
 {
     var macroRow;
-    macroRow = macroIndex[String(Int(collaboratorID))];
+    macroRow = BinarySearchById(sortedMacroRows, collaboratorID);
     return (macroRow != undefined && macroRow.macroregion != undefined ? String(macroRow.macroregion) : "");
 }
 
 /*
- * Строит индекс (объект-словарь, ключ -- id строкой) для O(1) поиска вместо линейного
- * ArrayOptFind(). Идентична версии в HREDU-183_tep_reports.js -- см. там подробное
- * объяснение находки и предупреждение о риске (первое использование в тикете
- * динамического доступа к свойству объекта по вычисляемому ключу).
- * @param {Object[]} rows   -   Строки с полем "id" (macroRows/cityRows).
- * @returns {Object}         -   Индекс { "<id>": row, ... }.
- */
-function BuildRowIndexById(rows)
-{
-    var index, i;
-    index = {};
-    for (i = 0; i < ArrayCount(rows); i++)
-    {
-        index[String(Int(rows[i].id))] = rows[i];
-    }
-    return index;
-}
-
-/*
- * То же самое, но для dateRows -- ключ СОСТАВНОЙ (сотрудник + программа). Идентична
- * версии в HREDU-183_tep_reports.js.
+ * Сортирует dateRows по collaborator_id (ключевое поле здесь -- collaborator_id, не id).
+ * Идентична версии в HREDU-183_tep_reports.js.
  * @param {Object[]} dateRows
- * @returns {Object}   -   Индекс { "<collaboratorID>_<programID>": row, ... }.
+ * @returns {Object[]}
  */
-function BuildDateIndex(dateRows)
+function SortDateRowsByCollaboratorId(dateRows)
 {
-    var index, i, sKey;
-    index = {};
-    for (i = 0; i < ArrayCount(dateRows); i++)
-    {
-        sKey = String(Int(dateRows[i].collaborator_id)) + "_" + String(Int(dateRows[i].education_method_id));
-        index[sKey] = dateRows[i];
-    }
-    return index;
+    return ArraySort(dateRows, "Int(This.collaborator_id)", "+");
 }
 
 function GetMirCodeRows()
@@ -540,11 +553,13 @@ function CollaboratorInProgramAudience(collaboratorRow, segments, mirCodeRows)
 
 /*
  * Применяет 4 ручных фильтра пользователя -- идентично HREDU-183_tep_reports.js.
- * ИЗМЕНЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ): 5-й параметр теперь называется
- * macroIndex и ожидает ГОТОВЫЙ индекс (см. BuildRowIndexById()), а не "сырой" массив --
- * поиск O(1) вместо O(n) на каждой итерации, см. подробное объяснение над FindMacroregion().
+ * ИЗМЕНЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ, дважды в один день -- см. подробности
+ * над SortRowsById()): 5-й параметр называется sortedMacroRows и ожидает массив,
+ * ОТСОРТИРОВАННЫЙ через SortRowsById() -- поиск бинарным поиском (BinarySearchById())
+ * вместо линейного ArrayOptFind(). (Первая версия правки использовала объект-словарь с
+ * динамическим ключом -- не сработало на реальном тесте, см. объяснение над SortRowsById().)
  */
-function ApplyManualFilters(collaboratorRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroIndex)
+function ApplyManualFilters(collaboratorRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, sortedMacroRows)
 {
     var allowedPositionIds, mirCodeRows, filteredRows, i, macroRow;
 
@@ -567,7 +582,7 @@ function ApplyManualFilters(collaboratorRows, iPositionFilter, sMacroregionFilte
         filteredRows = [];
         for (i = 0; i < ArrayCount(collaboratorRows); i++)
         {
-            macroRow = macroIndex[String(Int(collaboratorRows[i].id))];
+            macroRow = BinarySearchById(sortedMacroRows, Int(collaboratorRows[i].id));
             if (macroRow != undefined && String(macroRow.macroregion) == sMacroregionFilter) { filteredRows.push(collaboratorRows[i]); }
         }
     }
@@ -598,12 +613,50 @@ function GetCompletionDateRows(programIds)
     return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-function FindCompletionDate(dateIndex, collaboratorID, programID)
+/*
+ * ИЗМЕНЕНО (18.09.2026, см. объяснение над SortRowsById() в этом же файле): бинарный
+ * поиск первой строки этого сотрудника (по sortedDateRows, см.
+ * SortDateRowsByCollaboratorId()) + короткий линейный проход только по его строкам --
+ * идентична версии в HREDU-183_tep_reports.js.
+ * @param {Object[]} sortedDateRows
+ * @param {number} collaboratorID
+ * @param {number} programID
+ * @returns {string}
+ */
+function FindCompletionDate(sortedDateRows, collaboratorID, programID)
 {
-    var dateRow, sKey;
-    sKey = String(Int(collaboratorID)) + "_" + String(Int(programID));
-    dateRow = dateIndex[sKey];
-    return (dateRow != undefined ? StrDate(Date(dateRow.first_date), false) : "");
+    var lo, hi, mid, midId, iTarget, iProgram, startIdx, i, n;
+
+    iTarget = Int(collaboratorID);
+    iProgram = Int(programID);
+
+    lo = 0;
+    hi = ArrayCount(sortedDateRows) - 1;
+    startIdx = -1;
+    while (lo <= hi)
+    {
+        mid = Int((lo + hi) / 2);
+        midId = Int(sortedDateRows[mid].collaborator_id);
+        if (midId == iTarget)
+        {
+            startIdx = mid;
+            hi = mid - 1;
+        }
+        else if (midId < iTarget) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+
+    if (startIdx == -1) { return ""; }
+
+    n = ArrayCount(sortedDateRows);
+    for (i = startIdx; i < n && Int(sortedDateRows[i].collaborator_id) == iTarget; i++)
+    {
+        if (Int(sortedDateRows[i].education_method_id) == iProgram)
+        {
+            return StrDate(Date(sortedDateRows[i].first_date), false);
+        }
+    }
+    return "";
 }
 
 /*
@@ -785,7 +838,7 @@ function Run()
     var programIds, filteredProgramIds, programNames, i, j;
     var activeRows, manualFilteredRows;
     var macroRows, mirCodeRows, cityRows, dateRows;
-    var macroIndex, cityIndex, dateIndex; // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ) -- см. BuildRowIndexById()/BuildDateIndex()
+    var macroSorted, citySorted, dateSorted; // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ, вторая правка) -- см. SortRowsById()/SortDateRowsByCollaboratorId()
     var acc, cityProgramAcc, sCity, sProgramName, sDate, row;
     var totalAcc, resultRows, id;
     var sMacroregionForRow, sLinkMacroregion; // ДОБАВЛЕНО (18.09.2026) -- см. FindMacroregion()/BuildTepLink()
@@ -846,20 +899,22 @@ function Run()
         PerfCheckpoint("GetActiveCollaboratorRows() -- SQL/XQuery по всем активным сотрудникам");
         macroRows = GetMacroregionRows();
         PerfCheckpoint("GetMacroregionRows() -- SQL по макрорегионам сотрудников");
-        // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ -- см. подробности над
-        // FindMacroregion()/BuildRowIndexById()): та же O(n^2)-ловушка, что нашлась и
-        // измерилась в HREDU-183_tep_reports.js (линейный ArrayOptFind() внутри циклов по
-        // ВСЕМ активным сотрудникам компании) -- строим индексы ОДИН РАЗ сразу после SQL.
-        macroIndex = BuildRowIndexById(macroRows);
-        PerfCheckpoint("BuildRowIndexById(macroRows) -- построение индекса макрорегионов -- ЧИСТЫЙ КОД, O(n)");
+        // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ, дважды в один день -- см.
+        // подробности над SortRowsById()): та же O(n^2)-ловушка, что нашлась и измерилась
+        // в HREDU-183_tep_reports.js (линейный ArrayOptFind() по ВСЕМ активным сотрудникам
+        // компании внутри циклов). Первая попытка (объект-словарь с динамическим ключом)
+        // сломала именно ЭТОТ файл на реальном тесте ("Unknown object property") -- теперь
+        // сортируем массивы ОДИН РАЗ сразу после SQL и ищем бинарным поиском.
+        macroSorted = SortRowsById(macroRows);
+        PerfCheckpoint("SortRowsById(macroRows) -- сортировка для бинарного поиска по макрорегионам -- ЧИСТЫЙ КОД, O(n log n)");
         cityRows = GetCityRows();
         PerfCheckpoint("GetCityRows() -- SQL по городам сотрудников");
-        cityIndex = BuildRowIndexById(cityRows);
-        PerfCheckpoint("BuildRowIndexById(cityRows) -- построение индекса городов -- ЧИСТЫЙ КОД, O(n)");
+        citySorted = SortRowsById(cityRows);
+        PerfCheckpoint("SortRowsById(cityRows) -- сортировка для бинарного поиска по городам -- ЧИСТЫЙ КОД, O(n log n)");
         dateRows = GetCompletionDateRows(programIds);
         PerfCheckpoint("GetCompletionDateRows() -- SQL по датам прохождения программ");
-        dateIndex = BuildDateIndex(dateRows);
-        PerfCheckpoint("BuildDateIndex(dateRows) -- построение индекса дат прохождения -- ЧИСТЫЙ КОД, O(n)");
+        dateSorted = SortDateRowsByCollaboratorId(dateRows);
+        PerfCheckpoint("SortDateRowsByCollaboratorId(dateRows) -- сортировка для бинарного поиска по датам -- ЧИСТЫЙ КОД, O(n log n)");
         // ИЗМЕНЕНО (17.09.2026): mirCodeRows раньше грузился ЛЕНИВО (либо внутри
         // GetMatrixAudienceCollaboratorRows(), убрана, либо внутри ApplyManualFilters()
         // при ручном фильтре по мир-коду). Теперь нужен ВСЕГДА -- для аудитории КАЖДОЙ
@@ -890,7 +945,7 @@ function Run()
         // КАЖДОЙ ПАРЕ (сотрудник x программа) внутри цикла ниже -- значит пул для
         // total/mandatory и пул для fact СОВПАДАЮТ (оба -- "активные + ручные фильтры"),
         // достаточно посчитать один раз.
-        manualFilteredRows = ApplyManualFilters(activeRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroIndex);
+        manualFilteredRows = ApplyManualFilters(activeRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroSorted);
         LogAlert(1, "Run(). Сотрудников после ручных фильтров (база и для total/mandatory, и для fact): " + ArrayCount(manualFilteredRows));
         PerfCheckpoint("ApplyManualFilters() -- ручные фильтры пользователя -- ЧИСТЫЙ КОД (может дёргать SQL внутри при фильтре по должности)");
 
@@ -903,10 +958,10 @@ function Run()
         // "ИЗМЕНЕНО (17.09.2026)" выше -- аудитория теперь своя у каждой программы).
         for (i = 0; i < ArrayCount(manualFilteredRows); i++)
         {
-            sCity = FindCity(cityIndex, Int(manualFilteredRows[i].id));
+            sCity = FindCity(citySorted, Int(manualFilteredRows[i].id));
             // ДОБАВЛЕНО (18.09.2026): реальный макрорегион ЭТОГО сотрудника -- см.
             // FindMacroregion() и комментарий над GetOrCreateCityProgramAcc().
-            sMacroregionForRow = FindMacroregion(macroIndex, Int(manualFilteredRows[i].id));
+            sMacroregionForRow = FindMacroregion(macroSorted, Int(manualFilteredRows[i].id));
             for (j = 0; j < ArrayCount(programIds); j++)
             {
                 segments = FindProgramAudienceSegments(audienceIndex, programIds[j]);
@@ -914,7 +969,7 @@ function Run()
                 {
                     sProgramName = FindProgramName(programNames, programIds[j]);
                     cityProgramAcc = GetOrCreateCityProgramAcc(acc, sCity, programIds[j], sProgramName, sMacroregionForRow);
-                    sDate = FindCompletionDate(dateIndex, Int(manualFilteredRows[i].id), programIds[j]);
+                    sDate = FindCompletionDate(dateSorted, Int(manualFilteredRows[i].id), programIds[j]);
                     cityProgramAcc.total = cityProgramAcc.total + 1;
                     if (sDate == "") { cityProgramAcc.mandatory = cityProgramAcc.mandatory + 1; }
                 }
@@ -939,12 +994,12 @@ function Run()
         // пустых строк, которых никто не хочет видеть.
         for (i = 0; i < ArrayCount(manualFilteredRows); i++)
         {
-            sCity = FindCity(cityIndex, Int(manualFilteredRows[i].id));
-            sMacroregionForRow = FindMacroregion(macroIndex, Int(manualFilteredRows[i].id));
+            sCity = FindCity(citySorted, Int(manualFilteredRows[i].id));
+            sMacroregionForRow = FindMacroregion(macroSorted, Int(manualFilteredRows[i].id));
             for (j = 0; j < ArrayCount(programIds); j++)
             {
                 segments = FindProgramAudienceSegments(audienceIndex, programIds[j]);
-                sDate = FindCompletionDate(dateIndex, Int(manualFilteredRows[i].id), programIds[j]);
+                sDate = FindCompletionDate(dateSorted, Int(manualFilteredRows[i].id), programIds[j]);
                 if (sDate != "" && CollaboratorInProgramAudience(manualFilteredRows[i], segments, mirCodeRows))
                 {
                     sProgramName = FindProgramName(programNames, programIds[j]);
