@@ -1,94 +1,114 @@
-// HREDU-183. ТЭП_общее_кол-во / ТЭП_план / ТЭП_факт / ТЭП_обязательно -- выборка для
-// Табличных данных. Один файл, четыре режима через параметр result_type -- по образцу
-// education_accept_event_card (там тоже один result_type переключает поведение одной
-// выборки). Построено на основе HREDU-181_vostok_polny_spisok_draft.js -- та же матрица/
-// программы/сотрудники/даты/фильтры, плюс новое: аудитория матрицы и разбиение по
-// результату (см. ниже).
+// =====================================================================
+// HREDU-182. "Процент обученных" -- выборка для Табличных данных.
 //
-// ТЗ (HREDU-183, полный текст прислан пользователем 10.09.2026):
-//   Общее кол-во сотрудников -- все, кто подходят под матрицу (должность + мир-код).
-//   План -- кол-во сотрудников которые подходят под матрицу и у кого уже наступил
-//     период прохождения тренинга.
-//   Факт -- кол-во сотрудников, прошедших тренинг (НЕ ЗАВИСИМО от условий матрицы).
-//   Обязательно к прохождению -- все, кто подходят под матрицу и при этом ещё не
-//     проходили тренинг.
-//   % обученных -- факт/план (уточнено с пользователем 10.09.2026 -- в тексте ТЗ
-//     написано "план/факт", но по смыслу метрики и по факту подтверждения это факт/план;
-//     сам % не входит в эту выборку -- это отдельный лёгкий расчёт для "Процент обученных",
-//     не список сотрудников).
+// ТЗ (из письма Антонова + "ТЗ Отчёт по матрицам", присланы пользователем 10.09
+// и 14.09.2026) + РЕАЛЬНЫЙ ПРИМЕР ОТЧЁТА, присланный 14.09.2026 ("Макрорегион ВОСТОК",
+// лист с колонками Город/Общее кол-во сотрудников/План/Факт/Процент/Обязательно к
+// прохождению, построчно по городам + итоговая строка "Общий итог").
 //
-// РЕШЕНИЯ, ПРИНЯТЫЕ С ПОЛЬЗОВАТЕЛЕМ (10.09.2026), ЧАСТИЧНО ПЕРЕСМОТРЕНЫ (17.09.2026,
-// HREDU-215 "Правки 1" -- см. ниже):
-//   1. Аудитория (должность + мир-код) -- РЕАЛИЗУЕМ. ИЗМЕНЕНО (17.09.2026, HREDU-215
-//      "Правки 1", по прямому указанию тим-лида пользователя -- "ошиблись в архитектуре"):
-//      РАНЬШЕ поля position_common_id/mir_code_id жили НА САМОЙ МАТРИЦЕ (cc_learning_matrice),
-//      аудитория была ОДНА на всю матрицу. ТЕПЕРЬ эти поля УДАЛЕНЫ с типа документа
-//      "Матрицы обучения" и ДОБАВЛЕНЫ на тип документа "Элементы матриц обучения"
-//      (cc_learning_matrice_element, у которых уже были education_method_id/
-//      start_study_period/end_study_period) -- значит аудитория теперь СВОЯ У КАЖДОГО
-//      ЭЛЕМЕНТА (по факту -- у каждой программы, а если у одной программы несколько
-//      элементов с разными position_common_id -- у неё НЕСКОЛЬКО аудиторий, объединяемых
-//      через ИЛИ). См. BuildProgramAudienceIndex()/CollaboratorInProgramAudience() ниже.
-//      Это МАНДАТОРНОЕ условие "кому вообще адресована ЭТА программа" -- отдельная вещь
-//      от РУЧНЫХ фильтров пользователя (те же имена полей, но разный смысл): ручные
-//      фильтры дополнительно СУЖАЮТ то, что уже прошло через аудиторию, а не заменяют её.
-//   2. "Период прохождения тренинга" (нужен для честного "План") -- НЕ РЕАЛИЗОВАН. На
-//      элементе есть start_study_period=1/end_study_period=4 (числа, не даты -- см.
-//      диагностику), но неясно: единицы измерения и от какой даты сотрудника отсчитывать.
-//      Пользователь решил не тратить на это время сейчас -- УПРОЩЕНИЕ: План = Общее (без
-//      доп. фильтра по периоду). Это совпадает с тем, что мы уже видели на тестовых
-//      данных пользователя раньше в этом тикете (план и общее количество были равны).
-//      ОТКРЫТЫЙ ВОПРОС, вернуться при необходимости -- аналогично открытым вопросам
-//      №1-3 в HREDU-181_vostok_polny_spisok_draft.js.
-//   3. Факт -- ПЕРЕСМОТРЕНО ПОВТОРНО (17.09.2026, тот же день, что и п.1, но отдельным
-//      уточнением от пользователя -- см. AskUserQuestion): раньше "не зависимо от условий
-//      матрицы" понималось БУКВАЛЬНО -- фильтр аудитории для "fact" вообще не применялся
-//      (сотрудник мог быть кем угодно по должности). Реальный тест (матрица
-//      "Менеджер"/"Стандарт менеджер", город Воронеж) показал, что это даёт СТРАННЫЙ
-//      результат -- в "Факт" попадали сотрудники СОВСЕМ ДРУГИХ должностей (Экономисты),
-//      просто когда-то прошедшие ту же программу по не связанной с этой матрицей причине
-//      (программа -- общий каталог, не привязана к конкретной матрице). ПОДТВЕРЖДЕНО
-//      пользователем: "Факт" ТЕПЕРЬ ТОЖЕ должен ограничиваться аудиторией (должность+
-//      мир-код ХОТЯ БЫ ОДНОГО элемента этой программы) -- "не зависимо от условий
-//      матрицы" означает "не зависимо от ПЕРИОДА" (см. п.2 -- он всё равно не
-//      реализован), а НЕ "вообще без каких-либо условий". Базовый пул для факта -- все
-//      активные сотрудники (как и раньше), ручные фильтры пользователя применяются, ПЛЮС
-//      теперь и аудитория программы -- см. п. "б" ниже.
-//   4. Обязательно -- аудитория программы (как Общее) МИНУС те, кто прошёл (т.е. строки
-//      с пустой датой прохождения).
+// РЕШЕНО С ПОЛЬЗОВАТЕЛЕМ (14.09.2026, через AskUserQuestion): реальный отчёт -- это
+// ТАБЛИЦА С РАЗБИВКОЙ ПО ГОРОДАМ (как в примере), а НЕ одна строка показателей на всю
+// матрицу (как можно было бы прочитать из ТЗ п.4 буквально -- там про "поле" в
+// единственном числе, но пример явно про таблицу).
 //
-// ИТОГОВАЯ АРХИТЕКТУРА: сначала строим ряды "сотрудник x программа" ТОЧНО как в
-// HREDU-181 (программы матрицы, активные сотрудники, дата прохождения, все 4 ручных
-// фильтра из URL). Разница только в ДВУХ местах:
-//   а) ИЗМЕНЕНО (17.09.2026, дважды в один день -- см. п.3 выше): аудитория применяется
-//      НЕ к общему пулу сотрудников ДО построения строк (раньше -- GetMatrixAudienceCollaboratorRows(),
-//      убрана), а К КАЖДОЙ ГОТОВОЙ СТРОКЕ (сотрудник x программа) ПОСЛЕ построения --
-//      потому что у разных программ в одной и той же строке-сотруднике может быть РАЗНАЯ
-//      аудитория (см. row.in_audience в BuildReportRows(), фильтр в Run() сразу после
-//      сборки RESULT). Применяется ко ВСЕМ 4 режимам ОДИНАКОВО, включая "fact" (было
-//      исключение для "fact" -- убрано по итогам теста, см. п.3);
-//   б) ПОСЛЕ того, как готовые строки (с completion_date) собраны -- для "fact" оставляем
-//      только строки с НЕпустой датой, для "mandatory" -- только с ПУСТОЙ датой,
-//      для "total"/"plan" -- оставляем все строки без изменений.
+// ИЗМЕНЕНО (16.09.2026, по итогам разговора пользователя с тимлидом): выяснилось, что
+// у одной матрицы может быть НЕСКОЛЬКО элементов (cc_learning_matrice_element), каждый
+// со своей учебной программой (education_method_id) и своим периодом обучения -- см.
+// переписку 15.09.2026 про каталоги "Матрицы обучения"/"Элементы матриц обучения".
+// Раньше строка таблицы была на КАЖДЫЙ ГОРОД, а показатели total/plan/fact/mandatory
+// СУММИРОВАЛИСЬ по всем программам матрицы в одну строку -- значит из таблицы было
+// не видно, по какому именно элементу (программе) идёт расчёт. Теперь строка -- это
+// ПАРА (Город, Учебная программа): если в городе есть 2 программы матрицы, у него будет
+// 2 строки, по одной на каждую. Явно запрошено пользователем 16.09.2026: "сделаем ещё
+// одну колонку после город - Учебная программа... чтобы было понятно по какому именно
+// элементу матрицы строка отчета".
 //
-// Параметр result_type -- один из: "total" | "plan" | "fact" | "mandatory".
-//   ИЗМЕНЕНО (10.09.2026): раньше читался ТОЛЬКО как фиксированное значение на вкладке
-//   "Параметры" отдельного виджета (по виджету на режим). Теперь читается СНАЧАЛА из
-//   URL (как остальные фильтры) -- это открывает дорогу к переключению режима самим
-//   пользователем на фронтенде (вкладки/ссылки/поле в модалке -- способ ещё
-//   обсуждается). Если в URL параметра нет -- запасной путь: старое фиксированное
-//   значение LPE (обратная совместимость с уже настроенными виджетами), иначе "total".
-//   Подробности -- в начале Run().
-// Фильтры (matrix_id, macroregion, mir_code, position_common_id, program_id) читаются
-// ТАК ЖЕ, как в HREDU-181 -- из Request.Url (см. HREDU-183_diagnostic_get_params.js) --
-// это работает надёжно в контексте ВЫБОРКИ (не удалённого действия, там был другой
-// механизм через {{curEnv.curEnvUrl}}, здесь он не нужен).
+// Поле "город" -- custom_elem с именем "sity" (ПОДТВЕРЖДЕНО пользователем 14.09.2026,
+// прислал реальный XML документа collaborator: <custom_elem><name>sity</name>
+// <value>Санкт-Петербург</value></custom_elem>). ВНИМАНИЕ: имя технического поля
+// именно "sity" (с опечаткой, не "city") -- это НЕ опечатка в этом файле, так
+// называется реальное поле в системе.
 //
-// ВАЖНО про RESULT: как и в HREDU-181 -- RESULT это ПРЯМО массив строк, без обёртки.
+// ИЗМЕНЕНО (17.09.2026, HREDU-215 "Правки 1", по прямому указанию тим-лида пользователя --
+// "ошиблись в архитектуре"): поля position_common_id/mir_code_id УДАЛЕНЫ с типа документа
+// "Матрицы обучения" (cc_learning_matrice) и ДОБАВЛЕНЫ на тип документа "Элементы матриц
+// обучения" (cc_learning_matrice_element, у которых уже были education_method_id/
+// start_study_period/end_study_period). Значит аудитория (должность+мир-код) теперь СВОЯ
+// У КАЖДОЙ ПРОГРАММЫ (у каждого элемента, а если у одной программы несколько элементов с
+// разными position_common_id -- у неё несколько аудиторий, объединяемых через ИЛИ), а НЕ
+// ОДНА НА ВСЮ МАТРИЦУ, как было раньше. См. BuildProgramAudienceIndex()/
+// CollaboratorInProgramAudience() ниже -- та же замена, что в HREDU-183_tep_reports.js.
+//
+// ЛОГИКА ПОДСЧЁТА (полностью повторяет HREDU-183_tep_reports.js -- см. "РЕШЕНИЯ" в его
+// шапке -- только теперь всё разбито по городам вместо одного общего числа):
+//   Общее (total)      -- аудитория ЭТОЙ ПРОГРАММЫ (по всем её активным элементам) +
+//                          ручные фильтры пользователя, сгруппировано по городу.
+//   План (plan)         -- = Общее (упрощение, период прохождения ещё не реализован,
+//                          см. открытый вопрос в HREDU-183_tep_reports.js).
+//   Факт (fact)          -- ИЗМЕНЕНО (17.09.2026, повторное уточнение в тот же день, что
+//                          и HREDU-215 "Правки 1"): раньше считался БЕЗ ограничения
+//                          аудиторией вообще (буквальное "не зависимо от условий
+//                          матрицы") -- реальный тест показал, что так в "Факт" попадают
+//                          сотрудники совсем других должностей (см. AskUserQuestion
+//                          17.09.2026). ТЕПЕРЬ прошедшие тренинг ДОЛЖНЫ ТАКЖЕ входить в
+//                          аудиторию программы (должность+мир-код хотя бы одного её
+//                          элемента) -- "не зависимо от условий матрицы" означает
+//                          "не зависимо от ПЕРИОДА" (см. План выше), а не вообще ни от
+//                          чего. Плюс те же ручные фильтры, сгруппировано по городу.
+//   Обязательно (mandatory) -- аудитория программы МИНУС прошедшие (пустая дата).
+//   Процент (percent)    -- факт/план (округление до целого %, "-" если план = 0).
+//     Уточнено с пользователем 10.09.2026 (см. HREDU-183_tep_reports.js) -- в тексте ТЗ
+//     написано "план/факт", реально считаем факт/план, подтверждено сверкой с примером
+//     (Новосибирск: 10/11=91%, Красноярск: 9/10=90%, Итог: 70/72=97% -- ВСЕ совпадают
+//     ТОЛЬКО с факт/план, не план/факт).
+//
+// ГРУППИРОВКА ПО (ГОРОД, ПРОГРАММА) -- см. ДОПУЩЕНИЯ ниже. Строка появляется, если для
+// этой пары есть хотя бы 1 человек в АУДИТОРИИ ПРОГРАММЫ (Общее > 0), ИЛИ хотя бы 1
+// человек её прошёл (Факт > 0).
+//
+// ДОПУЩЕНИЯ (уточнить с пользователем при первом реальном прогоне):
+//   1. Строки = пары (город, программа), где есть хотя бы 1 человек в АУДИТОРИИ (для
+//      этой программы) ИЛИ хотя бы 1 человек её ПРОШЁЛ -- см. "ГРУППИРОВКА ПО (ГОРОД,
+//      ПРОГРАММА)" выше. ИЗМЕНЕНО (17.09.2026, HREDU-215 "Правки 1" + повторное
+//      уточнение о "Факт" в тот же день): раньше "Факт" не проверял аудиторию вообще --
+//      значит строка могла появиться ТОЛЬКО из фактового прохода (Общее=0, Факт>0), даже
+//      если прошедший вообще не подходил ни под одну должность матрицы. ТЕПЕРЬ "Факт"
+//      тоже фильтруется по аудитории программы (см. ЛОГИКА ПОДСЧЁТА выше) -- значит
+//      КАЖДЫЙ, кто попадает в Факт, по определению уже входит в аудиторию своей
+//      программы и своего города, а значит уже посчитан в Общее для той же пары (город,
+//      программа) -- строка "Общее=0, Факт>0" теперь практически не должна возникать.
+//      Код-защита (создавать строку из фактового прохода только при sDate != "") тем не
+//      менее оставлена как есть -- дешёвая подстраховка на случай расхождений в данных
+//      (например, GetPositionIdsByCommonPosition() вернёт не совсем то, что ожидалось).
+//   2. Сотрудники БЕЗ заполненного города (custom_elem "sity" пустой) -- попадают в
+//      отдельную группу "(без города)", чтобы не терять данные молча.
+//   3. Итоговая строка "Общий итог" -- сумма по ВСЕМ парам (город, программа), колонка
+//      "Учебная программа" в ней -- "-" (относится ко всем программам сразу).
+//   4. Сортировка строк (ИЗМЕНЕНО 16.09.2026) -- сначала по названию программы, затем
+//      по городу внутри неё (простое сравнение строк, БЕЗ гарантии точной русской
+//      локали в этом движке) -- т.е. все города одной программы идут блоком, а не
+//      вперемешку город-за-городом. "Общий итог" всегда последней строкой.
+//
+// Параметры/фильтры (matrix_id, macroregion, mir_code, position_common_id, program_id)
+// читаются ИЗ URL -- точно так же, как в HREDU-183_tep_reports.js. macroregion в этой
+// выборке работает как ПРЕДФИЛЬТР (например "Восток" -- сузить список городов до
+// одного макрорегиона, как в примере), а группировка идёт уже ПО ГОРОДУ внутри него.
+//
+// ВАЖНО про RESULT: как и в остальных выборках -- RESULT это ПРЯМО массив строк.
+// =====================================================================
 
 DEBUG = true;              // На проде поставить false после тестирования
-LOG_NAME = "agent";        // TODO: уточнить после создания документа в админке
-CUR_OBJECT_ID = 0;         // TODO: заполнить ID документа выборки после её создания в админке
+LOG_NAME = "agent";        // TODO: заполнить после создания документа в админке
+CUR_OBJECT_ID = 0;         // TODO: заполнить ID документа выборки после её создания в админке (LogAlert защищена try/catch -- забытый 0 не обрушит Run())
+
+// ИСПРАВЛЕНО (16.09.2026): было "mode=matrix_test" -- адрес тестовой страницы, оставшийся
+// как TODO-заглушка. Пользователь сообщил, что переименовал реальную (production) страницу
+// ТЭП-отчётов с "matrix_test" на "matrix_report". Пока здесь оставался старый адрес, клик
+// по строке в "Процент обученных" вёл на СТАРУЮ (тестовую, возможно неактуальную/по-другому
+// настроенную) страницу -- это, судя по всему, и есть причина, почему параметр city "не
+// доезжал": на новой странице (matrix_report), куда пользователь при ручной проверке заходил
+// сам через фильтры, всё работало, а клик по строке уводил на другую, старую страницу.
+TEP_REPORT_PAGE_URL = "/view_doc.html?mode=matrix_report";
 
 //-------------------------------------------------------------------------
 //              Область функций
@@ -96,13 +116,6 @@ CUR_OBJECT_ID = 0;         // TODO: заполнить ID документа в�
 
 function LogAlert(typeLog, message)
 {
-    // ЗАЩИЩЕНО (10.09.2026, по мотивам реальной поломки): если LOG_NAME/CUR_OBJECT_ID
-    // ещё не настроены (например CUR_OBJECT_ID=0 -- заглушка "TODO: заполнить после
-    // создания документа в админке"), вызов может упасть с ошибкой -- а LogAlert()
-    // вызывается ДО главного try/catch в Run(), поэтому необработанное исключение тут
-    // рушило ВЕСЬ Run() целиком: RESULT никогда не устанавливался, таблица оставалась
-    // пустой БЕЗ какого-либо сообщения об ошибке (именно это и произошло на реальном
-    // тесте). Логирование -- вспомогательная вещь, её сбой не должен ронять сам отчёт.
     try
     {
         tools.call_code_library_method("vtbl_log_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
@@ -118,42 +131,15 @@ function LogAlert(typeLog, message)
 //              пользователя -- медленно грузятся страницы после смены фильтров,
 //              нужно понять, тормозит БД (SQL/XQuery/tools.open_doc()) или сам код)
 //-------------------------------------------------------------------------
-// ВРЕМЕННАЯ ДИАГНОСТИКА. Когда причина тормозов найдена -- этот блок и все вызовы
-// PerfStart()/PerfCheckpoint() ниже можно спокойно удалить, на остальную логику файла
-// это никак не влияет (отдельный флаг PERF_DEBUG, отдельные функции -- ничего не
-// переиспользуется в основном коде отчёта).
-//
-// КАК ЧИТАТЬ: PerfStart() -- один раз в начале Run(), дальше PerfCheckpoint("название
-// шага") после каждого интересующего шага (SQL/XQuery-запрос, tools.open_doc(), тяжёлый
-// цикл). Каждый вызов -- это alert() с ТРЕМЯ цифрами: текущее время, сколько прошло С
-// ПРЕДЫДУЩЕЙ точки (это и есть время именно ЭТОГО шага) и сколько прошло С САМОГО НАЧАЛА
-// (общее время на данный момент). Если "с предыдущей точки" у конкретного шага большое --
-// значит тормозит именно он. В названии каждого шага ниже (см. Run()) явно помечено,
-// SQL/БД это или ЧИСТЫЙ КОД -- так сразу видно, куда смотреть: в СУБД или в сам скрипт.
-//
-// ЧЕСТНО ПРО ТОЧНОСТЬ: подсчёт секунд ((dTo - dFrom) * 86400) -- ЭКСПЕРИМЕНТАЛЬНЫЙ.
-// Арифметика вычитания дат на этой платформе раньше в проекте нигде не проверялась (в
-// отличие от Date()/StrDate()/DateOffset() -- они точно рабочие, см. FindCompletionDate()
-// в этом же файле). Точно известно: сравнение дат (">=") работает (см.
-// HREDU-176_integration_final_working.js), а DateOffset(date, секунды) прибавляет к дате
-// секунды -- это похоже на тип, где дата хранится числом (целая часть -- дни, дробная --
-// доля суток), поэтому вычитание, скорее всего, даёт разницу В ДНЯХ, а *86400 переводит
-// в секунды. НО если цифра в alert'е выглядит абсурдно (отрицательная, огромная, "?") --
-// НЕ доверяй числу секунд, доверяй RAW-таймштампам ("время сейчас: ...") -- разницу по
-// ним можно посчитать вручную, Date()/StrDate() -- точно рабочие функции. Вся арифметика
-// обёрнута в try/catch -- если вычитание дат не поддерживается, вместо числа увидишь "?".
-//
-// И сами alert() тоже обёрнуты в try/catch -- если alert() почему-то недоступен в
-// контексте исполнения выборки, замер просто промолчит, а не уронит отчёт.
+// ВРЕМЕННАЯ ДИАГНОСТИКА, идентична версии в HREDU-183_tep_reports.js (см. там подробное
+// объяснение -- как читать, риски точности подсчёта секунд, почему всё в try/catch).
+// Когда причина тормозов найдена -- блок и все вызовы PerfStart()/PerfCheckpoint() ниже
+// можно удалить, на остальную логику файла это не влияет.
 
 PERF_DEBUG = true; // поставь false, чтобы быстро выключить весь этот блок целиком
 gPerfStartTime = undefined;
 gPerfLastTime = undefined;
 
-/*
- * Начинает замер -- запоминает "сейчас" как точку отсчёта. Вызвать ОДИН РАЗ в начале Run().
- * @returns {void}
- */
 function PerfStart()
 {
     if (!PERF_DEBUG) { return; }
@@ -162,12 +148,6 @@ function PerfStart()
     PerfAlertSafe("[ЗАМЕР] СТАРТ. Время: " + PerfFormatTimestamp(gPerfStartTime));
 }
 
-/*
- * Точка замера -- alert() с текущим временем, временем ЭТОГО шага (с предыдущей точки) и
- * временем с начала (с PerfStart()). См. подробности в шапке блока выше.
- * @param {string} sLabel   -   Название шага, например "GetActiveCollaboratorRows() -- SQL".
- * @returns {void}
- */
 function PerfCheckpoint(sLabel)
 {
     if (!PERF_DEBUG) { return; }
@@ -208,38 +188,16 @@ function PerfAlertSafe(sMsg)
     try { alert(sMsg); } catch (_ex) { /* alert недоступен в этом контексте -- не роняем код */ }
 }
 
-/*
- * Достаёт полный URL текущей страницы (см. HREDU-181_vostok_polny_spisok_draft.js --
- * тот же приём, подтверждён диагностикой). В контексте ВЫБОРКИ Request.Url надёжен.
- * @returns {string}
- */
 function GetRequestUrlSafe()
 {
-    try
-    {
-        return String(Request.Url);
-    }
-    catch (_ex)
-    {
-        return "";
-    }
+    try { return String(Request.Url); }
+    catch (_ex) { return ""; }
 }
 
-/*
- * Вырезает значение GET-параметра из полного URL строки -- без regex, без методов
- * строк (их нет в этом движке), через штатный API платформы (StrOptSubStrPos/
- * StrRangePos/StrLen), декодирование через UrlDecode(). Идентична версии в
- * HREDU-181_vostok_polny_spisok_draft.js.
- * @param {string} sUrl
- * @param {string} sParamName
- * @returns {string}
- */
 function GetQueryParam(sUrl, sParamName)
 {
     var sAmpMarker, sQMarkMarker, iParamPos, iValueStart, iAmpPos, iValueEnd, sRawValue, iUrlLen;
-
     iUrlLen = StrLen(sUrl);
-
     sAmpMarker = "&" + sParamName + "=";
     iParamPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
     if (iParamPos != undefined)
@@ -250,190 +208,107 @@ function GetQueryParam(sUrl, sParamName)
     {
         sQMarkMarker = "?" + sParamName + "=";
         iParamPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
-        if (iParamPos == undefined)
-        {
-            return "";
-        }
+        if (iParamPos == undefined) { return ""; }
         iValueStart = iParamPos + StrLen(sQMarkMarker);
     }
-
     iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
     iValueEnd = (iAmpPos != undefined ? iAmpPos : iUrlLen);
-
     sRawValue = StrRangePos(sUrl, iValueStart, iValueEnd);
-
-    try
-    {
-        return UrlDecode(sRawValue);
-    }
-    catch (_exDecode)
-    {
-        return sRawValue;
-    }
+    try { return UrlDecode(sRawValue); }
+    catch (_exDecode) { return sRawValue; }
 }
 
-/*
- * Находит все записи cc_learning_matrice с указанным названием (см. открытый вопрос №1
- * в HREDU-181_vostok_polny_spisok_draft.js -- матрица может быть "размножена").
- * @param {string} matrixName
- * @returns {Object[]}
- */
 function GetMatrixRows(matrixName)
 {
-    LogAlert(1, "GetMatrixRows(). НАЧАЛО. matrixName=" + matrixName);
-    var matrixRows;
-    matrixRows = ArraySelectAll(XQuery("for $elem in cc_learning_matrices where $elem/name = " + XQueryLiteral(matrixName) + " return $elem"));
-    LogAlert(1, "GetMatrixRows(). Найдено записей: " + ArrayCount(matrixRows));
-    LogAlert(1, "GetMatrixRows(). КОНЕЦ");
-    return matrixRows;
+    return ArraySelectAll(XQuery("for $elem in cc_learning_matrices where $elem/name = " + XQueryLiteral(matrixName) + " return $elem"));
 }
 
-/*
- * Находит активные элементы (программы) для указанных записей матрицы.
- * @param {number[]} matrixIds
- * @returns {Object[]}
- */
 function GetMatrixElementRows(matrixIds)
 {
-    LogAlert(1, "GetMatrixElementRows(). НАЧАЛО");
-    var elementRows;
-    elementRows = ArraySelectAll(XQuery("for $elem in cc_learning_matrice_elements where MatchSome($elem/cc_learning_matrice_id, (" + ArrayMerge(matrixIds, "This", ",") + ")) and $elem/is_active=true() return $elem"));
-    LogAlert(1, "GetMatrixElementRows(). Найдено элементов: " + ArrayCount(elementRows));
-    LogAlert(1, "GetMatrixElementRows(). КОНЕЦ");
-    return elementRows;
+    return ArraySelectAll(XQuery("for $elem in cc_learning_matrice_elements where MatchSome($elem/cc_learning_matrice_id, (" + ArrayMerge(matrixIds, "This", ",") + ")) and $elem/is_active=true() return $elem"));
 }
 
 /*
- * Собирает уникальный список ID программ (education_method) -- ТОЛЬКО с элементов.
- * ИЗМЕНЕНО (17.09.2026, HREDU-215 "Правки 1", по прямому указанию тим-лида): у типа
- * документов "Матрицы обучения" (cc_learning_matrice) поле education_method_id УДАЛЕНО
- * (как и mir_code_id/position_common_id/start_study_period/end_study_period -- см. новую
- * структуру матрицы, шапка задачи) -- теперь ЭТИ поля есть ТОЛЬКО у "Элементов матриц
- * обучения" (cc_learning_matrice_element). Раньше эта функция объединяла
- * education_method_id матрицы И её элементов (на случай, если у матрицы тоже было такое
- * поле, см. историю правки 15.09.2026) -- теперь у матрицы этого поля больше нет вообще,
- * читаем ТОЛЬКО из elementRows.
- * @param {Object[]} elementRows
- * @returns {number[]}
+ * ИЗМЕНЕНО (17.09.2026, HREDU-215 "Правки 1"): у типа документов "Матрицы обучения"
+ * (cc_learning_matrice) поле education_method_id УДАЛЕНО (тим-лид пересмотрел архитектуру --
+ * см. шапку файла) -- программы теперь заданы ТОЛЬКО через элементы
+ * (cc_learning_matrice_element). Раньше эта функция объединяла education_method_id
+ * матрицы И её элементов (см. историю правки 15.09.2026, "Int(), Unknown source") --
+ * теперь читаем ТОЛЬКО из elementRows, параметр matrixRows убран.
  */
 function GetProgramIds(elementRows)
 {
-    LogAlert(1, "GetProgramIds(). НАЧАЛО");
-    var elementProgramIds, allProgramIds, programIds, i;
+    var elementProgramIds, allProgramIds, i;
     elementProgramIds = ArrayExtract(elementRows, "OptInt(This.education_method_id, 0)");
     allProgramIds = [];
-    for (i = 0; i < ArrayCount(elementProgramIds); i++)
-    {
-        if (Int(elementProgramIds[i]) > 0) { allProgramIds.push(elementProgramIds[i]); }
-    }
-    programIds = ArraySelectDistinct(allProgramIds, "This");
-    LogAlert(1, "GetProgramIds(). Уникальных программ (после отбрасывания пустых education_method_id): " + ArrayCount(programIds));
-    LogAlert(1, "GetProgramIds(). КОНЕЦ");
-    return programIds;
+    for (i = 0; i < ArrayCount(elementProgramIds); i++) { if (Int(elementProgramIds[i]) > 0) { allProgramIds.push(elementProgramIds[i]); } }
+    return ArraySelectDistinct(allProgramIds, "This");
 }
 
 /*
- * Строит справочник { id, title } по программам обучения.
- * @param {number[]} programIds
- * @returns {Object[]}
+ * ПЕРЕИМЕНОВАНО (17.09.2026, было ResolveProgramIds -- возвращала только programIds):
+ * теперь возвращает ещё и elementRows -- нужны отдельно для BuildProgramAudienceIndex()
+ * ниже (аудитория HREDU-215 теперь считается ПО ЭЛЕМЕНТАМ, не по самой матрице).
+ * @returns {Object}   -   { programIds: number[], elementRows: Object[] }.
  */
-function GetProgramTitles(programIds)
+function ResolveMatrixContext(matrixId, matrixName)
 {
-    LogAlert(1, "GetProgramTitles(). НАЧАЛО");
-    var titles, i, programID, educationMethodDoc;
-    titles = [];
-    for (i = 0; i < ArrayCount(programIds); i++)
+    var matrixRows, matrixIds, elementRows, programIds;
+    matrixRows = GetMatrixRows(matrixName);
+    matrixIds = ArrayExtract(matrixRows, "Int(This.id)");
+    if (ArrayCount(matrixIds) == 0)
     {
-        programID = programIds[i];
-        educationMethodDoc = tools.open_doc(programID).TopElem;
-        titles.push({ id: String(programID), title: String(educationMethodDoc.name) });
+        throw ("Не найдено ни одной записи cc_learning_matrice с названием [" + matrixName + "]");
     }
-    LogAlert(1, "GetProgramTitles(). КОНЕЦ");
-    return titles;
+    elementRows = GetMatrixElementRows(matrixIds);
+    programIds = GetProgramIds(elementRows);
+    if (ArrayCount(programIds) == 0)
+    {
+        throw ("У матрицы [" + matrixName + "] не найдено ни одной активной программы");
+    }
+    return { programIds: programIds, elementRows: elementRows };
 }
 
-/*
- * Читает всех действующих сотрудников (базовый пул, ДО аудитории матрицы и ДО ручных
- * фильтров).
- * @returns {Object[]}
- */
 function GetActiveCollaboratorRows()
 {
-    LogAlert(1, "GetActiveCollaboratorRows(). НАЧАЛО");
-    var collaboratorRows;
-    collaboratorRows = ArraySelectAll(XQuery("for $elem in collaborators where $elem/is_dismiss=false() return $elem"));
-    LogAlert(1, "GetActiveCollaboratorRows(). Найдено сотрудников: " + ArrayCount(collaboratorRows));
-    LogAlert(1, "GetActiveCollaboratorRows(). КОНЕЦ");
-    return collaboratorRows;
+    return ArraySelectAll(XQuery("for $elem in collaborators where $elem/is_dismiss=false() return $elem"));
 }
 
-/*
- * Находит ID документов коллекции "positions", у которых position_common_id совпадает
- * с переданным ID (см. подробное объяснение схемы в HREDU-181_vostok_polny_spisok_draft.js).
- * @param {number} iCommonPositionFilter
- * @returns {number[]}
- */
 function GetPositionIdsByCommonPosition(iCommonPositionFilter)
 {
-    LogAlert(1, "GetPositionIdsByCommonPosition(). НАЧАЛО. iCommonPositionFilter=" + iCommonPositionFilter);
     var positionRows, positionIds, i;
     positionRows = ArraySelectAll(XQuery("for $elem in positions where $elem/position_common_id = " + iCommonPositionFilter + " return $elem"));
     positionIds = [];
-    for (i = 0; i < ArrayCount(positionRows); i++)
-    {
-        positionIds.push(Int(positionRows[i].id));
-    }
-    LogAlert(1, "GetPositionIdsByCommonPosition(). Найдено конкретных должностей: " + ArrayCount(positionIds));
-    LogAlert(1, "GetPositionIdsByCommonPosition(). КОНЕЦ");
+    for (i = 0; i < ArrayCount(positionRows); i++) { positionIds.push(Int(positionRows[i].id)); }
     return positionIds;
 }
 
-/*
- * Проверяет вхождение числа в массив чисел обычным циклом (без ArraySelect()/строк-
- * выражений со ссылкой на внешние переменные -- см. объяснение в HREDU-181).
- * @param {number[]} idArray
- * @param {number} value
- * @returns {boolean}
- */
 function IdArrayContains(idArray, value)
 {
     var i;
     for (i = 0; i < ArrayCount(idArray); i++)
     {
-        if (Int(idArray[i]) == Int(value))
-        {
-            return true;
-        }
+        if (Int(idArray[i]) == Int(value)) { return true; }
     }
     return false;
 }
 
-/*
- * Достаёт макрорегион (custom_elem f_2ewj) по всем действующим сотрудникам одним SQL-запросом.
- * @returns {Object[]}
- */
 function GetMacroregionRows()
 {
-    LogAlert(1, "GetMacroregionRows(). НАЧАЛО");
-    var sqlText, macroRows;
+    var sqlText;
     sqlText = "";
     sqlText = sqlText + "select cs.id,\r\n";
     sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_2ewj'']/value)[1]', 'varchar(max)') as macroregion\r\n";
     sqlText = sqlText + "from collaborators cs\r\n";
     sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
     sqlText = sqlText + "where cs.is_dismiss != 1";
-    macroRows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetMacroregionRows(). Строк: " + ArrayCount(macroRows));
-    LogAlert(1, "GetMacroregionRows(). КОНЕЦ");
-    return macroRows;
+    return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
 /*
- * ДОБАВЛЕНО (14.09.2026, для drill-down из "Процент обученных"): город -- custom_elem
- * "sity" (имя технического поля подтверждено пользователем реальным XML документа
- * collaborator -- см. HREDU-182_procent_obuchennyh.js). Нужен, чтобы клик по конкретной
- * строке-городу в таблице "Процент обученных" открывал список ТОЛЬКО по этому городу,
- * а не по всей матрице.
+ * НОВОЕ (14.09.2026): город -- custom_elem "sity" (имя поля подтверждено пользователем
+ * реальным XML документа collaborator). Та же схема, что GetMacroregionRows()/
+ * GetMirCodeRows() -- один SQL на всех активных сотрудников сразу.
  * @returns {Object[]}   -   Массив {id, sity}.
  */
 function GetCityRows()
@@ -453,39 +328,22 @@ function GetCityRows()
 }
 
 /*
- * НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ (18.09.2026, реальный тест пользователя, см.
- * PerfCheckpoint() в Run()): "Ручной фильтр по макрорегиону" занял ~3 сек, "Фильтр по
- * городу" ~1 сек -- ПРИ ЭТОМ все SQL/XQuery-запросы заняли КАЖДЫЙ 0-1 сек. Т.е. БД тут ни
- * при чём -- тормозил ИМЕННО ЭТОТ КОД. Причина: FindCity()/FindMacroregion()/
- * FindCompletionDate() делали ArrayOptFind() -- ЛИНЕЙНЫЙ поиск по ВСЕМУ массиву
- * (macroRows/cityRows/dateRows -- это ВСЕ активные сотрудники компании) -- внутри цикла по
- * каждому сотруднику. Классическая O(n^2)-ловушка.
+ * НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ (18.09.2026, реальный тест пользователя): "Ручной
+ * фильтр по макрорегиону"/"Фильтр по городу" заняли секунды, ПРИ ЭТОМ все SQL/XQuery-
+ * запросы заняли доли секунды каждый -- БД ни при чём, тормозил ИМЕННО ЭТОТ КОД: линейный
+ * ArrayOptFind() по ВСЕМ активным сотрудникам компании внутри цикла по каждому сотруднику.
  *
- * ПЕРВАЯ ПОПЫТКА ФИКСА (18.09.2026, ОТКАЧЕНА В ТОТ ЖЕ ДЕНЬ): строили индекс через
- * обычный объект-словарь с динамическим ключом (object[String(id)]). РЕАЛЬНЫЙ ТЕСТ
- * пользователя это СЛОМАЛ -- платформа выдала "Unknown object property:
- * 6088495934734023244_6696477179940732741" -- т.е. динамический доступ к свойству
- * объекта по ВЫЧИСЛЯЕМОМУ строковому ключу (object[stringKey], в отличие от
- * object.fixedName) НЕ ПОДДЕРЖИВАЕТСЯ этим движком. Это подтверждённый факт, а не
- * гипотеза -- как в своё время не поддержались regex/.indexOf/.substring.
+ * ПЕРВАЯ ПОПЫТКА ФИКСА (18.09.2026, ОТКАЧЕНА В ТОТ ЖЕ ДЕНЬ): индекс через объект-словарь
+ * с динамическим ключом (object[String(id)]). РЕАЛЬНЫЙ ТЕСТ пользователя (на этом самом
+ * файле, "Процент обученных" перестал показывать таблицу) выдал ошибку "Unknown object
+ * property: <id>_<id>" -- динамический доступ к свойству объекта по ВЫЧИСЛЯЕМОМУ ключу
+ * НЕ ПОДДЕРЖИВАЕТСЯ этим движком. Подтверждённый факт, а не гипотеза.
  *
- * ИТОГОВЫЙ ФИКС (18.09.2026, ВТОРАЯ ПОПЫТКА): вместо объекта-словаря -- БИНАРНЫЙ ПОИСК по
- * массиву, ПРЕДВАРИТЕЛЬНО ОТСОРТИРОВАННОМУ через ArraySort(). Использует ТОЛЬКО
- * конструкции, уже подтверждённые в проекте: доступ к элементу массива по ЧИСЛОВОМУ
- * индексу (array[i] -- используется вообще везде в этом файле), ArraySort() (подтверждена
- * РЕАЛЬНО РАБОТАЮЩЕЙ в HREDU-176_integration_final_working.js: "ArraySort(snilsPersons,
- * ...HiringDate..., "+")"), сравнения и арифметика. Сложность: O(n log n) на сортировку
- * (один раз) + O(log n) на каждый поиск -- гораздо лучше O(n^2), хоть и не идеальный O(1),
- * зато не опирается на непроверенный (и теперь уже опровергнутый) механизм.
- *
- * ЧЕСТНО ПРО РИСК №2: ArraySort() подтверждена РАБОЧЕЙ в другом файле этого же проекта --
- * это МНОГО надёжнее, чем "непроверенная гипотеза" (какой была динамическая индексация),
- * но не 100% гарантия именно в ЭТОМ контексте (выборка, а не удалённое действие). ОБЯЗАТЕЛЬНО
- * проверь на реальных данных: (а) что отчёт снова показывает те же строки, что и раньше;
- * (б) что новые PerfCheckpoint() для "сортировки" в логе быстрые, а сами фильтры больше НЕ
- * занимают 3 сек/1 сек. Если ArraySort() тоже поведёт себя не так, как ожидается -- пришли
- * мне точный текст ошибки, откатимся на самый надёжный (хоть и медленный) вариант --
- * исходный ArrayOptFind() -- и будем думать дальше.
+ * ИТОГОВЫЙ ФИКС (18.09.2026, ВТОРАЯ ПОПЫТКА), идентичен версии в HREDU-183_tep_reports.js:
+ * БИНАРНЫЙ ПОИСК по массиву, отсортированному через ArraySort() (подтверждена рабочей в
+ * HREDU-176_integration_final_working.js) -- только доступ к массиву по числовому индексу,
+ * без object[computedKey]. ОБЯЗАТЕЛЬНО проверь на реальных данных после этой правки --
+ * если ArraySort() тоже поведёт себя неожиданно, пришли точный текст ошибки.
  * @param {Object[]} rows   -   Строки с полем "id" (macroRows/cityRows).
  * @returns {Object[]}       -   Тот же массив строк, отсортированный по возрастанию id.
  */
@@ -495,12 +353,11 @@ function SortRowsById(rows)
 }
 
 /*
- * Бинарный поиск строки с полем "id" == targetId в МАССИВЕ, ОТСОРТИРОВАННОМ ПО ВОЗРАСТАНИЮ
- * id (см. SortRowsById()). Использует только доступ к массиву по числовому индексу --
- * никакого object[computedKey], см. "ЧЕСТНО ПРО РИСК" выше.
- * @param {Object[]} sortedRows   -   Массив, УЖЕ отсортированный через SortRowsById().
+ * Бинарный поиск строки с полем "id" == targetId в массиве, ОТСОРТИРОВАННОМ по возрастанию
+ * id (см. SortRowsById()). Идентична версии в HREDU-183_tep_reports.js.
+ * @param {Object[]} sortedRows
  * @param {number} targetId
- * @returns {Object}               -   Найденная строка или undefined.
+ * @returns {Object}   -   Найденная строка или undefined.
  */
 function BinarySearchById(sortedRows, targetId)
 {
@@ -520,10 +377,9 @@ function BinarySearchById(sortedRows, targetId)
 }
 
 /*
- * Находит город конкретного сотрудника; "(без города)" если поле пустое/не найдено --
- * та же условность, что в HREDU-182_procent_obuchennyh.js.
- * ИЗМЕНЕНО (18.09.2026, см. "НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ" выше): теперь принимает
- * ОТСОРТИРОВАННЫЙ по id массив (см. SortRowsById()) и ищет БИНАРНЫМ ПОИСКОМ, а не линейно.
+ * Находит город конкретного сотрудника; "(без города)" если поле пустое/не найдено.
+ * ИЗМЕНЕНО (18.09.2026, см. объяснение над SortRowsById()) -- бинарный поиск вместо
+ * линейного ArrayOptFind()/динамического индекса.
  * @param {Object[]} sortedCityRows
  * @param {number} collaboratorID
  * @returns {string}
@@ -537,8 +393,22 @@ function FindCity(sortedCityRows, collaboratorID)
 }
 
 /*
- * Сортирует dateRows по collaborator_id (не по id -- у этих строк нет своего "id",
- * ключевое поле здесь -- collaborator_id, см. GetCompletionDateRows()).
+ * Ищет макрорегион конкретного сотрудника. ИЗМЕНЕНО (18.09.2026, см. объяснение над
+ * SortRowsById()) -- бинарный поиск вместо линейного ArrayOptFind()/динамического индекса.
+ * @param {Object[]} sortedMacroRows
+ * @param {number} collaboratorID
+ * @returns {string}
+ */
+function FindMacroregion(sortedMacroRows, collaboratorID)
+{
+    var macroRow;
+    macroRow = BinarySearchById(sortedMacroRows, collaboratorID);
+    return (macroRow != undefined && macroRow.macroregion != undefined ? String(macroRow.macroregion) : "");
+}
+
+/*
+ * Сортирует dateRows по collaborator_id (ключевое поле здесь -- collaborator_id, не id).
+ * Идентична версии в HREDU-183_tep_reports.js.
  * @param {Object[]} dateRows
  * @returns {Object[]}
  */
@@ -547,32 +417,18 @@ function SortDateRowsByCollaboratorId(dateRows)
     return ArraySort(dateRows, "Int(This.collaborator_id)", "+");
 }
 
-/*
- * Достаёт сырое значение мир-кодов (custom_elem f_mir_codes) по всем действующим
- * сотрудникам одним SQL-запросом.
- * @returns {Object[]}
- */
 function GetMirCodeRows()
 {
-    LogAlert(1, "GetMirCodeRows(). НАЧАЛО");
-    var sqlText, rows;
+    var sqlText;
     sqlText = "";
     sqlText = sqlText + "select cs.id,\r\n";
     sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_codes'']/value)[1]', 'varchar(max)') as mir_codes\r\n";
     sqlText = sqlText + "from collaborators cs\r\n";
     sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
     sqlText = sqlText + "where cs.is_dismiss != 1";
-    rows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetMirCodeRows(). Строк: " + ArrayCount(rows));
-    LogAlert(1, "GetMirCodeRows(). КОНЕЦ");
-    return rows;
+    return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-/*
- * Разбирает сырое значение f_mir_codes ("#LASK#17#|#LASM#17#...") в массив кодов без процентов.
- * @param {string} rawValue
- * @returns {string[]}
- */
 function ExtractMirCodes(rawValue)
 {
     var parts, fields, codes, i;
@@ -581,26 +437,25 @@ function ExtractMirCodes(rawValue)
     for (i = 0; i < ArrayCount(parts); i++)
     {
         fields = ArrayDirect(ArraySelect(String(parts[i]).split("#"), "This != ''"));
-        if (ArrayCount(fields) > 0)
-        {
-            codes.push(String(fields[0]));
-        }
+        if (ArrayCount(fields) > 0) { codes.push(String(fields[0])); }
     }
     return codes;
 }
 
 /*
- * Проверяет, есть ли у сотрудника указанный мир-код среди любых его мир-кодов.
- * НАЙДЕНО (18.09.2026, замер на "Процент обученных" ПОСЛЕ фикса macro/city/date бинарным
- * поиском): реальный тест показал провал в 31 сек ИМЕННО на шаге "Цикл total/mandatory" --
- * виновата была ЭТА функция: CollaboratorInProgramAudience() (см. ниже) вызывает её на
- * каждую пару сотрудник x программа-с-мир-кодовым-сегментом, а она делала линейный
+ * НАЙДЕНО (18.09.2026, третий раунд замера производительности -- уже ПОСЛЕ фикса
+ * macro/city/date бинарным поиском): реальный тест "Процент обученных" показал скачок
+ * с 15:28:18 до 15:28:49 (31 сек!) ИМЕННО на шаге "Цикл total/mandatory" -- при том, что
+ * FindMacroregion()/FindCity()/FindCompletionDate() внутри этого цикла УЖЕ бинарные.
+ * Причина -- ЭТА функция: она вызывается из CollaboratorInProgramAudience() (см. ниже)
+ * НА КАЖДУЮ пару сотрудник x программа-с-мир-кодовым-сегментом, и делала линейный
  * ArrayOptFind() по mirCodeRows -- ТАКОМУ ЖЕ полному массиву по ВСЕМ активным сотрудникам
- * компании, как macroRows/cityRows/dateRows до фикса -- та же O(n^2)-ловушка, пропущенная
- * в первых двух раундах правки ЭТОГО файла (тестовая матрица ТЭП не содержала элементов с
- * непустым мир-кодовым сегментом, поэтому баг здесь не проявился, хотя код был тот же).
- * Исправлено идентично остальным трём полям -- бинарный поиск по mirCodeRows,
- * отсортированному через SortRowsById() один раз в Run().
+ * компании, как macroRows/cityRows/dateRows до фикса -- то есть ровно та же O(n^2)-ловушка,
+ * просто её пропустили при первых двух раундах правки. ТЭП-тест её не поймал только
+ * потому, что в той матрице не было элементов с непустым мир-кодом сегмента -- то есть
+ * баг там тот же, просто не проявился на конкретных тестовых данных (см. идентичный фикс
+ * в HREDU-183_tep_reports.js). Исправлено ТЕМ ЖЕ способом, что и остальные три поля --
+ * бинарный поиск по mirCodeRows, отсортированному через SortRowsById() один раз в Run().
  * @param {Object[]} sortedMirCodeRows
  * @param {number} collaboratorID
  * @param {string} mirCodeFilter
@@ -610,67 +465,68 @@ function CollaboratorHasMirCode(sortedMirCodeRows, collaboratorID, mirCodeFilter
 {
     var row, codes;
     row = BinarySearchById(sortedMirCodeRows, collaboratorID);
-    if (row == undefined)
-    {
-        return false;
-    }
+    if (row == undefined) { return false; }
     codes = ExtractMirCodes(row.mir_codes);
     return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
 }
 
-/*
- * Резолвит ID объекта cc_mir_codes в его текстовый код -- нужно, чтобы превратить
- * mir_code_id САМОЙ МАТРИЦЫ (аудитория) в текст для сравнения с f_mir_codes сотрудника
- * (та же функция, что в HREDU-183_filtry_modal_shag1.js).
- * @param {number} iMirCodeID
- * @returns {string}
- */
 function ResolveMirCodeText(iMirCodeID)
 {
-    if (OptInt(iMirCodeID, 0) <= 0)
-    {
-        return "";
-    }
-    try
-    {
-        return String(tools.open_doc(Int(iMirCodeID)).TopElem.name);
-    }
-    catch (_ex)
-    {
-        return "";
-    }
+    if (OptInt(iMirCodeID, 0) <= 0) { return ""; }
+    try { return String(tools.open_doc(Int(iMirCodeID)).TopElem.name); }
+    catch (_ex) { return ""; }
+}
+
+/*
+ * НОВОЕ (16.09.2026): резолвит id учебной программы (education_method) в текст --
+ * та же схема, что ResolveMirCodeText() (каталог "education_method" -- см.
+ * catalog: "education_method" у поля program_id в HREDU-183_filtry_modal_shag1.js).
+ * @param {number} iProgramId
+ * @returns {string}
+ */
+function ResolveProgramText(iProgramId)
+{
+    if (OptInt(iProgramId, 0) <= 0) { return "(без программы)"; }
+    try { return String(tools.open_doc(Int(iProgramId)).TopElem.name); }
+    catch (_ex) { return "id=" + iProgramId; }
+}
+
+/*
+ * Резолвит id программы в текст ЧЕРЕЗ УЖЕ ГОТОВЫЙ КЭШ (см. Run() -- programNames
+ * строится ОДИН РАЗ на все уникальные programIds, а не по разу на каждого сотрудника x
+ * программу -- иначе tools.open_doc() дёргался бы много тысяч раз).
+ * @param {Object[]} programNames   -   Массив {id, name}.
+ * @param {number} iProgramId
+ * @returns {string}
+ */
+function FindProgramName(programNames, iProgramId)
+{
+    var row;
+    row = ArrayOptFind(programNames, "Int(This.id) == Int(iProgramId)");
+    return (row != undefined ? String(row.name) : "id=" + iProgramId);
 }
 
 // УБРАНО (17.09.2026, HREDU-215 "Правки 1"): GetMatrixAudienceCollaboratorRows() читала
-// АУДИТОРИЮ (должность + мир-код) с полей position_common_id/mir_code_id САМОЙ МАТРИЦЫ
-// (cc_learning_matrice) -- этих полей у типа документа больше нет, тим-лид перенёс их на
-// "Элементы матриц обучения" (cc_learning_matrice_element, у которых уже были
-// education_method_id/start_study_period/end_study_period). Значит аудитория теперь НЕ
-// ОДНА НА ВСЮ МАТРИЦУ, а СВОЯ У КАЖДОГО ЭЛЕМЕНТА (то есть, по факту, у каждой программы --
-// см. пример из задачи: два элемента с ОДНИМ и тем же education_method_id, но РАЗНЫМИ
-// position_common_id -- это значит "эту программу должны пройти две разные аудитории").
-// Заменено на BuildProgramAudienceIndex()/CollaboratorInProgramAudience() ниже -- аудитория
-// считается ОТДЕЛЬНО ДЛЯ КАЖДОЙ ПРОГРАММЫ (по всем активным элементам с этим
-// education_method_id, через ИЛИ -- сотрудник входит в аудиторию программы, если подходит
-// ХОТЯ БЫ ПОД ОДИН из её элементов), и применяется НЕ к общему пулу сотрудников ДО
-// построения строк (как раньше), а К КАЖДОЙ СТРОКЕ (сотрудник x программа) ПОСЛЕ
-// построения -- см. Run() и BuildReportRows() ниже.
+// аудиторию (должность+мир-код) с полей position_common_id/mir_code_id САМОЙ МАТРИЦЫ --
+// этих полей у типа документа больше нет, тим-лид перенёс их на "Элементы матриц
+// обучения" (см. шапку файла и HREDU-183_tep_reports.js -- идентичная замена). Аудитория
+// теперь СВОЯ У КАЖДОЙ ПРОГРАММЫ (по всем активным элементам с этим education_method_id,
+// через ИЛИ между элементами) -- см. BuildProgramAudienceIndex()/CollaboratorInProgramAudience()
+// ниже, применяются в Run() ВНУТРИ цикла по программам (а не один раз ко всему пулу
+// сотрудников ДО цикла, как раньше).
 
 /*
- * Строит по каждой программе (education_method_id) список "сегментов аудитории" --
- * одна запись на КАЖДЫЙ активный элемент матрицы с этим education_method_id. Сотрудник
- * входит в аудиторию программы, если подходит ХОТЯ БЫ ПОД ОДИН сегмент (ИЛИ между
- * элементами, И между должностью/мир-кодом ВНУТРИ одного элемента -- та же логика "0/пусто
- * = без ограничения по этой оси", что была в старой GetMatrixAudienceCollaboratorRows()).
- * allowedPositionIds считается ОДИН РАЗ НА СЕГМЕНТ здесь (не на каждого сотрудника ниже) --
- * иначе был бы N+1 запросов в GetPositionIdsByCommonPosition() на каждой строке отчёта.
- * @param {Object[]} elementRows   -   Активные элементы матрицы (is_active=1 уже в выборке).
+ * Строит по каждой программе (education_method_id) список "сегментов аудитории" -- один
+ * на КАЖДЫЙ активный элемент матрицы с этим education_method_id. Сотрудник входит в
+ * аудиторию программы, если подходит ХОТЯ БЫ ПОД ОДИН сегмент. allowedPositionIds
+ * считается ОДИН РАЗ НА СЕГМЕНТ здесь (не на каждого сотрудника) -- та же логика и те же
+ * функции, что в HREDU-183_tep_reports.js (см. подробный комментарий там).
+ * @param {Object[]} elementRows
  * @param {number[]} programIds
- * @returns {Object[]}   -   Массив { programId, segments: [{ positionCommonId, allowedPositionIds, mirCodeText }] }.
+ * @returns {Object[]}   -   [{ programId, segments: [{ positionCommonId, allowedPositionIds, mirCodeText }] }].
  */
 function BuildProgramAudienceIndex(elementRows, programIds)
 {
-    LogAlert(1, "BuildProgramAudienceIndex(). НАЧАЛО");
     var index, i, j, programId, elem, segments, iPos, iMirCode, sMirCodeText, allowedPositionIds;
     index = [];
     for (i = 0; i < ArrayCount(programIds); i++)
@@ -691,17 +547,9 @@ function BuildProgramAudienceIndex(elementRows, programIds)
         }
         index.push({ programId: Int(programId), segments: segments });
     }
-    LogAlert(1, "BuildProgramAudienceIndex(). КОНЕЦ. Программ в индексе: " + ArrayCount(index));
     return index;
 }
 
-/*
- * Находит сегменты аудитории конкретной программы в индексе, построенном
- * BuildProgramAudienceIndex().
- * @param {Object[]} audienceIndex
- * @param {number} programId
- * @returns {Object[]}
- */
 function FindProgramAudienceSegments(audienceIndex, programId)
 {
     var row;
@@ -709,14 +557,6 @@ function FindProgramAudienceSegments(audienceIndex, programId)
     return (row != undefined ? row.segments : []);
 }
 
-/*
- * Проверяет, входит ли сотрудник в аудиторию программы -- подходит ли он ХОТЯ БЫ ПОД
- * ОДИН из её сегментов (элементов матрицы).
- * @param {Object} collaboratorRow
- * @param {Object[]} segments        -   Результат FindProgramAudienceSegments().
- * @param {Object[]} sortedMirCodeRows   -   Результат GetMirCodeRows() + SortRowsById() (см. Run()).
- * @returns {boolean}
- */
 function CollaboratorInProgramAudience(collaboratorRow, segments, sortedMirCodeRows)
 {
     var i, seg, positionOk, mirCodeOk;
@@ -725,45 +565,83 @@ function CollaboratorInProgramAudience(collaboratorRow, segments, sortedMirCodeR
         seg = segments[i];
         positionOk = (seg.positionCommonId <= 0 || IdArrayContains(seg.allowedPositionIds, OptInt(collaboratorRow.position_id, 0)));
         mirCodeOk = (seg.mirCodeText == "" || CollaboratorHasMirCode(sortedMirCodeRows, Int(collaboratorRow.id), seg.mirCodeText));
-        if (positionOk && mirCodeOk)
-        {
-            return true;
-        }
+        if (positionOk && mirCodeOk) { return true; }
     }
     return false;
 }
 
 /*
- * Находит минимальную дату прохождения по каждому сотруднику и программе.
- * @param {number[]} programIds
- * @returns {Object[]}
+ * Применяет 4 ручных фильтра пользователя -- идентично HREDU-183_tep_reports.js.
+ * ИЗМЕНЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ, дважды в один день -- см. подробности
+ * над SortRowsById()): 5-й параметр называется sortedMacroRows и ожидает массив,
+ * ОТСОРТИРОВАННЫЙ через SortRowsById() -- поиск бинарным поиском (BinarySearchById())
+ * вместо линейного ArrayOptFind(). (Первая версия правки использовала объект-словарь с
+ * динамическим ключом -- не сработало на реальном тесте, см. объяснение над SortRowsById().)
+ * ИЗМЕНЕНО (18.09.2026, третий раунд -- см. комментарий над CollaboratorHasMirCode()):
+ * добавлен 6-й параметр sortedMirCodeRows -- та же логика, что и sortedMacroRows. РАНЬШЕ
+ * эта функция сама дёргала GetMirCodeRows() (ЛИШНИЙ повторный SQL-запрос -- mirCodeRows уже
+ * загружен в Run() ДО вызова ApplyManualFilters()) и искала линейным ArrayOptFind() --
+ * теперь просто переиспользует готовый отсортированный массив, переданный извне.
  */
+function ApplyManualFilters(collaboratorRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, sortedMacroRows, sortedMirCodeRows)
+{
+    var allowedPositionIds, filteredRows, i, macroRow;
+
+    filteredRows = collaboratorRows;
+
+    if (iPositionFilter > 0)
+    {
+        allowedPositionIds = GetPositionIdsByCommonPosition(iPositionFilter);
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0))) { filteredRows.push(collaboratorRows[i]); }
+        }
+    }
+
+    if (sMacroregionFilter != "")
+    {
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            macroRow = BinarySearchById(sortedMacroRows, Int(collaboratorRows[i].id));
+            if (macroRow != undefined && String(macroRow.macroregion) == sMacroregionFilter) { filteredRows.push(collaboratorRows[i]); }
+        }
+    }
+
+    if (sMirCodeFilter != "")
+    {
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            if (CollaboratorHasMirCode(sortedMirCodeRows, Int(collaboratorRows[i].id), sMirCodeFilter)) { filteredRows.push(collaboratorRows[i]); }
+        }
+    }
+
+    return filteredRows;
+}
+
 function GetCompletionDateRows(programIds)
 {
-    LogAlert(1, "GetCompletionDateRows(). НАЧАЛО");
-    var sqlText, dateRows;
+    var sqlText;
     sqlText = "";
     sqlText = sqlText + "select ec.collaborator_id, e.education_method_id, min(ec.start_date) as first_date\r\n";
     sqlText = sqlText + "from event_collaborators ec\r\n";
     sqlText = sqlText + "join events e on e.id = ec.event_id\r\n";
     sqlText = sqlText + "where e.education_method_id in (" + ArrayMerge(programIds, "This", ",") + ")\r\n";
     sqlText = sqlText + "group by ec.collaborator_id, e.education_method_id";
-    dateRows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetCompletionDateRows(). Строк: " + ArrayCount(dateRows));
-    LogAlert(1, "GetCompletionDateRows(). КОНЕЦ");
-    return dateRows;
+    return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
 /*
- * Ищет дату прохождения конкретного сотрудника по конкретной программе.
- * ИЗМЕНЕНО (18.09.2026, см. "НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ" над SortRowsById()):
- * dateRows У ОДНОГО сотрудника обычно немного строк (по числу программ, которые он вообще
- * когда-либо проходил -- НЕ пропорционально общему числу сотрудников компании), поэтому
- * здесь -- БИНАРНЫЙ ПОИСК первой строки этого сотрудника (по sortedDateRows,
- * отсортированному через SortDateRowsByCollaboratorId()), а дальше короткий линейный
- * проход ТОЛЬКО по строкам ЭТОГО сотрудника (их мало) в поисках нужной программы -- без
- * object[computedKey], см. объяснение риска выше.
- * @param {Object[]} sortedDateRows   -   Массив, УЖЕ отсортированный через SortDateRowsByCollaboratorId().
+ * ИЗМЕНЕНО (18.09.2026, см. объяснение над SortRowsById() в этом же файле): бинарный
+ * поиск первой строки этого сотрудника (по sortedDateRows, см.
+ * SortDateRowsByCollaboratorId()) + короткий линейный проход только по его строкам --
+ * идентична версии в HREDU-183_tep_reports.js.
+ * @param {Object[]} sortedDateRows
  * @param {number} collaboratorID
  * @param {number} programID
  * @returns {string}
@@ -775,8 +653,6 @@ function FindCompletionDate(sortedDateRows, collaboratorID, programID)
     iTarget = Int(collaboratorID);
     iProgram = Int(programID);
 
-    // Бинарный поиск ЛЮБОЙ строки этого сотрудника, затем сдвигаемся к ПЕРВОЙ такой строке
-    // (могут быть дубликаты collaborator_id -- по одной строке на каждую пройденную программу).
     lo = 0;
     hi = ArrayCount(sortedDateRows) - 1;
     startIdx = -1;
@@ -787,7 +663,7 @@ function FindCompletionDate(sortedDateRows, collaboratorID, programID)
         if (midId == iTarget)
         {
             startIdx = mid;
-            hi = mid - 1; // ищем более ранний индекс с тем же collaborator_id
+            hi = mid - 1;
         }
         else if (midId < iTarget) { lo = mid + 1; }
         else { hi = mid - 1; }
@@ -807,152 +683,190 @@ function FindCompletionDate(sortedDateRows, collaboratorID, programID)
 }
 
 /*
- * Ищет макрорегион конкретного сотрудника.
- * ИЗМЕНЕНО (18.09.2026, см. "НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ" над SortRowsById()) --
- * бинарный поиск по отсортированному массиву вместо линейного ArrayOptFind().
- * @param {Object[]} sortedMacroRows   -   Массив, УЖЕ отсортированный через SortRowsById().
- * @param {number} collaboratorID
+ * ИЗМЕНЕНО (16.09.2026): накопитель теперь по ПАРЕ (город, программа), а не только по
+ * городу -- см. "ГРУППИРОВКА ПО (ГОРОД, ПРОГРАММА)" в шапке файла. Ищем циклом (как и
+ * раньше) -- ArraySelect по строке-выражению не годится для ИЗМЕНЯЕМОГО накопителя.
+ * @param {Object[]} acc
+ * @param {string} sCity
+ * @param {number} iProgramId
+ * @param {string} sProgramName
+ * @returns {Object}
+ */
+/*
+ * ИЗМЕНЕНО (18.09.2026, по прямой просьбе пользователя): добавлен параметр sMacroregion --
+ * макрорегион конкретного сотрудника, из которого создаётся/дополняется строка (город x
+ * программа). Записывается ТОЛЬКО при создании новой строки (первый сотрудник этого города,
+ * встретившийся в цикле) -- город фактически всегда принадлежит ровно одному макрорегиону
+ * (это организационная привязка, а не личный признак сотрудника), поэтому у всех
+ * сотрудников одного города он должен совпадать; берём первое встреченное значение и
+ * дальше не перезаписываем (см. использование в Run() -- row.macroregion идёт в
+ * BuildTepLink() вместо/вместе с ручным фильтром sMacroregionFilter).
+ * @param {Object[]} acc
+ * @param {string} sCity
+ * @param {number} iProgramId
+ * @param {string} sProgramName
+ * @param {string} sMacroregion
+ * @returns {Object}
+ */
+function GetOrCreateCityProgramAcc(acc, sCity, iProgramId, sProgramName, sMacroregion)
+{
+    var i;
+    for (i = 0; i < ArrayCount(acc); i++)
+    {
+        if (acc[i].city == sCity && Int(acc[i].programId) == Int(iProgramId)) { return acc[i]; }
+    }
+    var newAcc;
+    newAcc = { city: sCity, programId: Int(iProgramId), programName: sProgramName, macroregion: sMacroregion, total: 0, mandatory: 0, fact: 0 };
+    acc.push(newAcc);
+    return newAcc;
+}
+
+/*
+ * Округление факт/план в проценты (до целого, обычное арифметическое округление).
+ * "-" если план = 0 (см. ДОПУЩЕНИЕ -- в реальных данных пока не встречалось, но
+ * возможно в теории, если у города вся аудитория уже "выпала" -- на деле план всегда
+ * = общее в этой версии, так что план=0 означает и общее=0, т.е. города вообще нет
+ * в аудитории -- такая строка сюда не попадёт, см. ДОПУЩЕНИЕ №1).
+ *
+ * ИСПРАВЛЕНО (17.09.2026, реальный баг -- "Липецк/Развитие внимательности: 24 из 41 --
+ * должно быть 59%, показывало 0%"): старая формула была "(nFact / nPlan) * 100 + 0.5" --
+ * т.е. СНАЧАЛА делили (24 / 41), и ТОЛЬКО ПОТОМ умножали на 100. Пока факт МЕНЬШЕ плана
+ * (а так почти всегда и есть, если только не гнаться за >100%), "nFact / nPlan" -- это
+ * деление МЕНЬШЕГО на БОЛЬШЕЕ, а в этом скриптовом движке (как и в ряде других найденных
+ * в этом тикете расхождений со стандартным JS -- Int(undefined), var в цикле и т.д.)
+ * оператор "/" над двумя целыми числами, судя по всему, делает ЦЕЛОЧИСЛЕННОЕ деление
+ * (в обычном JS 24/41 = 0.585..., а здесь, похоже, 24/41 = 0 -- дробная часть теряется
+ * ДО умножения на 100, поэтому и результат всегда 0%, если факт < план). Фикс: сначала
+ * УМНОЖАЕМ факт на 100 (2400), а уже потом делим на план -- тогда даже при целочисленном
+ * делении дробная часть не успевает потеряться раньше времени. Округление до ближайшего
+ * целого сделано тоже ЦЕЛОЧИСЛЕННОЙ арифметикой (прибавляем половину плана перед делением,
+ * классический приём округления делением без плавающей точки) -- чтобы не зависеть от
+ * того, поддерживает ли движок дробные числа вообще.
+ * @param {number} nFact
+ * @param {number} nPlan
  * @returns {string}
  */
-function FindMacroregion(sortedMacroRows, collaboratorID)
+function FormatPercent(nFact, nPlan)
 {
-    var macroRow;
-    macroRow = BinarySearchById(sortedMacroRows, collaboratorID);
-    return (macroRow != undefined && macroRow.macroregion != undefined ? String(macroRow.macroregion) : "");
+    var iFact, iPlan, iRounded;
+    if (nPlan <= 0) { return "-"; }
+    iFact = Int(nFact);
+    iPlan = Int(nPlan);
+    iRounded = Int((iFact * 100 + Int(iPlan / 2)) / iPlan);
+    return String(iRounded) + "%";
 }
 
 /*
- * Ищет название программы по её ID.
- * @param {Object[]} programTitles
- * @param {number} programID
+ * ИСПРАВЛЕНИЕ (14.09.2026, БАГ С "&macroregion="): реальный тест показал, что итоговая
+ * ссылка искажается ПРИ ОТОБРАЖЕНИИ виджетом "Табличные данные" -- "&macroregion="
+ * превращалось в "%C2%AForegion=" (т.е. "&macr" пропадало, вместо него -- символ "¯",
+ * U+00AF). Причина: "macr" -- это ИМЕННО ТАКОЕ имя у "легаси" HTML-сущности безточки
+ * с запятой (как &amp, &lt, &nbsp) -- она означает символ "¯" (macron) и НЕ требует ";"
+ * на конце. Судя по всему, виджет вставляет значение поля "link"/*_link ПРЯМО в атрибут
+ * href как HTML-текст, без экранирования "&" в "&amp;" -- поэтому браузер видит в
+ * "&macroregion=" сначала "&macr" (валидная сущность!) и стирает её, заменяя на "¯",
+ * а не сам символ "&". Никакого отношения к UrlEncodeQuery()/percent-encoding это не
+ * имеет -- проблема на уровне HTML, а не URL. Фикс: экранируем "&" САМИ в "&amp;" перед
+ * тем, как класть готовую ссылку в поле RESULT -- тогда браузер сначала раскодирует
+ * "&amp;" обратно в "&", и только ПОСЛЕ этого получившийся URL uже не содержит "&macr"
+ * как отдельную подстроку для сущности. Без regex -- см. HtmlEscapeAmp() ниже, тот же
+ * строковый API (StrOptSubStrPos/StrRangePos/StrLen), что и в GetQueryParam().
+ * @param {string} sUrl
  * @returns {string}
  */
-function FindProgramTitle(programTitles, programID)
+function HtmlEscapeAmp(sUrl)
 {
-    var titleRow;
-    titleRow = ArrayOptFind(programTitles, "String(This.id) == String(programID)");
-    return (titleRow != undefined ? String(titleRow.title) : "");
+    var sResult, iPos, iUrlLen, iSearchStart;
+    sResult = "";
+    iSearchStart = 0;
+    iUrlLen = StrLen(sUrl);
+    while (true)
+    {
+        iPos = StrOptSubStrPos(sUrl, "&", false, iSearchStart);
+        if (iPos == undefined)
+        {
+            sResult = sResult + StrRangePos(sUrl, iSearchStart, iUrlLen);
+            break;
+        }
+        sResult = sResult + StrRangePos(sUrl, iSearchStart, iPos) + "&amp;";
+        iSearchStart = iPos + 1;
+    }
+    return sResult;
 }
 
 /*
- * Собирает строки отчёта для ОДНОГО сотрудника -- по одной строке на каждую программу
- * матрицы (те же 6 полей, что в HREDU-181, ПЛЮС город -- см. ниже).
- * ИЗМЕНЕНО (16.09.2026, по просьбе пользователя): добавлено поле row.city -- отдельная
- * колонка "Город" рядом с "Макрорегион". Считается тем же способом, что и раньше
- * использовался ТОЛЬКО для фильтрации (FindCity()/GetCityRows(), см. выше) -- теперь
- * используется ещё и для отображения. В LPE-настройках виджета "Табличные данные" для
- * этой выборки нужно добавить колонку, привязанную к полю "city" (рядом с "macroregion") --
- * из кода это не настраивается, RESULT здесь -- просто массив строк без описания колонок
- * (см. "ВАЖНО про RESULT" в шапке файла).
- * ИЗМЕНЕНО (17.09.2026, HREDU-215 "Правки 1"): добавлено служебное поле row.in_audience --
- * входит ли ЭТОТ сотрудник в аудиторию ИМЕННО ЭТОЙ программы (проверяется по индексу
- * BuildProgramAudienceIndex(), т.к. аудитория теперь своя у каждого элемента/программы,
- * а не одна на всю матрицу -- см. комментарий над BuildProgramAudienceIndex() выше). Это
- * НЕ колонка для отображения (в LPE её просто не привязывают ни к чему) -- используется
- * только внутри Run() для финальной фильтрации total/plan/mandatory (для fact аудитория
- * не применяется вообще, как и раньше -- "не зависимо от условий матрицы").
- * ИЗМЕНЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ, дважды в один день -- см. подробности
- * над SortRowsById()): параметры macroRows/cityRows/dateRows переименованы в
- * macroSorted/citySorted/dateSorted -- это массивы, ОТСОРТИРОВАННЫЕ через SortRowsById()/
- * SortDateRowsByCollaboratorId(), для БИНАРНОГО поиска внутри FindMacroregion()/FindCity()/
- * FindCompletionDate() вместо линейного ArrayOptFind(). (Первая версия правки использовала
- * объект-словарь с динамическим ключом -- реальный тест пользователя показал, что такой
- * доступ не поддерживается платформой ("Unknown object property") -- откачено на бинарный
- * поиск, см. подробности над SortRowsById().)
- * @param {Object} collaborator
- * @param {Object[]} macroSorted
- * @param {Object[]} citySorted
- * @param {Object[]} dateSorted
- * @param {Object[]} programTitles
- * @param {number[]} programIds
- * @param {Object[]} audienceIndex
- * @param {Object[]} mirCodeSorted   -   Отсортированный через SortRowsById() (см. Run()).
- * @returns {Object[]}
+ * Строит ссылку на страницу ТЭП-отчётов (HREDU-183_tep_reports.js) с нужным
+ * набором параметров -- ровно те же параметры, что читает сама ТЭП-выборка
+ * (см. GetQueryParam(...) в HREDU-183_tep_reports.js): matrix_id, macroregion,
+ * mir_code, position_common_id, program_id, result_type + НОВЫЙ параметр city
+ * (см. HREDU-183_tep_reports.js -- добавлен туда для этого дрилл-дауна).
+ *
+ * sCity = "" (пустая строка) -> ссылка ведёт на ВЕСЬ матрикс без фильтра по городу
+ * (используется для строки "Общий итог").
+ *
+ * ИЗМЕНЕНО (16.09.2026): program_id теперь берётся ИЗ КОНКРЕТНОЙ СТРОКИ (её программа
+ * матрицы), а не из ручного фильтра пользователя -- раз строка теперь и так соответствует
+ * ровно одной программе (см. "ГРУППИРОВКА ПО (ГОРОД, ПРОГРАММА)"), логично, чтобы клик по
+ * ней вёл в ТЭП-отчёт, УЖЕ отфильтрованный именно по этой программе. iProgramId=0 ->
+ * без фильтра по программе (используется для строки "Общий итог").
+ *
+ * ИЗМЕНЕНО (18.09.2026, по прямой просьбе пользователя): параметр sMacroregionFilter,
+ * несмотря на имя (не переименован, чтобы не трогать сигнатуру больше необходимого),
+ * теперь у ПОСТРОЧНЫХ ссылок (клик по конкретному городу) получает не сам ручной фильтр
+ * страницы, а РЕАЛЬНЫЙ макрорегион этого города (row.macroregion, см. Run() ниже) -- со
+ * старым фильтром как запасным вариантом. У ссылки "Общий итог" (sCity == "") по-прежнему
+ * передаётся именно sMacroregionFilter -- единого макрорегиона там нет, это ссылка на всю
+ * матрицу целиком.
+ *
+ * @param {number} iMatrixId
+ * @param {string} sMacroregionFilter   -   Значение для query-параметра "macroregion" ссылки
+ *                                          (либо ручной фильтр страницы, либо -- для
+ *                                          построчных ссылок -- реальный макрорегион города,
+ *                                          см. "ИЗМЕНЕНО (18.09.2026)" выше).
+ * @param {string} sMirCodeFilter
+ * @param {number} iPositionFilter
+ * @param {number} iProgramId
+ * @param {string} sResultType   -   "total"|"plan"|"fact"|"mandatory"
+ * @param {string} sCity
+ * @returns {string}
  */
-function BuildReportRows(collaborator, macroSorted, citySorted, dateSorted, programTitles, programIds, audienceIndex, mirCodeSorted)
+function BuildTepLink(iMatrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, iProgramId, sResultType, sCity)
 {
-    var rows, row, i, programID, segments;
-    rows = [];
-    for (i = 0; i < ArrayCount(programIds); i++)
-    {
-        programID = programIds[i];
-        segments = FindProgramAudienceSegments(audienceIndex, programID);
-        row = new Object();
-        row.fullname = String(collaborator.fullname);
-        row.position_name = String(collaborator.position_name);
-        row.subdivision_name = String(collaborator.position_parent_name);
-        row.macroregion = FindMacroregion(macroSorted, Int(collaborator.id));
-        row.city = FindCity(citySorted, Int(collaborator.id));
-        row.program_name = FindProgramTitle(programTitles, programID);
-        row.completion_date = FindCompletionDate(dateSorted, Int(collaborator.id), programID);
-        row.in_audience = CollaboratorInProgramAudience(collaborator, segments, mirCodeSorted);
-        rows.push(row);
-    }
-    return rows;
+    var oQueryParams, sQueryString, sSeparator;
+    oQueryParams = {
+        matrix_id: String(iMatrixId),
+        macroregion: sMacroregionFilter,
+        mir_code: sMirCodeFilter,
+        position_common_id: String(iPositionFilter),
+        program_id: String(iProgramId),
+        result_type: sResultType,
+        city: sCity
+    };
+    sQueryString = UrlEncodeQuery(oQueryParams);
+    sSeparator = (StrOptSubStrPos(TEP_REPORT_PAGE_URL, "?", false) != undefined ? "&" : "?");
+    // HtmlEscapeAmp() -- см. комментарий над ней: "&" экранируем в "&amp;", потому что
+    // виджет вставляет это значение прямо в HTML (href) без собственного экранирования.
+    return HtmlEscapeAmp(TEP_REPORT_PAGE_URL + sSeparator + sQueryString);
 }
 
-/*
- * Резолвит выбранную матрицу (matrix_id) в список ID программ обучения И в сами строки
- * элементов матрицы (elementRows нужны отдельно от programIds -- см. HREDU-215 "Правки 1":
- * аудитория (должность+мир-код) теперь считается ПО ЭЛЕМЕНТАМ, см. BuildProgramAudienceIndex()
- * выше, поэтому одних programIds уже недостаточно).
- * ПЕРЕИМЕНОВАНО (17.09.2026, было ResolveProgramIds -- возвращала только programIds):
- * теперь возвращает объект { programIds, elementRows }.
- * @param {number} matrixId
- * @param {string} matrixName
- * @returns {Object}   -   { programIds: number[], elementRows: Object[] }.
- */
-function ResolveMatrixContext(matrixId, matrixName)
-{
-    LogAlert(1, "ResolveMatrixContext(). НАЧАЛО. matrixId=" + matrixId);
-    var matrixRows, matrixIds, elementRows, programIds;
+//-------------------------------------------------------------------------
+//              Точка входа
+//-------------------------------------------------------------------------
 
-    matrixRows = GetMatrixRows(matrixName);
-    matrixIds = ArrayExtract(matrixRows, "Int(This.id)");
-    if (ArrayCount(matrixIds) == 0)
-    {
-        throw ("Не найдено ни одной записи cc_learning_matrice с названием [" + matrixName + "]");
-    }
-
-    elementRows = GetMatrixElementRows(matrixIds);
-    programIds = GetProgramIds(elementRows);
-    if (ArrayCount(programIds) == 0)
-    {
-        throw ("У матрицы [" + matrixName + "] не найдено ни одной активной программы");
-    }
-
-    LogAlert(1, "ResolveMatrixContext(). КОНЕЦ");
-    return { programIds: programIds, elementRows: elementRows };
-}
-
-/*
- * Точка входа. Собирает данные ОДНОГО из 4 отчётов-представлений ТЭП, в зависимости от
- * result_type -- см. подробности архитектуры и принятых решений в шапке файла.
- * @returns {void}
- */
 function Run()
 {
-    // ИСПРАВЛЕНО (14.09.2026, по мотивам реальной поломки в HREDU-183_tep_reports.js с
-    // CUR_OBJECT_ID): ссылка на "голый" глобал result_type ЗДЕСЬ, ДО try/catch, была
-    // рискованной -- result_type теперь необязательный LPE-параметр (см. изменение
-    // 10.09.2026, чтение сначала из URL), и если он вообще не привязан у виджета,
-    // обращение к необъявленному глобалу могло бы упасть необработанным исключением
-    // ДО того, как основной try/catch успел бы его поймать -- Run() оборвался бы молча,
-    // как уже было один раз с LogAlert()/CUR_OBJECT_ID. Убрал ссылку на result_type
-    // из этой самой первой строки -- реальное значение (sResultType) вычисляется и
-    // логируется чуть ниже, УЖЕ внутри try/catch.
-    LogAlert(2, "Run(). НАЧАЛО");
-    var sResultType, sFullUrl, matrixId, matrixDoc, matrixName;
-    var iProgramFilter, sMacroregionFilter, sMirCodeFilter, iPositionFilter, sCityFilter;
-    var matrixContext, elementRows, audienceIndex;
-    var programIds, programTitles, collaboratorRows, macroRows, mirCodeRows, cityRows, dateRows;
-    var macroSorted, citySorted, dateSorted; // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ) -- см. SortRowsById()/SortDateRowsByCollaboratorId()
-    var mirCodeSorted; // ДОБАВЛЕНО (18.09.2026, ВТОРАЯ правка -- см. комментарий над CollaboratorHasMirCode()): та же O(n^2)-ловушка нашлась и в мир-кодах, пропущенная в первом раунде
-    var collaboratorReportRows, i, j;
-    var filteredProgramIds, filteredCollaboratorRows, allowedPositionIds, filteredResultRows;
+    LogAlert(2, "Run(). НАЧАЛО (Процент обученных)");
+    var sFullUrl, matrixId, matrixDoc, matrixName, iProgramFilter, sMacroregionFilter, sMirCodeFilter, iPositionFilter;
+    var matrixContext, elementRows, audienceIndex, segments;
+    var programIds, filteredProgramIds, programNames, i, j;
+    var activeRows, manualFilteredRows;
+    var macroRows, mirCodeRows, cityRows, dateRows;
+    var macroSorted, citySorted, dateSorted; // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ, вторая правка) -- см. SortRowsById()/SortDateRowsByCollaboratorId()
+    var mirCodeSorted; // ДОБАВЛЕНО (18.09.2026, ТРЕТЬЯ правка -- см. комментарий над CollaboratorHasMirCode()): та же O(n^2)-ловушка нашлась и в мир-кодах, пропущенная в первых двух раундах
+    var acc, cityProgramAcc, sCity, sProgramName, sDate, row;
+    var totalAcc, resultRows, id;
+    var sMacroregionForRow, sLinkMacroregion; // ДОБАВЛЕНО (18.09.2026) -- см. FindMacroregion()/BuildTepLink()
 
-    ERROR = 0;
-    MESSAGE = "";
     RESULT = [];
 
     try
@@ -962,55 +876,15 @@ function Run()
         sFullUrl = GetRequestUrlSafe();
         LogAlert(1, "Run(). Request.Url = [" + sFullUrl + "]");
 
-        // ИЗМЕНЕНО (10.09.2026, вынос режима на фронтенд + английские имена): раньше
-        // result_type был ТОЛЬКО фиксированным параметром выборки -- задавался один раз
-        // в LPE "Параметры" каждого из 4 виджетов, пользователь не мог его поменять сам.
-        // Теперь сначала читаем result_type из URL -- так же, как остальные фильтры --
-        // если он там есть, режим может переключать сам пользователь (например через
-        // поле в модалке фильтров или ссылки-вкладки на странице). Если в URL параметра
-        // нет -- запасной путь: старое фиксированное значение из LPE (обратная
-        // совместимость с уже настроенными виджетами), а если и его нет -- дефолт "total".
-        // Имена режимов ТЕПЕРЬ НА АНГЛИЙСКОМ (было "obshee"/"fakt"/"obyazatelno" --
-        // транслит с русского, неудобно читать): total | plan | fact | mandatory.
-        // Если у виджетов в админке result_type ещё настроен старыми именами -- их нужно
-        // переименовать (obshee->total, fakt->fact, obyazatelno->mandatory, plan остаётся).
-        sResultType = GetQueryParam(sFullUrl, "result_type");
-        if (sResultType == "")
-        {
-            try
-            {
-                sResultType = String(result_type);
-            }
-            catch (_exResultTypeParam)
-            {
-                sResultType = "";
-            }
-        }
-        if (sResultType == "" || sResultType == "undefined")
-        {
-            sResultType = "total";
-        }
-        if (sResultType != "total" && sResultType != "plan" && sResultType != "fact" && sResultType != "mandatory")
-        {
-            throw ("Неизвестный result_type=[" + sResultType + "] -- ожидается одно из: total, plan, fact, mandatory");
-        }
-        LogAlert(1, "Run(). sResultType=[" + sResultType + "]");
-
         matrixId = OptInt(GetQueryParam(sFullUrl, "matrix_id"), 0);
         iProgramFilter = OptInt(GetQueryParam(sFullUrl, "program_id"), 0);
         sMacroregionFilter = GetQueryParam(sFullUrl, "macroregion");
         sMirCodeFilter = GetQueryParam(sFullUrl, "mir_code");
         iPositionFilter = OptInt(GetQueryParam(sFullUrl, "position_common_id"), 0);
-        // ДОБАВЛЕНО (14.09.2026, drill-down из "Процент обученных"): необязательный
-        // фильтр по городу (custom_elem "sity") -- если ссылка со страницы "Процент
-        // обученных" пришла для конкретного города, здесь сузим список ТОЛЬКО до него.
-        // Если параметра нет -- ведёт себя как раньше (без изменений для существующих
-        // ссылок без city).
-        sCityFilter = GetQueryParam(sFullUrl, "city");
 
         LogAlert(1, "Run(). matrixId=" + matrixId + " programFilter=" + iProgramFilter
             + " macroregionFilter=[" + sMacroregionFilter + "] mirCodeFilter=[" + sMirCodeFilter
-            + "] positionCommonIdFilter=" + iPositionFilter + " cityFilter=[" + sCityFilter + "]");
+            + "] positionCommonIdFilter=" + iPositionFilter);
 
         PerfCheckpoint("Разбор Request.Url и всех фильтров -- ЧИСТЫЙ КОД, без SQL");
 
@@ -1024,8 +898,8 @@ function Run()
         PerfCheckpoint("tools.open_doc(matrixId) -- открытие документа матрицы -- БД/документ");
 
         // ИЗМЕНЕНО (17.09.2026, HREDU-215 "Правки 1"): ResolveProgramIds() переименована в
-        // ResolveMatrixContext() и теперь возвращает ещё и elementRows (не только
-        // programIds) -- нужны для построения аудитории ПО ЭЛЕМЕНТАМ ниже (BuildProgramAudienceIndex()).
+        // ResolveMatrixContext() -- возвращает ещё и elementRows, нужны для аудитории ПО
+        // ЭЛЕМЕНТАМ (BuildProgramAudienceIndex() ниже).
         matrixContext = ResolveMatrixContext(matrixId, matrixName);
         programIds = matrixContext.programIds;
         elementRows = matrixContext.elementRows;
@@ -1036,10 +910,7 @@ function Run()
             filteredProgramIds = [];
             for (i = 0; i < ArrayCount(programIds); i++)
             {
-                if (Int(programIds[i]) == iProgramFilter)
-                {
-                    filteredProgramIds.push(programIds[i]);
-                }
+                if (Int(programIds[i]) == iProgramFilter) { filteredProgramIds.push(programIds[i]); }
             }
             programIds = filteredProgramIds;
             if (ArrayCount(programIds) == 0)
@@ -1048,196 +919,216 @@ function Run()
             }
         }
 
-        programTitles = GetProgramTitles(programIds);
-        PerfCheckpoint("GetProgramTitles() -- N x tools.open_doc() по программам матрицы -- БД/документы (потенциальный N+1)");
-
-        // ИЗМЕНЕНО (17.09.2026, HREDU-215 "Правки 1"): раньше здесь фильтровался ОБЩИЙ
-        // пул сотрудников по ОДНОЙ аудитории матрицы (GetMatrixAudienceCollaboratorRows(),
-        // убрана). Теперь у КАЖДОЙ программы (элемента) СВОЯ аудитория -- строим индекс
-        // один раз (по текущему, уже возможно суженному фильтром program_id, списку
-        // programIds), а применяем его ПОЗЖЕ, к каждой ГОТОВОЙ СТРОКЕ отчёта (сотрудник x
-        // программа) -- см. блок после сборки RESULT ниже. Аудитория по-прежнему не
-        // применяется для "fact" вообще (см. "РЕШЕНИЯ" в шапке файла).
-        audienceIndex = BuildProgramAudienceIndex(elementRows, programIds);
-        PerfCheckpoint("BuildProgramAudienceIndex() -- аудитория по элементам, внутри может быть SQL (GetPositionIdsByCommonPosition() на сегмент)");
-
-        collaboratorRows = GetActiveCollaboratorRows();
+        activeRows = GetActiveCollaboratorRows();
         PerfCheckpoint("GetActiveCollaboratorRows() -- SQL/XQuery по всем активным сотрудникам");
-
-        // ИЗМЕНЕНО (17.09.2026): mirCodeRows раньше грузился ЛЕНИВО -- либо внутри
-        // GetMatrixAudienceCollaboratorRows() (для аудитории матрицы, убрана), либо здесь
-        // ниже при ручном фильтре по мир-коду. Теперь он нужен ВСЕГДА -- для аудитории
-        // КАЖДОЙ программы (CollaboratorInProgramAudience(), см. BuildReportRows() ниже) --
-        // грузим один раз здесь и переиспользуем и для ручного фильтра по мир-коду.
-        mirCodeRows = GetMirCodeRows();
-        PerfCheckpoint("GetMirCodeRows() -- SQL по мир-кодам сотрудников");
-        // ДОБАВЛЕНО (18.09.2026, ВТОРАЯ правка -- см. комментарий над
-        // CollaboratorHasMirCode()): реальный тест на "Процент обученных" показал провал
-        // в 31 сек именно из-за линейного поиска по mirCodeRows -- та же ловушка есть и
-        // здесь (тестовая матрица ТЭП её просто не проявила). Сортируем один раз.
-        mirCodeSorted = SortRowsById(mirCodeRows);
-        PerfCheckpoint("SortRowsById(mirCodeRows) -- сортировка для бинарного поиска по мир-кодам -- ЧИСТЫЙ КОД, O(n log n)");
-
-        // Дальше -- РУЧНЫЕ фильтры пользователя, точно как в HREDU-181 (без изменений).
-        if (iPositionFilter > 0)
-        {
-            allowedPositionIds = GetPositionIdsByCommonPosition(iPositionFilter);
-            filteredCollaboratorRows = [];
-            for (i = 0; i < ArrayCount(collaboratorRows); i++)
-            {
-                if (IdArrayContains(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0)))
-                {
-                    filteredCollaboratorRows.push(collaboratorRows[i]);
-                }
-            }
-            collaboratorRows = filteredCollaboratorRows;
-            LogAlert(1, "Run(). После ручного фильтра по типовой должности осталось сотрудников: " + ArrayCount(collaboratorRows));
-            PerfCheckpoint("Ручной фильтр по типовой должности (GetPositionIdsByCommonPosition() + цикл) -- SQL + ЧИСТЫЙ КОД");
-        }
-
         macroRows = GetMacroregionRows();
         PerfCheckpoint("GetMacroregionRows() -- SQL по макрорегионам сотрудников");
-        // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ): строим индекс ОДИН РАЗ сразу
-        // после SQL -- дальше и ручной фильтр ниже, и BuildReportRows() (там пробегаем по
-        // ВСЕМ отфильтрованным сотрудникам ещё раз) используют O(1)-поиск по индексу
-        // вместо O(n) ArrayOptFind() -- см. подробное объяснение над SortRowsById().
+        // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ, дважды в один день -- см.
+        // подробности над SortRowsById()): та же O(n^2)-ловушка, что нашлась и измерилась
+        // в HREDU-183_tep_reports.js (линейный ArrayOptFind() по ВСЕМ активным сотрудникам
+        // компании внутри циклов). Первая попытка (объект-словарь с динамическим ключом)
+        // сломала именно ЭТОТ файл на реальном тесте ("Unknown object property") -- теперь
+        // сортируем массивы ОДИН РАЗ сразу после SQL и ищем бинарным поиском.
         macroSorted = SortRowsById(macroRows);
         PerfCheckpoint("SortRowsById(macroRows) -- сортировка для бинарного поиска по макрорегионам -- ЧИСТЫЙ КОД, O(n log n)");
-        if (sMacroregionFilter != "")
-        {
-            filteredCollaboratorRows = [];
-            for (i = 0; i < ArrayCount(collaboratorRows); i++)
-            {
-                if (FindMacroregion(macroSorted, Int(collaboratorRows[i].id)) == sMacroregionFilter)
-                {
-                    filteredCollaboratorRows.push(collaboratorRows[i]);
-                }
-            }
-            collaboratorRows = filteredCollaboratorRows;
-            LogAlert(1, "Run(). После ручного фильтра по макрорегиону осталось сотрудников: " + ArrayCount(collaboratorRows));
-            PerfCheckpoint("Ручной фильтр по макрорегиону (цикл по collaboratorRows, теперь через индекс) -- ЧИСТЫЙ КОД");
-        }
-
-        if (sMirCodeFilter != "")
-        {
-            // mirCodeSorted уже загружен и отсортирован выше (грузится теперь всегда, не только тут).
-            filteredCollaboratorRows = [];
-            for (i = 0; i < ArrayCount(collaboratorRows); i++)
-            {
-                if (CollaboratorHasMirCode(mirCodeSorted, Int(collaboratorRows[i].id), sMirCodeFilter))
-                {
-                    filteredCollaboratorRows.push(collaboratorRows[i]);
-                }
-            }
-            collaboratorRows = filteredCollaboratorRows;
-            LogAlert(1, "Run(). После ручного фильтра по мир-коду осталось сотрудников: " + ArrayCount(collaboratorRows));
-            PerfCheckpoint("Ручной фильтр по мир-коду (CollaboratorHasMirCode() в цикле) -- ЧИСТЫЙ КОД");
-        }
-
-        // ИЗМЕНЕНО (16.09.2026, колонка "Город"): cityRows теперь грузится ВСЕГДА (было --
-        // только если sCityFilter != "") -- иначе для отображения города колонкой (не
-        // только для фильтрации) данных бы не было, когда фильтр по городу не применён.
         cityRows = GetCityRows();
         PerfCheckpoint("GetCityRows() -- SQL по городам сотрудников");
         citySorted = SortRowsById(cityRows);
         PerfCheckpoint("SortRowsById(cityRows) -- сортировка для бинарного поиска по городам -- ЧИСТЫЙ КОД, O(n log n)");
-
-        // ДОБАВЛЕНО (14.09.2026, drill-down из "Процент обученных"): необязательный
-        // фильтр по городу -- см. GetCityRows()/FindCity() выше.
-        if (sCityFilter != "")
-        {
-            filteredCollaboratorRows = [];
-            for (i = 0; i < ArrayCount(collaboratorRows); i++)
-            {
-                if (FindCity(citySorted, Int(collaboratorRows[i].id)) == sCityFilter)
-                {
-                    filteredCollaboratorRows.push(collaboratorRows[i]);
-                }
-            }
-            collaboratorRows = filteredCollaboratorRows;
-            LogAlert(1, "Run(). После фильтра по городу осталось сотрудников: " + ArrayCount(collaboratorRows));
-            PerfCheckpoint("Фильтр по городу (FindCity() в цикле, теперь через индекс) -- ЧИСТЫЙ КОД");
-        }
-
         dateRows = GetCompletionDateRows(programIds);
         PerfCheckpoint("GetCompletionDateRows() -- SQL по датам прохождения программ");
         dateSorted = SortDateRowsByCollaboratorId(dateRows);
         PerfCheckpoint("SortDateRowsByCollaboratorId(dateRows) -- сортировка для бинарного поиска по датам -- ЧИСТЫЙ КОД, O(n log n)");
+        // ИЗМЕНЕНО (17.09.2026): mirCodeRows раньше грузился ЛЕНИВО (либо внутри
+        // GetMatrixAudienceCollaboratorRows(), убрана, либо внутри ApplyManualFilters()
+        // при ручном фильтре по мир-коду). Теперь нужен ВСЕГДА -- для аудитории КАЖДОЙ
+        // программы (CollaboratorInProgramAudience() в цикле total/mandatory ниже).
+        mirCodeRows = GetMirCodeRows();
+        PerfCheckpoint("GetMirCodeRows() -- SQL по мир-кодам сотрудников");
+        // ДОБАВЛЕНО (18.09.2026, ТРЕТЬЯ правка -- см. комментарий над
+        // CollaboratorHasMirCode()): реальный тест показал провал в 31 сек именно на шаге
+        // "Цикл total/mandatory" -- виновата была ЭТА же O(n^2)-ловушка (линейный поиск по
+        // mirCodeRows на каждую пару сотрудник x программа), пропущенная в первых двух
+        // раундах правки. Сортируем один раз, как остальные три поля.
+        mirCodeSorted = SortRowsById(mirCodeRows);
+        PerfCheckpoint("SortRowsById(mirCodeRows) -- сортировка для бинарного поиска по мир-кодам -- ЧИСТЫЙ КОД, O(n log n)");
 
-        RESULT = [];
-        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        // НОВОЕ (16.09.2026): имена программ резолвим ОДИН РАЗ на все уникальные
+        // programIds (не по разу на каждого сотрудника x программу -- иначе
+        // tools.open_doc() дёргался бы многие тысячи раз, см. FindProgramName()).
+        programNames = [];
+        for (j = 0; j < ArrayCount(programIds); j++)
         {
-            collaboratorReportRows = BuildReportRows(collaboratorRows[i], macroSorted, citySorted, dateSorted, programTitles, programIds, audienceIndex, mirCodeSorted);
-            for (j = 0; j < ArrayCount(collaboratorReportRows); j++)
-            {
-                RESULT.push(collaboratorReportRows[j]);
-            }
+            programNames.push({ id: Int(programIds[j]), name: ResolveProgramText(programIds[j]) });
         }
-        LogAlert(1, "Run(). Строк (сотрудник x программа) до фильтра аудитории/result_type: " + ArrayCount(RESULT));
-        PerfCheckpoint("Цикл построения строк (BuildReportRows() x сотрудников x программ) -- ЧИСТЫЙ КОД, без SQL");
+        PerfCheckpoint("Цикл ResolveProgramText() -- N x tools.open_doc() по программам матрицы -- БД/документы (потенциальный N+1)");
 
-        // ИЗМЕНЕНО (17.09.2026, повторное уточнение с пользователем в тот же день): раньше
-        // здесь стояло "если result_type != fact" -- т.е. для "Факт" аудитория вообще НЕ
-        // проверялась (буквальное прочтение старого ТЗ "не зависимо от условий матрицы").
-        // Реальный тест пользователя (матрица "Менеджер"/"Стандарт менеджер", город
-        // Воронеж) показал, что это даёт СТРАННЫЙ результат -- в "Факт" попадали
-        // сотрудники СОВСЕМ ДРУГИХ должностей (Экономисты), просто когда-то прошедшие ту
-        // же программу по любой другой причине (программа -- общий каталог, не привязана
-        // к конкретной матрице). Пользователь подтвердил (см. AskUserQuestion 17.09.2026):
-        // "Факт" ТЕПЕРЬ ТОЖЕ ограничивается аудиторией -- должен подходить ХОТЯ БЫ ПОД
-        // ОДИН элемент этой программы по должности+мир-коду (row.in_audience, см.
-        // BuildReportRows() выше) -- НО, как и раньше, БЕЗ ограничения по периоду/датам
-        // элемента (start_study_period/end_study_period по-прежнему не реализованы, см.
-        // "РЕШЕНИЯ" пункт 2 в шапке файла) -- т.е. "не зависимо от условий матрицы"
-        // теперь означает именно "не зависимо от периода", а не "не зависимо вообще ни от
-        // чего". Поэтому условие "если != fact" убрано -- фильтр по аудитории применяется
-        // ко ВСЕМ 4 режимам одинаково.
-        filteredResultRows = [];
-        for (i = 0; i < ArrayCount(RESULT); i++)
-        {
-            if (RESULT[i].in_audience)
-            {
-                filteredResultRows.push(RESULT[i]);
-            }
-        }
-        RESULT = filteredResultRows;
-        LogAlert(1, "Run(). После фильтра аудитории по элементам матрицы (для ВСЕХ режимов, включая fact) осталось строк: " + ArrayCount(RESULT));
-        PerfCheckpoint("Фильтр по row.in_audience (цикл по RESULT) -- ЧИСТЫЙ КОД");
+        // ДОБАВЛЕНО (17.09.2026, HREDU-215 "Правки 1"): индекс аудитории ПО ПРОГРАММАМ
+        // (была одна аудитория на всю матрицу -- GetMatrixAudienceCollaboratorRows(),
+        // убрана; теперь своя у каждого элемента/программы, см. комментарий над
+        // BuildProgramAudienceIndex() выше).
+        audienceIndex = BuildProgramAudienceIndex(elementRows, programIds);
+        PerfCheckpoint("BuildProgramAudienceIndex() -- аудитория по элементам, внутри может быть SQL (GetPositionIdsByCommonPosition() на сегмент)");
 
-        // НОВОЕ (10.09.2026): финальное разбиение по result_type -- см. "ИТОГОВАЯ
-        // АРХИТЕКТУРА" в шапке файла. "total"/"plan" -- без изменений (План = Общее,
-        // см. "РЕШЕНИЯ" пункт 2).
-        if (sResultType == "fact")
+        // ИЗМЕНЕНО (17.09.2026): раньше здесь было ДВА отдельных пула -- "аудитория
+        // матрицы + ручные фильтры" (для total/plan/mandatory) и "без аудитории, только
+        // ручные фильтры" (для fact). Теперь аудитория не пул-фильтр, а проверка ПО
+        // КАЖДОЙ ПАРЕ (сотрудник x программа) внутри цикла ниже -- значит пул для
+        // total/mandatory и пул для fact СОВПАДАЮТ (оба -- "активные + ручные фильтры"),
+        // достаточно посчитать один раз.
+        manualFilteredRows = ApplyManualFilters(activeRows, iPositionFilter, sMacroregionFilter, sMirCodeFilter, macroSorted, mirCodeSorted);
+        LogAlert(1, "Run(). Сотрудников после ручных фильтров (база и для total/mandatory, и для fact): " + ArrayCount(manualFilteredRows));
+        PerfCheckpoint("ApplyManualFilters() -- ручные фильтры пользователя -- ЧИСТЫЙ КОД (может дёргать SQL внутри при фильтре по должности)");
+
+        acc = [];
+
+        // total/mandatory -- по каждому (сотрудник x программа), сгруппировано по ПАРЕ
+        // (город, программа) -- см. "ГРУППИРОВКА ПО (ГОРОД, ПРОГРАММА)" в шапке. НО
+        // теперь, В ОТЛИЧИЕ от 16.09.2026, засчитываем сотрудника в total/mandatory
+        // программы, ТОЛЬКО ЕСЛИ он входит в АУДИТОРИЮ ИМЕННО ЭТОЙ программы (см.
+        // "ИЗМЕНЕНО (17.09.2026)" выше -- аудитория теперь своя у каждой программы).
+        for (i = 0; i < ArrayCount(manualFilteredRows); i++)
         {
-            filteredResultRows = [];
-            for (i = 0; i < ArrayCount(RESULT); i++)
+            sCity = FindCity(citySorted, Int(manualFilteredRows[i].id));
+            // ДОБАВЛЕНО (18.09.2026): реальный макрорегион ЭТОГО сотрудника -- см.
+            // FindMacroregion() и комментарий над GetOrCreateCityProgramAcc().
+            sMacroregionForRow = FindMacroregion(macroSorted, Int(manualFilteredRows[i].id));
+            for (j = 0; j < ArrayCount(programIds); j++)
             {
-                if (RESULT[i].completion_date != "")
+                segments = FindProgramAudienceSegments(audienceIndex, programIds[j]);
+                if (CollaboratorInProgramAudience(manualFilteredRows[i], segments, mirCodeSorted))
                 {
-                    filteredResultRows.push(RESULT[i]);
+                    sProgramName = FindProgramName(programNames, programIds[j]);
+                    cityProgramAcc = GetOrCreateCityProgramAcc(acc, sCity, programIds[j], sProgramName, sMacroregionForRow);
+                    sDate = FindCompletionDate(dateSorted, Int(manualFilteredRows[i].id), programIds[j]);
+                    cityProgramAcc.total = cityProgramAcc.total + 1;
+                    if (sDate == "") { cityProgramAcc.mandatory = cityProgramAcc.mandatory + 1; }
                 }
             }
-            RESULT = filteredResultRows;
         }
-        else if (sResultType == "mandatory")
+        PerfCheckpoint("Цикл total/mandatory (сотрудники x программы, с проверкой аудитории) -- ЧИСТЫЙ КОД, без SQL");
+
+        // fact -- по каждому (сотрудник x программа), только ПРОЙДЕННЫЕ. ИЗМЕНЕНО
+        // (17.09.2026, повторное уточнение с пользователем в тот же день, что и HREDU-215
+        // "Правки 1" -- см. AskUserQuestion): раньше "Факт" не проверял аудиторию вообще
+        // (буквальное "не зависимо от условий матрицы") -- реальный тест на матрице
+        // "Менеджер"/"Стандарт менеджер" (Воронеж) показал, что в "Факт" из-за этого
+        // попадали сотрудники СОВСЕМ ДРУГИХ должностей (Экономисты), просто когда-то
+        // прошедшие ту же программу по не связанной с этой матрицей причине (программа --
+        // общий каталог). Пользователь подтвердил: "Факт" ТЕПЕРЬ ТОЖЕ ограничивается
+        // аудиторией программы (должность+мир-код ХОТЯ БЫ ОДНОГО её элемента) -- "не
+        // зависимо от условий матрицы" означает "не зависимо от ПЕРИОДА" (см. ДОПУЩЕНИЕ о
+        // периоде в HREDU-183_tep_reports.js), а не "вообще без каких-либо условий".
+        // ДОПУЩЕНИЕ №1 (см. шапку файла, изменено 16.09.2026, актуально и сейчас):
+        // накопитель (город, программа) создаём здесь ТОЛЬКО когда реально есть
+        // завершение (sDate != "") -- иначе при большой факт-базе получился бы взрыв
+        // пустых строк, которых никто не хочет видеть.
+        for (i = 0; i < ArrayCount(manualFilteredRows); i++)
         {
-            filteredResultRows = [];
-            for (i = 0; i < ArrayCount(RESULT); i++)
+            sCity = FindCity(citySorted, Int(manualFilteredRows[i].id));
+            sMacroregionForRow = FindMacroregion(macroSorted, Int(manualFilteredRows[i].id));
+            for (j = 0; j < ArrayCount(programIds); j++)
             {
-                if (RESULT[i].completion_date == "")
+                segments = FindProgramAudienceSegments(audienceIndex, programIds[j]);
+                sDate = FindCompletionDate(dateSorted, Int(manualFilteredRows[i].id), programIds[j]);
+                if (sDate != "" && CollaboratorInProgramAudience(manualFilteredRows[i], segments, mirCodeSorted))
                 {
-                    filteredResultRows.push(RESULT[i]);
+                    sProgramName = FindProgramName(programNames, programIds[j]);
+                    cityProgramAcc = GetOrCreateCityProgramAcc(acc, sCity, programIds[j], sProgramName, sMacroregionForRow);
+                    cityProgramAcc.fact = cityProgramAcc.fact + 1;
                 }
             }
-            RESULT = filteredResultRows;
+        }
+        PerfCheckpoint("Цикл fact (сотрудники x программы, с проверкой аудитории) -- ЧИСТЫЙ КОД, без SQL");
+
+        // ИЗМЕНЕНО (16.09.2026, по запросу пользователя): сортировка теперь СНАЧАЛА по
+        // названию программы, ПОТОМ по городу внутри неё -- то есть все города одной
+        // программы идут подряд одним блоком, а следующая программа начинается только
+        // после того, как закончился блок предыдущей (а не вперемешку город-за-городом,
+        // как было раньше). ОБЫЧНЫМ ЦИКЛОМ (пузырьком), а не через возможную функцию-
+        // хелпер вроде ArraySort(): такая функция НИ РАЗУ не встречалась и не
+        // подтверждалась в этом тикете (в отличие от ArraySelectDistinct/ArrayExtract/
+        // ArrayMerge и т.д.), а гадать с непроверенными функциями платформы уже дорого
+        // обходилось (regex, function-as-value, .indexOf/.substring -- см. историю
+        // тикета) -- поэтому используем только то, что 100% работает: простые циклы
+        // и операторы сравнения.
+        var iOuter, iInner, tmpAcc;
+        for (iOuter = 0; iOuter < ArrayCount(acc) - 1; iOuter++)
+        {
+            for (iInner = 0; iInner < ArrayCount(acc) - 1 - iOuter; iInner++)
+            {
+                if (acc[iInner].programName > acc[iInner + 1].programName
+                    || (acc[iInner].programName == acc[iInner + 1].programName && acc[iInner].city > acc[iInner + 1].city))
+                {
+                    tmpAcc = acc[iInner];
+                    acc[iInner] = acc[iInner + 1];
+                    acc[iInner + 1] = tmpAcc;
+                }
+            }
+        }
+        PerfCheckpoint("Сортировка пузырьком (O(n^2), " + ArrayCount(acc) + " строк город x программа) -- ЧИСТЫЙ КОД");
+
+        resultRows = [];
+        id = 0;
+        totalAcc = { total: 0, mandatory: 0, fact: 0 };
+        for (i = 0; i < ArrayCount(acc); i++)
+        {
+            id = id + 1;
+            row = acc[i];
+            resultRows.push({
+                id: id,
+                city: row.city,
+                program: row.programName,
+                total: row.total,
+                plan: row.total, // План = Общее, см. "РЕШЕНИЯ" в шапке
+                fact: row.fact,
+                percent: FormatPercent(row.fact, row.total),
+                mandatory: row.mandatory,
+                // ПОДТВЕРЖДЕНО (14.09.2026, реальный тест пользователя): виджет "Табличные
+                // данные" различает клик ТОЛЬКО по строке целиком -- один "link" на всю
+                // строку. ИЗМЕНЕНО (16.09.2026): program_id в ссылке теперь берётся из
+                // КОНКРЕТНОЙ строки (row.programId), а не из общего фильтра -- см.
+                // BuildTepLink(). Режим по-прежнему фиксирован на "total"; план/факт/
+                // обязательно пользователь смотрит либо прямо в этой таблице, либо
+                // переключает "Режим отчёта" вручную на целевой странице.
+                // ИЗМЕНЕНО (18.09.2026, по прямой просьбе пользователя): раньше в ссылку
+                // всегда клался sMacroregionFilter -- значение РУЧНОГО фильтра страницы,
+                // который чаще всего пуст (макрорегион необязателен). Теперь предпочитаем
+                // row.macroregion -- РЕАЛЬНЫЙ макрорегион этого конкретного города (см.
+                // FindMacroregion()/GetOrCreateCityProgramAcc() выше), а на фильтр
+                // (sMacroregionFilter) переходим только запасным вариантом, если у города
+                // почему-то не нашлось макрорегиона в данных (row.macroregion == "").
+                link: BuildTepLink(matrixId, (row.macroregion != "" ? row.macroregion : sMacroregionFilter), sMirCodeFilter, iPositionFilter, row.programId, "total", row.city)
+            });
+            totalAcc.total = totalAcc.total + row.total;
+            totalAcc.mandatory = totalAcc.mandatory + row.mandatory;
+            totalAcc.fact = totalAcc.fact + row.fact;
         }
 
-        PerfCheckpoint("Финальное разбиение по result_type (" + sResultType + ") -- ЧИСТЫЙ КОД");
-        LogAlert(2, "Run(). Готово. result_type=" + sResultType + ", строк отчёта: " + ArrayCount(RESULT));
-        PerfCheckpoint("Run() -- ГОТОВО (успех), строк отчёта: " + ArrayCount(RESULT));
+        id = id + 1;
+        // sCity = "" и iProgramId = 0 для "Общий итог" -- ссылка ведёт на ВЕСЬ матрикс
+        // (без фильтра по городу и без фильтра по программе).
+        resultRows.push({
+            id: id,
+            city: "Общий итог",
+            program: "-",
+            total: totalAcc.total,
+            plan: totalAcc.total,
+            fact: totalAcc.fact,
+            percent: FormatPercent(totalAcc.fact, totalAcc.total),
+            mandatory: totalAcc.mandatory,
+            link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, 0, "total", "")
+        });
+
+        PerfCheckpoint("Сборка resultRows + построение BuildTepLink() на каждую строку -- ЧИСТЫЙ КОД");
+
+        RESULT = resultRows;
+        LogAlert(2, "Run(). Готово. Строк (город x программа): " + (ArrayCount(resultRows) - 1) + " + итоговая строка");
+        PerfCheckpoint("Run() -- ГОТОВО (успех), строк: " + (ArrayCount(resultRows) - 1) + " + итоговая");
     }
     catch (_ex)
     {
+        RESULT = [];
         ERROR = 1;
         MESSAGE = ExtractUserError(_ex);
         LogAlert(4, "Run(). ОШИБКА: " + MESSAGE);
@@ -1246,8 +1137,29 @@ function Run()
     LogAlert(2, "Run(). КОНЕЦ");
 }
 
-//-------------------------------------------------------------------------
-//              Область основного кода
-//-------------------------------------------------------------------------
-
 Run();
+
+// ЗАКРЫТО (14.09.2026, КЛИКАБЕЛЬНОСТЬ): реальный тест пользователя подтвердил, что
+// виджет "Табличные данные" различает клик ТОЛЬКО по строке целиком -- отдельной ссылки
+// "на конкретную ячейку/число" у него нет (независимо от того, по какой колонке
+// кликнули, срабатывает один и тот же "link" всей строки). Поэтому четыре поля
+// total_link/plan_link/fact_link/mandatory_link и соответствующие им закомментированные
+// варианты колонок -- УБРАНЫ как мёртвый код (см. историю тикета -- раньше они были
+// здесь как непроверенная гипотеза). РЕШЕНИЕ: один клик по строке города -> ТЭП-отчёт в
+// режиме "total"; план/факт/обязательно пользователь смотрит НЕ переходом по клику, а
+// либо прямо в этой таблице (числа уже видны), либо переключает "Режим отчёта" вручную
+// в фильтрах на целевой странице (см. HREDU-183_filtry_modal_shag1.js).
+// ДОБАВЛЕНО (16.09.2026, по запросу пользователя): колонка "Учебная программа" сразу
+// после "Город" -- строка теперь соответствует паре (город, программа), а не только
+// городу, см. "ГРУППИРОВКА ПО (ГОРОД, ПРОГРАММА)" в шапке файла.
+COLUMNS = [
+    { "data": "id", "editable": true, "hidden": true, "sortable": false },
+    { "data": "link", "hidden": true, "editable": false, "sortable": false }, // проверенный row-level link
+    { "data": "city", "title": "Город", "type": "string", "editable": false, "sortable": true },
+    { "data": "program", "title": "Учебная программа", "type": "string", "editable": false, "sortable": true },
+    { "data": "total", "title": "Общее кол-во сотрудников", "type": "integer", "editable": false, "sortable": true },
+    { "data": "plan", "title": "План", "type": "integer", "editable": false, "sortable": true },
+    { "data": "fact", "title": "Факт", "type": "integer", "editable": false, "sortable": true },
+    { "data": "percent", "title": "Процент", "type": "string", "editable": false, "sortable": false },
+    { "data": "mandatory", "title": "Обязательно к прохождению", "type": "integer", "editable": false, "sortable": true }
+];
