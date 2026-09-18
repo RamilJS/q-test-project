@@ -591,15 +591,25 @@ function ExtractMirCodes(rawValue)
 
 /*
  * Проверяет, есть ли у сотрудника указанный мир-код среди любых его мир-кодов.
- * @param {Object[]} mirCodeRows
+ * НАЙДЕНО (18.09.2026, замер на "Процент обученных" ПОСЛЕ фикса macro/city/date бинарным
+ * поиском): реальный тест показал провал в 31 сек ИМЕННО на шаге "Цикл total/mandatory" --
+ * виновата была ЭТА функция: CollaboratorInProgramAudience() (см. ниже) вызывает её на
+ * каждую пару сотрудник x программа-с-мир-кодовым-сегментом, а она делала линейный
+ * ArrayOptFind() по mirCodeRows -- ТАКОМУ ЖЕ полному массиву по ВСЕМ активным сотрудникам
+ * компании, как macroRows/cityRows/dateRows до фикса -- та же O(n^2)-ловушка, пропущенная
+ * в первых двух раундах правки ЭТОГО файла (тестовая матрица ТЭП не содержала элементов с
+ * непустым мир-кодовым сегментом, поэтому баг здесь не проявился, хотя код был тот же).
+ * Исправлено идентично остальным трём полям -- бинарный поиск по mirCodeRows,
+ * отсортированному через SortRowsById() один раз в Run().
+ * @param {Object[]} sortedMirCodeRows
  * @param {number} collaboratorID
  * @param {string} mirCodeFilter
  * @returns {boolean}
  */
-function CollaboratorHasMirCode(mirCodeRows, collaboratorID, mirCodeFilter)
+function CollaboratorHasMirCode(sortedMirCodeRows, collaboratorID, mirCodeFilter)
 {
     var row, codes;
-    row = ArrayOptFind(mirCodeRows, "Int(This.id) == Int(collaboratorID)");
+    row = BinarySearchById(sortedMirCodeRows, collaboratorID);
     if (row == undefined)
     {
         return false;
@@ -704,17 +714,17 @@ function FindProgramAudienceSegments(audienceIndex, programId)
  * ОДИН из её сегментов (элементов матрицы).
  * @param {Object} collaboratorRow
  * @param {Object[]} segments        -   Результат FindProgramAudienceSegments().
- * @param {Object[]} mirCodeRows     -   Результат GetMirCodeRows() (грузится один раз в Run()).
+ * @param {Object[]} sortedMirCodeRows   -   Результат GetMirCodeRows() + SortRowsById() (см. Run()).
  * @returns {boolean}
  */
-function CollaboratorInProgramAudience(collaboratorRow, segments, mirCodeRows)
+function CollaboratorInProgramAudience(collaboratorRow, segments, sortedMirCodeRows)
 {
     var i, seg, positionOk, mirCodeOk;
     for (i = 0; i < ArrayCount(segments); i++)
     {
         seg = segments[i];
         positionOk = (seg.positionCommonId <= 0 || IdArrayContains(seg.allowedPositionIds, OptInt(collaboratorRow.position_id, 0)));
-        mirCodeOk = (seg.mirCodeText == "" || CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRow.id), seg.mirCodeText));
+        mirCodeOk = (seg.mirCodeText == "" || CollaboratorHasMirCode(sortedMirCodeRows, Int(collaboratorRow.id), seg.mirCodeText));
         if (positionOk && mirCodeOk)
         {
             return true;
@@ -856,10 +866,10 @@ function FindProgramTitle(programTitles, programID)
  * @param {Object[]} programTitles
  * @param {number[]} programIds
  * @param {Object[]} audienceIndex
- * @param {Object[]} mirCodeRows
+ * @param {Object[]} mirCodeSorted   -   Отсортированный через SortRowsById() (см. Run()).
  * @returns {Object[]}
  */
-function BuildReportRows(collaborator, macroSorted, citySorted, dateSorted, programTitles, programIds, audienceIndex, mirCodeRows)
+function BuildReportRows(collaborator, macroSorted, citySorted, dateSorted, programTitles, programIds, audienceIndex, mirCodeSorted)
 {
     var rows, row, i, programID, segments;
     rows = [];
@@ -875,7 +885,7 @@ function BuildReportRows(collaborator, macroSorted, citySorted, dateSorted, prog
         row.city = FindCity(citySorted, Int(collaborator.id));
         row.program_name = FindProgramTitle(programTitles, programID);
         row.completion_date = FindCompletionDate(dateSorted, Int(collaborator.id), programID);
-        row.in_audience = CollaboratorInProgramAudience(collaborator, segments, mirCodeRows);
+        row.in_audience = CollaboratorInProgramAudience(collaborator, segments, mirCodeSorted);
         rows.push(row);
     }
     return rows;
@@ -937,6 +947,7 @@ function Run()
     var matrixContext, elementRows, audienceIndex;
     var programIds, programTitles, collaboratorRows, macroRows, mirCodeRows, cityRows, dateRows;
     var macroSorted, citySorted, dateSorted; // ДОБАВЛЕНО (18.09.2026, ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ) -- см. SortRowsById()/SortDateRowsByCollaboratorId()
+    var mirCodeSorted; // ДОБАВЛЕНО (18.09.2026, ВТОРАЯ правка -- см. комментарий над CollaboratorHasMirCode()): та же O(n^2)-ловушка нашлась и в мир-кодах, пропущенная в первом раунде
     var collaboratorReportRows, i, j;
     var filteredProgramIds, filteredCollaboratorRows, allowedPositionIds, filteredResultRows;
 
@@ -1060,6 +1071,12 @@ function Run()
         // грузим один раз здесь и переиспользуем и для ручного фильтра по мир-коду.
         mirCodeRows = GetMirCodeRows();
         PerfCheckpoint("GetMirCodeRows() -- SQL по мир-кодам сотрудников");
+        // ДОБАВЛЕНО (18.09.2026, ВТОРАЯ правка -- см. комментарий над
+        // CollaboratorHasMirCode()): реальный тест на "Процент обученных" показал провал
+        // в 31 сек именно из-за линейного поиска по mirCodeRows -- та же ловушка есть и
+        // здесь (тестовая матрица ТЭП её просто не проявила). Сортируем один раз.
+        mirCodeSorted = SortRowsById(mirCodeRows);
+        PerfCheckpoint("SortRowsById(mirCodeRows) -- сортировка для бинарного поиска по мир-кодам -- ЧИСТЫЙ КОД, O(n log n)");
 
         // Дальше -- РУЧНЫЕ фильтры пользователя, точно как в HREDU-181 (без изменений).
         if (iPositionFilter > 0)
@@ -1103,11 +1120,11 @@ function Run()
 
         if (sMirCodeFilter != "")
         {
-            // mirCodeRows уже загружен выше (грузится теперь всегда, не только тут).
+            // mirCodeSorted уже загружен и отсортирован выше (грузится теперь всегда, не только тут).
             filteredCollaboratorRows = [];
             for (i = 0; i < ArrayCount(collaboratorRows); i++)
             {
-                if (CollaboratorHasMirCode(mirCodeRows, Int(collaboratorRows[i].id), sMirCodeFilter))
+                if (CollaboratorHasMirCode(mirCodeSorted, Int(collaboratorRows[i].id), sMirCodeFilter))
                 {
                     filteredCollaboratorRows.push(collaboratorRows[i]);
                 }
@@ -1150,7 +1167,7 @@ function Run()
         RESULT = [];
         for (i = 0; i < ArrayCount(collaboratorRows); i++)
         {
-            collaboratorReportRows = BuildReportRows(collaboratorRows[i], macroSorted, citySorted, dateSorted, programTitles, programIds, audienceIndex, mirCodeRows);
+            collaboratorReportRows = BuildReportRows(collaboratorRows[i], macroSorted, citySorted, dateSorted, programTitles, programIds, audienceIndex, mirCodeSorted);
             for (j = 0; j < ArrayCount(collaboratorReportRows); j++)
             {
                 RESULT.push(collaboratorReportRows[j]);
