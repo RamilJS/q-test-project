@@ -8,7 +8,8 @@ function alert(sInputObj)
 
 // =====================================================================
 // HREDU-182/183. Breadcrumbs -- ТОЛЬКО для страницы отчётов ТЭП
-
+// (https://als-devwt.vl.vtb/view_doc.html?mode=matrix_report).
+//
 
 DEBUG = true;              // На проде поставить false после тестирования
 LOG_NAME = "agent";        // TODO: заполнить после создания документа выборки в админке
@@ -116,6 +117,42 @@ function ResolveResultTypeLabel(sResultType)
     }
 }
 
+/*
+ * ДОБАВЛЕНО (21.09.2026, реальный тест -- битая ссылка на саму себя): та же самая
+ * "&macr"-ловушка, что уже была найдена и исправлена в BuildTepLink()
+ * (HREDU-182_procent_obuchennyh.js, см. подробное объяснение там). Виджет вставляет
+ * значение поля ссылки ПРЯМО в HTML-атрибут href БЕЗ экранирования "&" в "&amp;" --
+ * поэтому "&macroregion=Москва" браузер читает как легаси-HTML-сущность "&macr"
+ * (символ "¯", без точки с запятой на конце, как у "&amp"/"&lt"/"&nbsp") + "oregion=...".
+ * Реальный симптом СОВПАДАЕТ один в один: "matrix_id=...%C2%AForegion=..." --
+ * %C2%AF это UTF-8 для U+00AF (macron), "&macr" пропало, "oregion=" осталось. Фикс --
+ * ТОТ ЖЕ САМЫЙ: экранируем "&" в "&amp;" САМИ, ДО того как класть ссылку в RESULT --
+ * тогда браузер сначала раскодирует "&amp;" обратно в "&", и итоговый URL уже не
+ * содержит "&macr" как отдельную подстроку. Без regex -- тот же строковый API
+ * (StrOptSubStrPos/StrRangePos/StrLen), что и в GetQueryParam().
+ * @param {string} sUrl
+ * @returns {string}
+ */
+function HtmlEscapeAmp(sUrl)
+{
+    var sResult, iPos, iUrlLen, iSearchStart;
+    sResult = "";
+    iSearchStart = 0;
+    iUrlLen = StrLen(sUrl);
+    while (true)
+    {
+        iPos = StrOptSubStrPos(sUrl, "&", false, iSearchStart);
+        if (iPos == undefined)
+        {
+            sResult = sResult + StrRangePos(sUrl, iSearchStart, iUrlLen);
+            break;
+        }
+        sResult = sResult + StrRangePos(sUrl, iSearchStart, iPos) + "&amp;";
+        iSearchStart = iPos + 1;
+    }
+    return sResult;
+}
+
 //-------------------------------------------------------------------------
 //              Точка входа
 //-------------------------------------------------------------------------
@@ -147,8 +184,8 @@ try
     // тикета), а виджет возьмёт то, которое реально привязано в LPE.
     RESULT.push({
         "name": "Отчет процент обученных",
-        "value": PERCENT_PAGE_URL,
-        "link": PERCENT_PAGE_URL,
+        "value": HtmlEscapeAmp(PERCENT_PAGE_URL),
+        "link": HtmlEscapeAmp(PERCENT_PAGE_URL),
         "id": ArrayCount(RESULT)
     });
 
@@ -166,8 +203,8 @@ try
     // параметрами -- для пользователя неотличимо от "некликабельно".
     RESULT.push({
         "name": "Отчет " + sResultTypeLabel,
-        "value": sFullUrl,
-        "link": sFullUrl,
+        "value": HtmlEscapeAmp(sFullUrl),
+        "link": HtmlEscapeAmp(sFullUrl),
         "id": ArrayCount(RESULT)
     });
 }
