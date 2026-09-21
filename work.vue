@@ -23,14 +23,21 @@ function alert(sInputObj)
 // HREDU-183_tep_reports.js).
 //
 // КАК ОПРЕДЕЛЯЕМ, НА КАКОЙ МЫ СТРАНИЦЕ (одна выборка -- значит нужно самим понять,
-// откуда её вызвали): страница ТЭП всегда открывается по адресу с "mode=matrix_report"
-// (см. константу TEP_REPORT_PAGE_URL = "/view_doc.html?mode=matrix_report" в
-// HREDU-182_procent_obuchennyh.js -- туда ведёт BuildTepLink(), и ИМЕННО этот mode
-// настроен на самой странице ТЭП в админке). Если в Request.Url этой подстроки нет --
-// значит мы на странице "Процент обученных" (единственная другая страница, использующая
-// эту выборку). Более простая и надёжная проверка, чем "есть ли result_type в URL" --
-// того же результата можно было бы добиться проверкой result_type, но у страницы ТЭП он
-// технически МОЖЕТ отсутствовать (первый заход без фильтров), а вот её mode -- нет.
+// откуда её вызвали): по параметру "mode" в Request.Url -- ТОЧНЫЕ адреса подтверждены
+// пользователем 21.09.2026:
+//   "Процент обученных"  -- https://als-devwt.vl.vtb/view_doc.html?mode=matrix_educated_percent
+//   ТЭП (План/Факт/...)  -- https://als-devwt.vl.vtb/view_doc.html?mode=matrix_report
+// ИСПРАВЛЕНО (21.09.2026): раньше проверялось ТОЛЬКО "есть ли mode=matrix_report" --
+// если нет, по умолчанию считалось, что это страница "Процент обученных". Реальный тест
+// показал, что крошка на "Процент обученных" не работала -- ПРИЧИНА могла быть либо в
+// том, что виджет на этой странице ещё не настроен в админке (result_type[внешний] не
+// привязан к "fields"), либо в том, что на проде URL отличался от того, что
+// предполагалось изначально (просто "не matrix_report"). Теперь ОБЕ страницы
+// определяются ЯВНО, по СВОИМ ТОЧНЫМ значениям "mode=" -- никаких "по умолчанию"
+// веток: если mode не совпал НИ С ОДНИМ из двух известных значений, крошка НЕ строится
+// вообще (пустой RESULT, а не ошибочный текст) -- так сразу видно в логе (см.
+// LogAlert() ниже с самим Request.Url), если появится третья страница или mode
+// поменяется снова, вместо того чтобы молча показывать неверную крошку.
 //
 // ВНИМАНИЕ, ДВА РАЗНЫХ "result_type" В ЭТОМ ФАЙЛЕ (легко перепутать):
 //   1. ВНЕШНИЙ result_type (переменная sResType ниже) -- служебный LPE-параметр самого
@@ -56,6 +63,12 @@ function alert(sInputObj)
 DEBUG = true;              // На проде поставить false после тестирования
 LOG_NAME = "agent";        // TODO: заполнить после создания документа выборки в админке
 CUR_OBJECT_ID = 0;         // TODO: заполнить ID документа выборки после её создания в админке (LogAlert защищена try/catch -- забытый 0 не обрушит код)
+
+// ТОЧНЫЕ значения "mode" для каждой из двух страниц -- подтверждены пользователем
+// 21.09.2026 реальными production-адресами (см. "КАК ОПРЕДЕЛЯЕМ, НА КАКОЙ МЫ СТРАНИЦЕ"
+// в шапке файла).
+PERCENT_PAGE_MODE = "mode=matrix_educated_percent";
+TEP_PAGE_MODE = "mode=matrix_report";
 
 //-------------------------------------------------------------------------
 //              Область функций
@@ -166,7 +179,7 @@ RESULT = [];
 
 try
 {
-    var sResType, sFullUrl, bIsTepPage, sReportResultType, sResultTypeLabel;
+    var sResType, sFullUrl, bIsTepPage, bIsPercentPage, sReportResultType, sResultTypeLabel;
 
     // ВНЕШНИЙ result_type -- см. "ВНИМАНИЕ, ДВА РАЗНЫХ result_type" в шапке файла (п.1).
     sResType = result_type;
@@ -178,10 +191,11 @@ try
         {
             sFullUrl = GetRequestUrlSafe();
 
-            // Определяем страницу -- см. "КАК ОПРЕДЕЛЯЕМ, НА КАКОЙ МЫ СТРАНИЦЕ" в шапке
-            // файла: mode=matrix_report однозначно означает страницу ТЭП.
-            bIsTepPage = (StrOptSubStrPos(sFullUrl, "mode=matrix_report", false) != undefined);
-            LogAlert(1, "Breadcrumbs (общая). Request.Url=[" + sFullUrl + "] bIsTepPage=" + bIsTepPage);
+            // Определяем страницу ЯВНО по ОБОИМ известным значениям "mode" -- см.
+            // "ИСПРАВЛЕНО (21.09.2026)" в шапке файла: никаких "по умолчанию" веток.
+            bIsTepPage = (StrOptSubStrPos(sFullUrl, TEP_PAGE_MODE, false) != undefined);
+            bIsPercentPage = (StrOptSubStrPos(sFullUrl, PERCENT_PAGE_MODE, false) != undefined);
+            LogAlert(1, "Breadcrumbs (общая). Request.Url=[" + sFullUrl + "] bIsTepPage=" + bIsTepPage + " bIsPercentPage=" + bIsPercentPage);
 
             if (bIsTepPage)
             {
@@ -200,7 +214,7 @@ try
                     "id": ArrayCount(RESULT)
                 });
             }
-            else
+            else if (bIsPercentPage)
             {
                 // Страница "Процент обученных" -- крошка ВСЕГДА статична, см. шапку файла.
                 RESULT.push({
@@ -208,6 +222,14 @@ try
                     "value": "",
                     "id": ArrayCount(RESULT)
                 });
+            }
+            else
+            {
+                // НИ ОДИН из двух известных mode не совпал -- см. "ИСПРАВЛЕНО
+                // (21.09.2026)" в шапке файла: намеренно НЕ строим крошку "на всякий
+                // случай", чтобы не показать неверный текст молча -- лучше пустая
+                // крошка + строка в логе с реальным Request.Url для диагностики.
+                LogAlert(3, "Breadcrumbs (общая). Ни один известный mode не совпал -- крошка не построена. Request.Url=[" + sFullUrl + "]");
             }
             break;
         }
