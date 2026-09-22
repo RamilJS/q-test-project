@@ -9,11 +9,10 @@ function alert(sInputObj) {
 // HREDU-182. "Процент обученных" -- выборка для Табличных данных.
 //
 
+
 DEBUG = true;              // На проде поставить false после тестирования
 LOG_NAME = "agent";        // TODO: заполнить после создания документа в админке
 CUR_OBJECT_ID = 7685313676595870594;         
-
-
 TEP_REPORT_PAGE_URL = "/view_doc.html?mode=matrix_report";
 
 // ДОБАВЛЕНО (22.09.2026) -- см. "ВИДИМОСТЬ ПО РОЛИ" в шапке файла.
@@ -23,8 +22,6 @@ UORIAP_GROUP_XQUERY_TYPE = "groups"; // ГИПОТЕЗА (по аналогии 
 //-------------------------------------------------------------------------
 //              Область функций
 //-------------------------------------------------------------------------
-
-
 
 /*
  * ДОБАВЛЕНО (22.09.2026) -- см. "ВИДИМОСТЬ ПО РОЛИ" в шапке файла. Достаёт ID текущего
@@ -38,9 +35,9 @@ function GetCurUserIdSafe()
 {
     try
     {
-        if (typeof curUserId != "undefined" && curUserId != undefined && OptInt(curUserId, 0) > 0)
+        if (typeof curUserId != "undefined" && curUserId != undefined && curUserId > 0)
         {
-            return OptInt(curUserId, 0);
+            return curUserId;
         }
     }
     catch (_ex)
@@ -102,17 +99,9 @@ function IsUorApMember(iCurUserId)
         iGroupId = Int(groupRows[0].id);
         groupDoc = tools.open_doc(iGroupId).TopElem;
         collabList = groupDoc.collaborators.collaborator;
-        // ПРЕДПОЛОЖЕНИЕ: collabList -- массив (в реальной группе сейчас 14 сотрудников,
-        // так и должно прийти). Если в группе когда-нибудь останется РОВНО ОДИН
-        // сотрудник, а движок в этом случае вернёт не массив, а один объект -- цикл
-        // ниже отработает 0 раз вместо 1, то есть единственный сотрудник молча не будет
-        // засчитан. Осознанно НЕ подстраховываемся от этого сейчас (непроверенная
-        // логика определения типа поверх и так непроверенной структуры) -- если
-        // когда-нибудь всплывёт, будет видно по логам (0 совпадений при заведомо
-        // непустой группе).
         for (i = 0; i < ArrayCount(collabList); i++)
         {
-            if (Int(collabList[i].collaborator_id) == iCurUserId)
+            if (String(collabList[i].collaborator_id) == String(iCurUserId))
             {
                 alert("IsUorApMember(). Способ 2 (tools.open_doc()) сработал, совпадение найдено. userId=" + iCurUserId);
                 return true;
@@ -128,15 +117,6 @@ function IsUorApMember(iCurUserId)
     }
 }
 
-//-------------------------------------------------------------------------
-//              ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ (18.09.2026, по просьбе тим-лида
-//              пользователя -- медленно грузятся страницы после смены фильтров,
-//              нужно понять, тормозит БД (SQL/XQuery/tools.open_doc()) или сам код)
-//-------------------------------------------------------------------------
-// ВРЕМЕННАЯ ДИАГНОСТИКА, идентична версии в HREDU-183_tep_reports.js (см. там подробное
-// объяснение -- как читать, риски точности подсчёта секунд, почему всё в try/catch).
-// Когда причина тормозов найдена -- блок и все вызовы PerfStart()/PerfCheckpoint() ниже
-// можно удалить, на остальную логику файла это не влияет.
 
 PERF_DEBUG = true; // поставь false, чтобы быстро выключить весь этот блок целиком
 gPerfStartTime = undefined;
@@ -1123,7 +1103,7 @@ function Run()
         // сколько реально пар (сотрудник x программа) обрабатывается.
         PerfCheckpoint("Цикл total/mandatory (сотрудники x программы, с проверкой аудитории) -- ЧИСТЫЙ КОД, без SQL. Сотрудников: " + ArrayCount(manualFilteredRows) + "; программ: " + ArrayCount(programIds) + "; пар всего: " + (ArrayCount(manualFilteredRows) * ArrayCount(programIds)));
 
-        
+
         for (i = 0; i < ArrayCount(manualFilteredRows); i++)
         {
             sCity = FindCity(citySorted, Int(manualFilteredRows[i].id));
@@ -1142,7 +1122,7 @@ function Run()
         }
         PerfCheckpoint("Цикл fact (сотрудники x программы, с проверкой аудитории) -- ЧИСТЫЙ КОД, без SQL. Пар всего: " + (ArrayCount(manualFilteredRows) * ArrayCount(programIds)));
 
-   
+
         var iOuter, iInner, tmpAcc;
         for (iOuter = 0; iOuter < ArrayCount(acc) - 1; iOuter++)
         {
@@ -1175,7 +1155,20 @@ function Run()
                 fact: row.fact,
                 percent: FormatPercent(row.fact, row.total),
                 mandatory: row.mandatory,
-                
+                // ПОДТВЕРЖДЕНО (14.09.2026, реальный тест пользователя): виджет "Табличные
+                // данные" различает клик ТОЛЬКО по строке целиком -- один "link" на всю
+                // строку. ИЗМЕНЕНО (16.09.2026): program_id в ссылке теперь берётся из
+                // КОНКРЕТНОЙ строки (row.programId), а не из общего фильтра -- см.
+                // BuildTepLink(). Режим по-прежнему фиксирован на "total"; план/факт/
+                // обязательно пользователь смотрит либо прямо в этой таблице, либо
+                // переключает "Режим отчёта" вручную на целевой странице.
+                // ИЗМЕНЕНО (18.09.2026, по прямой просьбе пользователя): раньше в ссылку
+                // всегда клался sMacroregionFilter -- значение РУЧНОГО фильтра страницы,
+                // который чаще всего пуст (макрорегион необязателен). Теперь предпочитаем
+                // row.macroregion -- РЕАЛЬНЫЙ макрорегион этого конкретного города (см.
+                // FindMacroregion()/GetOrCreateCityProgramAcc() выше), а на фильтр
+                // (sMacroregionFilter) переходим только запасным вариантом, если у города
+                // почему-то не нашлось макрорегиона в данных (row.macroregion == "").
                 link: BuildTepLink(matrixId, (row.macroregion != "" ? row.macroregion : sMacroregionFilter), sMirCodeFilter, iPositionFilter, row.programId, "total", row.city)
             });
             totalAcc.total = totalAcc.total + row.total;
