@@ -1,4 +1,4 @@
-sLogName = 'HREDU_182_TEST_manager_sql_round4_23092026';
+sLogName = 'HREDU_182_TEST_manager_sql';
 EnableLog(sLogName, true);
 function alert(sInputObj)
 {
@@ -7,124 +7,96 @@ function alert(sInputObj)
 }
 
 // =====================================================================
-// ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ФАЙЛ, РАУНД 4 (23.09.2026) -- НЕ для продакшена.
-// Продолжение _round2.js / _round3.js -- см. историю там же.
+// ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ФАЙЛ, РАУНД 5 (23.09.2026) -- НЕ для продакшена.
+// Продолжение _round4.js -- см. историю там же.
 //
-// РЕЗУЛЬТАТ РАУНДА 3 (реальный тест): предикат ломает запрос ДАЖЕ когда сужаем WHERE
-// до 4 точно "хороших" сотрудников (Тест 1 -- 0 строк), И ДАЖЕ через .exist() вместо
-// .value() (Тест 2 -- тоже 0 строк на ВСЮ таблицу). При этом .exist() БЕЗ предиката
-// (Тест 3) подтвердил: у ВСЕХ 2312 активных сотрудников func_managers/func_manager
-// точно есть. Вывод: дело НЕ в "плохих данных" у какого-то одного сотрудника из 2312 --
-// сам ПРЕДИКАТ (что по is_native, что по boss_type_id, в любом стиле кавычек) ломает
-// запрос УНИВЕРСАЛЬНО, даже на заведомо чистых записях.
+// НАЙДЕНО (реальный тест, раунд 4): is_native в СЫРОЙ XML хранится как ТЕКСТ
+// "true"/"false", а НЕ "1"/"0", как показывал экспорт документа при просмотре карточки
+// сотрудника -- та же ловушка "экспорт ≠ то, что в БД", что уже была с id группы
+// УОРиАП. ВСЕ предыдущие раунды (1-3) сравнивали с "1", которого в данных не было
+// НИГДЕ -- отсюда предикат не находил совпадений вообще ни у одного сотрудника, и
+// платформа (по неясной пока причине, отдельная находка) схлопывала это в 0 строк
+// вместо 2312 строк с пустым manager_id. Позиционный предикат func_manager[3] в
+// раунде 4 сработал СРАЗУ и правильно -- значит с синтаксисом предиката на func_manager
+// всё было в порядке всё это время, дело было ИСКЛЮЧИТЕЛЬНО в сравниваемом значении.
 //
-// НОВАЯ ГИПОТЕЗА (РАУНД 4): в этом тикете уже был похожий сюрприз с группой УОРиАП --
-// то, что ПОКАЗЫВАЕТСЯ при экспорте/просмотре документа (например id как "0x...."), и
-// то, что РЕАЛЬНО лежит в СЫРОЙ XML в БД -- РАЗНЫЕ ПРЕДСТАВЛЕНИЯ. Вполне возможно, что
-// func_managers -- это ВЫЧИСЛЯЕМЫЙ/РЕЗОЛВЛЕННЫЙ блок (данные оргструктуры/иерархии,
-// которые вычисляются на лету при просмотре карточки), и его РЕАЛЬНАЯ форма в сыром
-// XML колонки c.data (то, что мы полностью КОНТРОЛИРУЕМ через SQL) может ОТЛИЧАТЬСЯ от
-// того, что мы видели при экспорте -- например is_native/boss_type_id могут быть НЕ
-// дочерними элементами, а АТРИБУТАМИ (func_manager is_native="1" вместо
-// <func_manager><is_native>1</is_native>), или называться иначе, или иметь другую
-// вложенность. Раз предикат ПО ЛЮБОМУ полю падает одинаково -- логично посмотреть
-// НАПРЯМУЮ, что реально лежит в сырой XML, а не гадать дальше вслепую очередным
-// вариантом предиката.
-//
-// ЧТО ДЕЛАЕТ ЭТОТ ФАЙЛ:
-//   Тест 1 -- .query() вместо .value()/.exist(): достаёт СЫРОЙ XML-фрагмент
-//             func_managers ЦЕЛИКОМ (как текст, CAST в nvarchar(max)) для ОДНОГО
-//             known-good сотрудника (id Рамиля) -- покажет РЕАЛЬНУЮ структуру со всеми
-//             тегами/атрибутами, как она есть в БД, без каких-либо предположений.
-//   Тест 2 -- позиционный предикат func_manager[3] (БЕЗ сравнения по значению поля,
-//             просто "третий по счёту func_manager") -- если ЭТО сработает, а
-//             предикаты по значению поля (is_native=...) нет -- значит дело именно в
-//             сравнении конкретных полей (например атрибут вместо элемента), а не в
-//             самой возможности использовать [] на func_manager. Если И ЭТО не
-//             сработает -- дело глубже, в самой возможности предиката на этом узле.
+// ЭТОТ ФАЙЛ: тот же предикат, что и в раунде 2 (Вариант Г, стиль ''..'' кавычек,
+// проверенный на custom_elem[name=''sity'']), но со значением ''true'' вместо ''1'' --
+// на ВСЕЙ таблице активных сотрудников (2312), с той же точечной проверкой на Рамиле,
+// что и во всех прошлых раундах.
 // =====================================================================
 
 RESULT = [];
 try
 {
-    var sqlText1, sqlText2, rows1, rows2, row;
+    var sqlText, rows, ramilRow, i;
 
-    alert("1. НАЧАЛО раунда 4.");
+    alert("1. НАЧАЛО раунда 5.");
 
-    // -----------------------------------------------------------------
-    // Тест 1: сырой XML func_managers как текст, для Рамиля.
-    // -----------------------------------------------------------------
-    sqlText1 = "";
-    sqlText1 = sqlText1 + "select cs.id,\r\n";
-    sqlText1 = sqlText1 + "       cast(c.data.query('*/func_managers') as nvarchar(max)) as raw_func_managers\r\n";
-    sqlText1 = sqlText1 + "from collaborators cs\r\n";
-    sqlText1 = sqlText1 + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText1 = sqlText1 + "where cs.id = 7311507899656113337";
+    sqlText = "";
+    sqlText = sqlText + "select cs.id,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/func_managers/func_manager[is_native=''true'']/person_id)[1]', 'varchar(max)') as manager_id\r\n";
+    sqlText = sqlText + "from collaborators cs\r\n";
+    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText = sqlText + "where cs.is_dismiss != 1";
 
-    try
+    rows = ArraySelectAll(XQuery("sql:" + sqlText));
+    alert("2. Запрос (is_native=''true'') ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows));
+
+    ramilRow = ArrayOptFind(rows, "String(This.id) == '7311507899656113337'");
+    if (ramilRow != undefined)
     {
-        rows1 = ArraySelectAll(XQuery("sql:" + sqlText1));
-        alert("2.1. Тест 1 (сырой XML func_managers) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows1));
-        if (ArrayCount(rows1) > 0)
+        alert("3. Строка Рамиля: manager_id=[" + ramilRow.manager_id + "] (ОЖИДАЕМ 6555406089169669479 -- Колесникова)");
+    }
+    else
+    {
+        alert("3. ОШИБКА: строка Рамиля НЕ найдена.");
+    }
+
+    // Ещё точечно проверим Колесникову (её manager_id должен быть Соловьева,
+    // 7595032916280367128) и Соловьеву (её manager_id должен быть Казначеев,
+    // 7527496053871281461) -- всю цепочку сразу, раз уж мы её знаем по карточкам.
+    var kolesnikovaRow, solovievaRow, kaznacheevRow;
+    kolesnikovaRow = ArrayOptFind(rows, "String(This.id) == '6555406089169669479'");
+    if (kolesnikovaRow != undefined)
+    {
+        alert("4. Колесникова: manager_id=[" + kolesnikovaRow.manager_id + "] (ОЖИДАЕМ 7595032916280367128 -- Соловьева)");
+    }
+    solovievaRow = ArrayOptFind(rows, "String(This.id) == '7595032916280367128'");
+    if (solovievaRow != undefined)
+    {
+        alert("5. Соловьева: manager_id=[" + solovievaRow.manager_id + "] (ОЖИДАЕМ 7527496053871281461 -- Казначеев)");
+    }
+    kaznacheevRow = ArrayOptFind(rows, "String(This.id) == '7527496053871281461'");
+    if (kaznacheevRow != undefined)
+    {
+        alert("6. Казначеев: manager_id=[" + kaznacheevRow.manager_id + "] (ОЖИДАЕМ 7527496053871281461 -- САМ НА СЕБЯ, маркер вершины иерархии)");
+    }
+
+    // Сколько сотрудников вообще НЕ имеют is_native=''true'' записи (manager_id пустой) --
+    // если таких много, это тоже важно знать заранее (например, новые сотрудники без
+    // назначенного руководителя, или сами руководители верхнего уровня).
+    var iEmpty, iFilled;
+    iEmpty = 0;
+    iFilled = 0;
+    for (i = 0; i < ArrayCount(rows); i++)
+    {
+        if (rows[i].manager_id == undefined || String(rows[i].manager_id) == "")
         {
-            row = rows1[0];
-            alert("3.1. Длина сырого XML: " + StrLen(String(row.raw_func_managers)) + " символов.");
-            // Печатаем частями по 900 символов -- на случай, если у alert()/LogEvent()
-            // есть ограничение на длину одного сообщения (лучше подстраховаться, чем
-            // потерять хвост важного XML).
-            var sRaw, iLen, iPos;
-            sRaw = String(row.raw_func_managers);
-            iLen = StrLen(sRaw);
-            iPos = 0;
-            while (iPos < iLen)
-            {
-                alert("3.1.RAW[" + iPos + "]: " + StrRangePos(sRaw, iPos, (iPos + 900 < iLen ? iPos + 900 : iLen)));
-                iPos = iPos + 900;
-            }
+            iEmpty = iEmpty + 1;
         }
         else
         {
-            alert("3.1. ОШИБКА: строка Рамиля НЕ найдена (или id не совпал).");
+            iFilled = iFilled + 1;
         }
     }
-    catch (_ex1)
-    {
-        alert("2.1. Тест 1 (сырой XML) КИНУЛ ОШИБКУ: " + ExtractUserError(_ex1));
-    }
+    alert("7. Итог: с заполненным manager_id -- " + iFilled + "; БЕЗ manager_id (пусто) -- " + iEmpty + " (из " + ArrayCount(rows) + ").");
 
-    // -----------------------------------------------------------------
-    // Тест 2: позиционный предикат (без сравнения по значению поля).
-    // -----------------------------------------------------------------
-    sqlText2 = "";
-    sqlText2 = sqlText2 + "select cs.id,\r\n";
-    sqlText2 = sqlText2 + "       c.data.value('(*/func_managers/func_manager[3]/person_id)[1]', 'varchar(max)') as manager_id_pos3\r\n";
-    sqlText2 = sqlText2 + "from collaborators cs\r\n";
-    sqlText2 = sqlText2 + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText2 = sqlText2 + "where cs.id = 7311507899656113337";
-
-    try
-    {
-        rows2 = ArraySelectAll(XQuery("sql:" + sqlText2));
-        alert("2.2. Тест 2 (позиционный предикат [3]) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows2));
-        if (ArrayCount(rows2) > 0)
-        {
-            alert("3.2. manager_id_pos3=[" + rows2[0].manager_id_pos3 + "] (ОЖИДАЕМ 6555406089169669479, если позиционный предикат работает и 3-я запись в документе -- Колесникова is_native=1)");
-        }
-        else
-        {
-            alert("3.2. ОШИБКА: 0 строк -- значит позиционный предикат ТОЖЕ ломает запрос, дело не в сравнении конкретного поля.");
-        }
-    }
-    catch (_ex2)
-    {
-        alert("2.2. Тест 2 (позиционный предикат) КИНУЛ ОШИБКУ: " + ExtractUserError(_ex2));
-    }
-
-    RESULT = [];
-    alert("4. КОНЕЦ раунда 4.");
+    RESULT = rows;
+    alert("8. КОНЕЦ раунда 5. RESULT = все строки, для просмотра в виджете если понадобится.");
 }
 catch (_ex)
 {
     RESULT = [];
-    alert("ОШИБКА ВЕРХНЕГО УРОВНЯ: " + ExtractUserError(_ex));
+    alert("ОШИБКА: " + ExtractUserError(_ex));
 }
