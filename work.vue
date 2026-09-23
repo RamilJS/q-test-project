@@ -1,4 +1,4 @@
-sLogName = 'HREDU_182_TEST_manager_sql_round6_23092026';
+sLogName = 'HREDU_182_TEST_manager_sql';
 EnableLog(sLogName, true);
 function alert(sInputObj)
 {
