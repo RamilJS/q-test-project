@@ -1,4 +1,4 @@
-sLogName = 'HREDU_182_TEST_manager_sql';
+sLogName = 'HREDU_182_TEST_manager_sql_round4_23092026';
 EnableLog(sLogName, true);
 function alert(sInputObj)
 {
@@ -6,106 +6,122 @@ function alert(sInputObj)
     return sInputObj;
 }
 
+// =====================================================================
+// ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ФАЙЛ, РАУНД 4 (23.09.2026) -- НЕ для продакшена.
+// Продолжение _round2.js / _round3.js -- см. историю там же.
+//
+// РЕЗУЛЬТАТ РАУНДА 3 (реальный тест): предикат ломает запрос ДАЖЕ когда сужаем WHERE
+// до 4 точно "хороших" сотрудников (Тест 1 -- 0 строк), И ДАЖЕ через .exist() вместо
+// .value() (Тест 2 -- тоже 0 строк на ВСЮ таблицу). При этом .exist() БЕЗ предиката
+// (Тест 3) подтвердил: у ВСЕХ 2312 активных сотрудников func_managers/func_manager
+// точно есть. Вывод: дело НЕ в "плохих данных" у какого-то одного сотрудника из 2312 --
+// сам ПРЕДИКАТ (что по is_native, что по boss_type_id, в любом стиле кавычек) ломает
+// запрос УНИВЕРСАЛЬНО, даже на заведомо чистых записях.
+//
+// НОВАЯ ГИПОТЕЗА (РАУНД 4): в этом тикете уже был похожий сюрприз с группой УОРиАП --
+// то, что ПОКАЗЫВАЕТСЯ при экспорте/просмотре документа (например id как "0x...."), и
+// то, что РЕАЛЬНО лежит в СЫРОЙ XML в БД -- РАЗНЫЕ ПРЕДСТАВЛЕНИЯ. Вполне возможно, что
+// func_managers -- это ВЫЧИСЛЯЕМЫЙ/РЕЗОЛВЛЕННЫЙ блок (данные оргструктуры/иерархии,
+// которые вычисляются на лету при просмотре карточки), и его РЕАЛЬНАЯ форма в сыром
+// XML колонки c.data (то, что мы полностью КОНТРОЛИРУЕМ через SQL) может ОТЛИЧАТЬСЯ от
+// того, что мы видели при экспорте -- например is_native/boss_type_id могут быть НЕ
+// дочерними элементами, а АТРИБУТАМИ (func_manager is_native="1" вместо
+// <func_manager><is_native>1</is_native>), или называться иначе, или иметь другую
+// вложенность. Раз предикат ПО ЛЮБОМУ полю падает одинаково -- логично посмотреть
+// НАПРЯМУЮ, что реально лежит в сырой XML, а не гадать дальше вслепую очередным
+// вариантом предиката.
+//
+// ЧТО ДЕЛАЕТ ЭТОТ ФАЙЛ:
+//   Тест 1 -- .query() вместо .value()/.exist(): достаёт СЫРОЙ XML-фрагмент
+//             func_managers ЦЕЛИКОМ (как текст, CAST в nvarchar(max)) для ОДНОГО
+//             known-good сотрудника (id Рамиля) -- покажет РЕАЛЬНУЮ структуру со всеми
+//             тегами/атрибутами, как она есть в БД, без каких-либо предположений.
+//   Тест 2 -- позиционный предикат func_manager[3] (БЕЗ сравнения по значению поля,
+//             просто "третий по счёту func_manager") -- если ЭТО сработает, а
+//             предикаты по значению поля (is_native=...) нет -- значит дело именно в
+//             сравнении конкретных полей (например атрибут вместо элемента), а не в
+//             самой возможности использовать [] на func_manager. Если И ЭТО не
+//             сработает -- дело глубже, в самой возможности предиката на этом узле.
+// =====================================================================
 
 RESULT = [];
 try
 {
-    var sqlText1, sqlText2, sqlText3, rows1, rows2, rows3, row, i;
+    var sqlText1, sqlText2, rows1, rows2, row;
 
-    alert("1. НАЧАЛО раунда 3.");
+    alert("1. НАЧАЛО раунда 4.");
 
     // -----------------------------------------------------------------
-    // Тест 1: предикат is_native=''1'', но только на 4 заведомо "хороших" id.
+    // Тест 1: сырой XML func_managers как текст, для Рамиля.
     // -----------------------------------------------------------------
     sqlText1 = "";
     sqlText1 = sqlText1 + "select cs.id,\r\n";
-    sqlText1 = sqlText1 + "       c.data.value('(*/func_managers/func_manager[is_native=''1'']/person_id)[1]', 'varchar(max)') as manager_id\r\n";
+    sqlText1 = sqlText1 + "       cast(c.data.query('*/func_managers') as nvarchar(max)) as raw_func_managers\r\n";
     sqlText1 = sqlText1 + "from collaborators cs\r\n";
     sqlText1 = sqlText1 + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText1 = sqlText1 + "where cs.id in (7311507899656113337, 6555406089169669479, 7595032916280367128, 7527496053871281461)";
+    sqlText1 = sqlText1 + "where cs.id = 7311507899656113337";
 
     try
     {
         rows1 = ArraySelectAll(XQuery("sql:" + sqlText1));
-        alert("2.1. Тест 1 (сужено до 4 id) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows1));
-        for (i = 0; i < ArrayCount(rows1); i++)
+        alert("2.1. Тест 1 (сырой XML func_managers) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows1));
+        if (ArrayCount(rows1) > 0)
         {
-            alert("3.1." + i + ". id=" + rows1[i].id + " manager_id=[" + rows1[i].manager_id + "]");
+            row = rows1[0];
+            alert("3.1. Длина сырого XML: " + StrLen(String(row.raw_func_managers)) + " символов.");
+            // Печатаем частями по 900 символов -- на случай, если у alert()/LogEvent()
+            // есть ограничение на длину одного сообщения (лучше подстраховаться, чем
+            // потерять хвост важного XML).
+            var sRaw, iLen, iPos;
+            sRaw = String(row.raw_func_managers);
+            iLen = StrLen(sRaw);
+            iPos = 0;
+            while (iPos < iLen)
+            {
+                alert("3.1.RAW[" + iPos + "]: " + StrRangePos(sRaw, iPos, (iPos + 900 < iLen ? iPos + 900 : iLen)));
+                iPos = iPos + 900;
+            }
+        }
+        else
+        {
+            alert("3.1. ОШИБКА: строка Рамиля НЕ найдена (или id не совпал).");
         }
     }
     catch (_ex1)
     {
-        alert("2.1. Тест 1 КИНУЛ ОШИБКУ: " + ExtractUserError(_ex1));
+        alert("2.1. Тест 1 (сырой XML) КИНУЛ ОШИБКУ: " + ExtractUserError(_ex1));
     }
 
     // -----------------------------------------------------------------
-    // Тест 2: .exist() с тем же предикатом, на ВСЕЙ таблице -- просто булево флаг,
-    // без value()/varchar. Считаем, у скольких сотрудников есть is_native=1 запись.
+    // Тест 2: позиционный предикат (без сравнения по значению поля).
     // -----------------------------------------------------------------
     sqlText2 = "";
     sqlText2 = sqlText2 + "select cs.id,\r\n";
-    sqlText2 = sqlText2 + "       c.data.exist('*/func_managers/func_manager[is_native=''1'']') as has_native\r\n";
+    sqlText2 = sqlText2 + "       c.data.value('(*/func_managers/func_manager[3]/person_id)[1]', 'varchar(max)') as manager_id_pos3\r\n";
     sqlText2 = sqlText2 + "from collaborators cs\r\n";
     sqlText2 = sqlText2 + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText2 = sqlText2 + "where cs.is_dismiss != 1";
+    sqlText2 = sqlText2 + "where cs.id = 7311507899656113337";
 
     try
     {
         rows2 = ArraySelectAll(XQuery("sql:" + sqlText2));
-        alert("2.2. Тест 2 (.exist() с предикатом, вся таблица) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows2));
-        row = ArrayOptFind(rows2, "String(This.id) == '7311507899656113337'");
-        if (row != undefined)
+        alert("2.2. Тест 2 (позиционный предикат [3]) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows2));
+        if (ArrayCount(rows2) > 0)
         {
-            alert("3.2. Рамиль: has_native=[" + row.has_native + "]");
+            alert("3.2. manager_id_pos3=[" + rows2[0].manager_id_pos3 + "] (ОЖИДАЕМ 6555406089169669479, если позиционный предикат работает и 3-я запись в документе -- Колесникова is_native=1)");
+        }
+        else
+        {
+            alert("3.2. ОШИБКА: 0 строк -- значит позиционный предикат ТОЖЕ ломает запрос, дело не в сравнении конкретного поля.");
         }
     }
     catch (_ex2)
     {
-        alert("2.2. Тест 2 (.exist() с предикатом) КИНУЛ ОШИБКУ: " + ExtractUserError(_ex2));
+        alert("2.2. Тест 2 (позиционный предикат) КИНУЛ ОШИБКУ: " + ExtractUserError(_ex2));
     }
 
-    // -----------------------------------------------------------------
-    // Тест 3: .exist() БЕЗ предиката -- просто "есть ли у сотрудника func_managers
-    // вообще". Если тут меньше 2312 -- вот источник "плохих" строк.
-    // -----------------------------------------------------------------
-    sqlText3 = "";
-    sqlText3 = sqlText3 + "select cs.id,\r\n";
-    sqlText3 = sqlText3 + "       c.data.exist('*/func_managers/func_manager') as has_any_manager\r\n";
-    sqlText3 = sqlText3 + "from collaborators cs\r\n";
-    sqlText3 = sqlText3 + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText3 = sqlText3 + "where cs.is_dismiss != 1";
-
-    try
-    {
-        rows3 = ArraySelectAll(XQuery("sql:" + sqlText3));
-        alert("2.3. Тест 3 (.exist() без предиката) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows3));
-        var iWithout, iWith;
-        iWithout = 0;
-        iWith = 0;
-        for (i = 0; i < ArrayCount(rows3); i++)
-        {
-            if (String(rows3[i].has_any_manager) == "0" || rows3[i].has_any_manager == undefined)
-            {
-                iWithout = iWithout + 1;
-                if (iWithout <= 5)
-                {
-                    alert("3.3. БЕЗ func_manager вообще: id=" + rows3[i].id);
-                }
-            }
-            else
-            {
-                iWith = iWith + 1;
-            }
-        }
-        alert("4. Тест 3 итог: с func_manager -- " + iWith + "; БЕЗ func_manager вообще -- " + iWithout + " (из " + ArrayCount(rows3) + " активных).");
-    }
-    catch (_ex3)
-    {
-        alert("2.3. Тест 3 (.exist() без предиката) КИНУЛ ОШИБКУ: " + ExtractUserError(_ex3));
-    }
-
-    RESULT = (rows1 != undefined ? rows1 : []);
-    alert("5. КОНЕЦ раунда 3.");
+    RESULT = [];
+    alert("4. КОНЕЦ раунда 4.");
 }
 catch (_ex)
 {
