@@ -6,108 +6,106 @@ function alert(sInputObj)
     return sInputObj;
 }
 
-// =====================================================================
-// ВРЕМЕННЫЙ ДИАГНОСТИЧЕСКИЙ ФАЙЛ, РАУНД 2 (23.09.2026) -- НЕ для продакшена, удалить
-// после теста. Продолжение HREDU-182_test_manager_sql.js -- см. историю там же.
-//
-// РЕЗУЛЬТАТ РАУНДА 1 (реальный тест, 23.09.2026):
-//   - Контрольный запрос БЕЗ предиката (func_manager БЕЗ [is_native=...]) -- ОТРАБОТАЛ,
-//     2312 строк. Для Рамиля вернул manager_id=6808456539733239590, что в hex -- ровно
-//     0x5E7C7F266F7C2726 (Щапов, его ПЕРВАЯ, is_native=0, функциональная запись) --
-//     подтверждает и порядок записей в документе, и то, что PERSON_ID В ОТВЕТЕ SQL
-//     ПРИХОДИТ ОБЫЧНЫМ ДЕСЯТИЧНЫМ ЧИСЛОМ (а НЕ строкой "0x..." как в самом XML при
-//     экспорте/просмотре документа) -- конвертация hex->десятичное НЕ понадобится.
-//   - Оба варианта С ПРЕДИКАТОМ ([is_native=1] без кавычек, [is_native="1"] в двойных
-//     кавычках) -- вернули ВООБЩЕ НОЛЬ СТРОК на весь запрос (не просто NULL в поле --
-//     именно 0 строк, при том же JOIN/WHERE, что в контроле дал 2312) -- значит запрос
-//     ПАДАЕТ ЦЕЛИКОМ на уровне SQL Server из-за синтаксиса предиката, и эта ошибка
-//     почему-то не долетает до нашего try/catch как исключение (просто пустой массив).
-//
-// ГИПОТЕЗА РАУНДА 2: в РАБОЧЕМ предикате в этом же файле (GetCityRows() и др.,
-// custom_elem[name=''sity'']) используются ДВОЙНЫЕ ОДИНАРНЫЕ кавычки (T-SQL-
-// экранирование одинарной кавычки ВНУТРИ строкового литерала) -- а не "без кавычек" и
-// не обычные двойные кавычки, которые пробовались в раунде 1. Вариант Г ниже -- точная
-// копия ЭТОГО же проверенного стиля, просто сравниваем is_native со строкой ''1''
-// вместо name со строкой ''sity''.
-//
-// ЗАПАСНОЙ ВАРИАНТ (Вариант Д): если is_native всё равно не заработает -- у ВСЕХ 4
-// сотрудников по цепочке (Рамиль, Колесникова, Соловьева, Казначеев) поле boss_type_id
-// РОВНО У is_native=1 записи было ОДНИМ И ТЕМ ЖЕ значением -- 0x55555555555555AA
-// (похоже на служебную "sentinel"-константу платформы для типа "непосредственный
-// руководитель"). Пробуем ту же ''..''-кавычку, но сравнение по boss_type_id вместо
-// is_native -- альтернативный способ найти ТУ ЖЕ запись, если is_native почему-то не
-// читается.
-// =====================================================================
 
 RESULT = [];
 try
 {
-    var sqlTextD, sqlTextE, rowsD, rowsE, ramilRowD, ramilRowE;
+    var sqlText1, sqlText2, sqlText3, rows1, rows2, rows3, row, i;
 
-    alert("1. НАЧАЛО раунда 2.");
+    alert("1. НАЧАЛО раунда 3.");
 
     // -----------------------------------------------------------------
-    // Вариант Г: is_native как СТРОКА, в ДВОЙНЫХ ОДИНАРНЫХ кавычках -- точная копия
-    // проверенного стиля из GetCityRows()/GetMacroregionRows()/GetMirCodeRows().
+    // Тест 1: предикат is_native=''1'', но только на 4 заведомо "хороших" id.
     // -----------------------------------------------------------------
-    sqlTextD = "";
-    sqlTextD = sqlTextD + "select cs.id,\r\n";
-    sqlTextD = sqlTextD + "       c.data.value('(*/func_managers/func_manager[is_native=''1'']/person_id)[1]', 'varchar(max)') as manager_id\r\n";
-    sqlTextD = sqlTextD + "from collaborators cs\r\n";
-    sqlTextD = sqlTextD + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlTextD = sqlTextD + "where cs.is_dismiss != 1";
+    sqlText1 = "";
+    sqlText1 = sqlText1 + "select cs.id,\r\n";
+    sqlText1 = sqlText1 + "       c.data.value('(*/func_managers/func_manager[is_native=''1'']/person_id)[1]', 'varchar(max)') as manager_id\r\n";
+    sqlText1 = sqlText1 + "from collaborators cs\r\n";
+    sqlText1 = sqlText1 + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText1 = sqlText1 + "where cs.id in (7311507899656113337, 6555406089169669479, 7595032916280367128, 7527496053871281461)";
 
     try
     {
-        rowsD = ArraySelectAll(XQuery("sql:" + sqlTextD));
-        alert("2D. Вариант Г (''1'', двойные одинарные кавычки) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rowsD));
-        ramilRowD = ArrayOptFind(rowsD, "String(This.id) == '7311507899656113337'");
-        if (ramilRowD != undefined)
+        rows1 = ArraySelectAll(XQuery("sql:" + sqlText1));
+        alert("2.1. Тест 1 (сужено до 4 id) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows1));
+        for (i = 0; i < ArrayCount(rows1); i++)
         {
-            alert("3D. Строка Рамиля (Вариант Г): manager_id=[" + ramilRowD.manager_id + "] (ОЖИДАЕМ 6555406089169669479 -- это Колесникова, дес. от 0x5AF97B1B27640D67)");
-        }
-        else
-        {
-            alert("3D. ОШИБКА: строка Рамиля НЕ найдена в результате Варианта Г.");
+            alert("3.1." + i + ". id=" + rows1[i].id + " manager_id=[" + rows1[i].manager_id + "]");
         }
     }
-    catch (_exD)
+    catch (_ex1)
     {
-        alert("2D. Вариант Г КИНУЛ ОШИБКУ: " + ExtractUserError(_exD));
+        alert("2.1. Тест 1 КИНУЛ ОШИБКУ: " + ExtractUserError(_ex1));
     }
 
     // -----------------------------------------------------------------
-    // Вариант Д: ЗАПАСНОЙ -- сравнение по boss_type_id (той же ''..''-кавычкой), а не
-    // по is_native, на случай если is_native всё равно не сработает.
+    // Тест 2: .exist() с тем же предикатом, на ВСЕЙ таблице -- просто булево флаг,
+    // без value()/varchar. Считаем, у скольких сотрудников есть is_native=1 запись.
     // -----------------------------------------------------------------
-    sqlTextE = "";
-    sqlTextE = sqlTextE + "select cs.id,\r\n";
-    sqlTextE = sqlTextE + "       c.data.value('(*/func_managers/func_manager[boss_type_id=''0x55555555555555AA'']/person_id)[1]', 'varchar(max)') as manager_id\r\n";
-    sqlTextE = sqlTextE + "from collaborators cs\r\n";
-    sqlTextE = sqlTextE + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlTextE = sqlTextE + "where cs.is_dismiss != 1";
+    sqlText2 = "";
+    sqlText2 = sqlText2 + "select cs.id,\r\n";
+    sqlText2 = sqlText2 + "       c.data.exist('*/func_managers/func_manager[is_native=''1'']') as has_native\r\n";
+    sqlText2 = sqlText2 + "from collaborators cs\r\n";
+    sqlText2 = sqlText2 + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText2 = sqlText2 + "where cs.is_dismiss != 1";
 
     try
     {
-        rowsE = ArraySelectAll(XQuery("sql:" + sqlTextE));
-        alert("2E. Вариант Д (boss_type_id) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rowsE));
-        ramilRowE = ArrayOptFind(rowsE, "String(This.id) == '7311507899656113337'");
-        if (ramilRowE != undefined)
+        rows2 = ArraySelectAll(XQuery("sql:" + sqlText2));
+        alert("2.2. Тест 2 (.exist() с предикатом, вся таблица) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows2));
+        row = ArrayOptFind(rows2, "String(This.id) == '7311507899656113337'");
+        if (row != undefined)
         {
-            alert("3E. Строка Рамиля (Вариант Д): manager_id=[" + ramilRowE.manager_id + "] (ОЖИДАЕМ 6555406089169669479 -- Колесникова)");
-        }
-        else
-        {
-            alert("3E. ОШИБКА: строка Рамиля НЕ найдена в результате Варианта Д.");
+            alert("3.2. Рамиль: has_native=[" + row.has_native + "]");
         }
     }
-    catch (_exE)
+    catch (_ex2)
     {
-        alert("2E. Вариант Д КИНУЛ ОШИБКУ: " + ExtractUserError(_exE));
+        alert("2.2. Тест 2 (.exist() с предикатом) КИНУЛ ОШИБКУ: " + ExtractUserError(_ex2));
     }
 
-    RESULT = (rowsD != undefined ? rowsD : (rowsE != undefined ? rowsE : []));
-    alert("4. КОНЕЦ раунда 2. RESULT = результат первого удавшегося варианта (" + ArrayCount(RESULT) + " строк).");
+    // -----------------------------------------------------------------
+    // Тест 3: .exist() БЕЗ предиката -- просто "есть ли у сотрудника func_managers
+    // вообще". Если тут меньше 2312 -- вот источник "плохих" строк.
+    // -----------------------------------------------------------------
+    sqlText3 = "";
+    sqlText3 = sqlText3 + "select cs.id,\r\n";
+    sqlText3 = sqlText3 + "       c.data.exist('*/func_managers/func_manager') as has_any_manager\r\n";
+    sqlText3 = sqlText3 + "from collaborators cs\r\n";
+    sqlText3 = sqlText3 + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText3 = sqlText3 + "where cs.is_dismiss != 1";
+
+    try
+    {
+        rows3 = ArraySelectAll(XQuery("sql:" + sqlText3));
+        alert("2.3. Тест 3 (.exist() без предиката) ВЫПОЛНИЛСЯ. Строк: " + ArrayCount(rows3));
+        var iWithout, iWith;
+        iWithout = 0;
+        iWith = 0;
+        for (i = 0; i < ArrayCount(rows3); i++)
+        {
+            if (String(rows3[i].has_any_manager) == "0" || rows3[i].has_any_manager == undefined)
+            {
+                iWithout = iWithout + 1;
+                if (iWithout <= 5)
+                {
+                    alert("3.3. БЕЗ func_manager вообще: id=" + rows3[i].id);
+                }
+            }
+            else
+            {
+                iWith = iWith + 1;
+            }
+        }
+        alert("4. Тест 3 итог: с func_manager -- " + iWith + "; БЕЗ func_manager вообще -- " + iWithout + " (из " + ArrayCount(rows3) + " активных).");
+    }
+    catch (_ex3)
+    {
+        alert("2.3. Тест 3 (.exist() без предиката) КИНУЛ ОШИБКУ: " + ExtractUserError(_ex3));
+    }
+
+    RESULT = (rows1 != undefined ? rows1 : []);
+    alert("5. КОНЕЦ раунда 3.");
 }
 catch (_ex)
 {
