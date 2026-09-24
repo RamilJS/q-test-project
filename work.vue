@@ -1,4 +1,3 @@
-
 EnableLog('matrix_filters_7685325909044809318', true);
 function alert(_string) {
     LogEvent('matrix_filters_7685325909044809318', _string);
@@ -317,23 +316,35 @@ function RemoveQueryParam(sUrl, sParamName)
 UORIAP_GROUP_ID = "7687978602560891542";
 UORIAP_GROUP_XQUERY_TYPE = "groups";
 
+// ИСПРАВЛЕНО (24.09.2026, реальный тест): изначально здесь читалась curUserID (заглавная
+// D) как "голая" глобальная переменная -- по образцу 3 файлов-примеров с query_qual. На
+// реальном тесте выяснилось, что это НЕ тот же механизм, что в отчёте
+// (HREDU-182_procent_obuchennyh.js): там используется curUserId (строчная d) как
+// LPE-параметр, который нужно ЯВНО привязать в редакторе страниц к этому конкретному
+// удалённому действию/виджету -- ровно так же, как это уже сделано для выборки отчёта. По
+// прямому указанию пользователя используем ТОЧНО ТУ ЖЕ переменную и тот же приём, что уже
+// подтверждён рабочим в отчёте: curUserId, напрямую через try/catch, без typeof.
+//
+// ВАЖНО: чтобы это заработало, curUserId должен быть привязан как LPE-параметр в редакторе
+// страниц для ЭТОГО удалённого действия (страница "Процент обученных" / модалка фильтров) --
+// так же, как это уже сделано для выборки отчёта.
 function GetCurUserIdSafe()
 {
     var sRaw;
     try
     {
-        sRaw = String(curUserID);
-        alert("GetCurUserIdSafe(). curUserID: [" + sRaw + "]");
+        sRaw = String(curUserId);
+        alert("GetCurUserIdSafe(). curUserId: [" + sRaw + "]");
         if (sRaw != "" && sRaw != "0" && sRaw != "undefined" && sRaw != "null")
         {
-            return curUserID;
+            return curUserId;
         }
     }
     catch (_exDirect)
     {
-        alert("GetCurUserIdSafe(). curUserID недоступна в этом удалённом действии -- ошибка: " + ExtractUserError(_exDirect));
+        alert("GetCurUserIdSafe(). curUserId недоступна (параметр не привязан в LPE на этой странице/копии виджета?) -- ошибка: " + ExtractUserError(_exDirect));
     }
-    alert("GetCurUserIdSafe(). curUserID не дала валидного значения -- возвращаем 0.");
+    alert("GetCurUserIdSafe(). curUserId не дала валидного значения -- возвращаем 0.");
     return 0;
 }
 
@@ -642,38 +653,41 @@ try
     // fail-safe: показываем ПУСТОЙ список матриц (sentinel id=0, никогда не совпадёт ни с
     // одной реальной матрицей), пока явно не докажем, что пользователю можно показать
     // больше (УОРиАП -- вообще без ограничений, руководитель -- список по мир-кодам).
-    sMatrixQueryQual = "MatchSome($elem/id,(0))";
+    // ИСПРАВЛЕНО (24.09.2026, реальный тест): раньше тут была явная проверка
+    // "if (iCurUserId > 0)" перед вызовом IsUorApMember()/BFS -- на реальном тесте
+    // руководитель увидел ВСЕ матрицы без ограничений, то есть sMatrixQueryQual остался
+    // пустым "" (ветка УОРиАП), а не sentinel -- при том что curUserId в логе печатался
+    // корректно. Сравнение "iCurUserId > 0" на таком огромном id (19 цифр) в этом движке
+    // ненадёжно -- та же категория проблем, что уже задокументирована в отчёте про
+    // Int()/OptInt() на LPE-параметрах. УБРАНО полностью, по образцу уже проверенного гейта
+    // в отчёте (HREDU-182_procent_obuchennyh.js): там тоже НЕТ явной проверки "> 0" --
+    // IsUorApMember(0) корректно вернёт false, а BFS от несуществующего id=0 корректно даст
+    // 0 подчинённых, и sMatrixQueryQual естественным образом останется sentinel-заглушкой
+    // "0" -- то есть fail-safe работает сам по себе, без отдельной ветки на невалидный id.
     iCurUserId = GetCurUserIdSafe();
-    if (iCurUserId > 0)
+    if (IsUorApMember(iCurUserId))
     {
-        if (IsUorApMember(iCurUserId))
-        {
-            DebugAlert("3d. Пользователь id=" + iCurUserId + " -- УОРиАП, пикер матриц БЕЗ ограничений.");
-            sMatrixQueryQual = "";
-        }
-        else
-        {
-            managerRows = GetManagerIdRows();
-            sortedByManagerRows = SortRowsByManagerId(managerRows);
-            subordinateIds = GetManagerHierarchySubordinateIds(sortedByManagerRows, iCurUserId);
-            DebugAlert("3d. Пользователь id=" + iCurUserId + " -- НЕ УОРиАП, подчинённых по всей цепочке вниз: " + ArrayCount(subordinateIds));
-
-            relevantMirCodes = GetRelevantMirCodes(iCurUserId, subordinateIds);
-            DebugAlert("3e. Мир-коды (свой + подчинённых), всего: " + ArrayCount(relevantMirCodes) + " -- [" + ArrayMerge(relevantMirCodes, "This", ", ") + "]");
-
-            matrixIds = GetMatrixIdsByMirCodes(relevantMirCodes);
-            DebugAlert("3f. Матриц, подходящих под эти мир-коды: " + ArrayCount(matrixIds) + " -- [" + ArrayMerge(matrixIds, "This", ", ") + "]");
-
-            if (ArrayCount(matrixIds) > 0)
-            {
-                sMatrixQueryQual = "MatchSome($elem/id,(" + ArrayMerge(matrixIds, "This", ",") + "))";
-            }
-            // иначе -- matrixIds пуст, sMatrixQueryQual остаётся sentinel "0" (пикер пуст).
-        }
+        DebugAlert("3d. Пользователь id=" + iCurUserId + " -- УОРиАП, пикер матриц БЕЗ ограничений.");
+        sMatrixQueryQual = "";
     }
     else
     {
-        DebugAlert("3d. curUserID не определён -- fail-safe, пикер матриц пуст.");
+        managerRows = GetManagerIdRows();
+        sortedByManagerRows = SortRowsByManagerId(managerRows);
+        subordinateIds = GetManagerHierarchySubordinateIds(sortedByManagerRows, iCurUserId);
+        DebugAlert("3d. Пользователь id=" + iCurUserId + " -- НЕ УОРиАП, подчинённых по всей цепочке вниз: " + ArrayCount(subordinateIds));
+
+        relevantMirCodes = GetRelevantMirCodes(iCurUserId, subordinateIds);
+        DebugAlert("3e. Мир-коды (свой + подчинённых), всего: " + ArrayCount(relevantMirCodes) + " -- [" + ArrayMerge(relevantMirCodes, "This", ", ") + "]");
+
+        matrixIds = GetMatrixIdsByMirCodes(relevantMirCodes);
+        DebugAlert("3f. Матриц, подходящих под эти мир-коды: " + ArrayCount(matrixIds) + " -- [" + ArrayMerge(matrixIds, "This", ", ") + "]");
+
+        if (ArrayCount(matrixIds) > 0)
+        {
+            sMatrixQueryQual = "MatchSome($elem/id,(" + ArrayMerge(matrixIds, "This", ",") + "))";
+        }
+        // иначе -- matrixIds пуст, sMatrixQueryQual остаётся sentinel "0" (пикер пуст).
     }
     DebugAlert("3g. Итоговый query_qual для matrix_id: [" + sMatrixQueryQual + "]");
 
