@@ -699,7 +699,15 @@ try
             type: "foreign_elem",
             value: sDefaultMatrixID,
             mandatory: true,
-            multiple: false,
+            // ВРЕМЕННО, ДИАГНОСТИКА (24.09.2026) -- было multiple: false. На реальном
+            // тесте query_qual НЕ ограничил пикер при multiple: false (руководитель видел
+            // все матрицы), а во всех 3 рабочих примерах с query_qual поля были
+            // multiple: true. Ставим true ТОЛЬКО чтобы проверить гипотезу "одиночный
+            // foreign_elem открывает другой виджет-проводник, который игнорирует
+            // query_qual". После теста вернуть multiple: false, если гипотеза не
+            // подтвердится (или придумать другое решение для одиночного пикера, если
+            // подтвердится).
+            multiple: true,
             catalog: "cc_learning_matrice",
             // ИЗМЕНЕНО (24.09.2026) -- см. "ФИЛЬТРАЦИЯ ПИКЕРА..." в шапке файла. Было "".
             query_qual: sMatrixQueryQual
