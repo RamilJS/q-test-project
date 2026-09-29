@@ -340,11 +340,7 @@ function GetQueryParam(sUrl, sParamName)
  * @param {string} sValue
  * @returns {boolean}
  */
-function IsActiveText(sValue)
-{
-    try { return tools_web.is_true(sValue); }
-    catch (_ex) { return (String(sValue) == "true" || String(sValue) == "1"); }
-}
+
 
 /*
  * ДОБАВЛЕНО (29.09.2026, HREDU-237). Массовое чтение самих модульных программ
@@ -355,27 +351,7 @@ function IsActiveText(sValue)
  *                            f_subdivision_names, f_subdivision_names_exclude, f_subdivision_child,
  *                            f_collaborator_statuses_exclude}.
  */
-function GetCompoundProgramRows()
-{
-    var sqlText;
-    sqlText = "";
-    sqlText = sqlText + "select cs.id,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/name)[1]', 'varchar(max)') as name,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_matrix_active'']/value)[1]', 'varchar(max)') as f_matrix_active,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_position_names'']/value)[1]', 'varchar(max)') as f_position_names,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_position_names_exclude'']/value)[1]', 'varchar(max)') as f_position_names_exclude,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_code'']/value)[1]', 'varchar(max)') as f_mir_code,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_code_exclude'']/value)[1]', 'varchar(max)') as f_mir_code_exclude,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_org_names'']/value)[1]', 'varchar(max)') as f_org_names,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_org_names_exclude'']/value)[1]', 'varchar(max)') as f_org_names_exclude,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_subdivision_names'']/value)[1]', 'varchar(max)') as f_subdivision_names,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_subdivision_names_exclude'']/value)[1]', 'varchar(max)') as f_subdivision_names_exclude,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_subdivision_child'']/value)[1]', 'varchar(max)') as f_subdivision_child,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_collaborator_statuses_exclude'']/value)[1]', 'varchar(max)') as f_collaborator_statuses_exclude\r\n";
-    sqlText = sqlText + "from compound_programs cs\r\n";
-    sqlText = sqlText + "inner join compound_program c on c.id = cs.id";
-    return ArraySelectAll(XQuery("sql:" + sqlText));
-}
+
 
 /*
  * ДОБАВЛЕНО (29.09.2026, HREDU-237). Массовое чтение задач типа "Учебная программа"
@@ -383,22 +359,7 @@ function GetCompoundProgramRows()
  * Идентична версии из HREDU-182_procent_obuchennyh.js.
  * @returns {Object[]}   -   {matrix_id, object_id, education_method_id, ptype, delay_days, pname}.
  */
-function GetEducationMethodTaskRows()
-{
-    var sqlText;
-    sqlText = "";
-    sqlText = sqlText + "select cs.id as matrix_id,\r\n";
-    sqlText = sqlText + "       t.p.value('(object_id)[1]', 'bigint') as object_id,\r\n";
-    sqlText = sqlText + "       t.p.value('(education_method_id)[1]', 'bigint') as education_method_id,\r\n";
-    sqlText = sqlText + "       t.p.value('(type)[1]', 'varchar(50)') as ptype,\r\n";
-    sqlText = sqlText + "       t.p.value('(delay_days)[1]', 'int') as delay_days,\r\n";
-    sqlText = sqlText + "       t.p.value('(name)[1]', 'varchar(max)') as pname\r\n";
-    sqlText = sqlText + "from compound_programs cs\r\n";
-    sqlText = sqlText + "inner join compound_program c on c.id = cs.id\r\n";
-    sqlText = sqlText + "cross apply c.data.nodes('/*/programs/program') as t(p)\r\n";
-    sqlText = sqlText + "where t.p.value('(type)[1]', 'varchar(50)') = 'education_method'";
-    return ArraySelectAll(XQuery("sql:" + sqlText));
-}
+
 
 /*
 * ПЕРЕПИСАНО (29.09.2026, HREDU-237): раньше собирала programIds из elementRows (элементы
@@ -745,42 +706,14 @@ function CollaboratorHasMirCode(sortedMirCodeRows, collaboratorID, mirCodeFilter
  * Идентична версии из HREDU-182_procent_obuchennyh.js.
  * @returns {Object[]}   -   Массив {id, status}.
  */
-function GetStatusRows()
-{
-    var sqlText;
-    sqlText = "";
-    sqlText = sqlText + "select cs.id,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''CurrentState'']/value)[1]', 'varchar(max)') as status\r\n";
-    sqlText = sqlText + "from collaborators cs\r\n";
-    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
-    sqlText = sqlText + "where cs.is_dismiss != 1";
-    return ArraySelectAll(XQuery("sql:" + sqlText));
-}
+
 
 /*
  * ДОБАВЛЕНО (29.09.2026, HREDU-237). Матчинг "* текст *"/"текст*"/"*текст" БЕЗ regex --
  * идентична версии из HREDU-182_procent_obuchennyh.js (см. там же историю находок про
  * StrOptSubStrPos()).
  */
-function SplitByStar(sPattern)
-{
-    var parts, iLen, iStart, iPos;
-    parts = [];
-    iLen = StrLen(sPattern);
-    iStart = 0;
-    while (true)
-    {
-        iPos = StrOptSubStrPos(sPattern, "*", true, iStart);
-        if (iPos == undefined)
-        {
-            parts.push(StrRangePos(sPattern, iStart, iLen));
-            break;
-        }
-        parts.push(StrRangePos(sPattern, iStart, iPos));
-        iStart = iPos + 1;
-    }
-    return parts;
-}
+
 
 /*
  * @param {string} sPattern
@@ -790,27 +723,7 @@ function SplitByStar(sPattern)
  *                                    ИМЕННО true игнорирует регистр, обратное названию).
  * @returns {boolean}
  */
-function WildcardMatch(sPattern, sText, bIgnoreCase)
-{
-    var parts, i, sSeg, iTextLen, iSearchPos, iFoundPos, bLeadingStar, bTrailingStar;
-    if (sPattern == "") { return false; }
-    bLeadingStar = (StrRangePos(sPattern, 0, 1) == "*");
-    bTrailingStar = (StrRangePos(sPattern, StrLen(sPattern) - 1, StrLen(sPattern)) == "*");
-    parts = SplitByStar(sPattern);
-    iTextLen = StrLen(sText);
-    iSearchPos = 0;
-    for (i = 0; i < ArrayCount(parts); i++)
-    {
-        sSeg = parts[i];
-        if (sSeg == "") { continue; }
-        iFoundPos = StrOptSubStrPos(sText, sSeg, bIgnoreCase, iSearchPos);
-        if (iFoundPos == undefined) { return false; }
-        if (i == 0 && !bLeadingStar && iFoundPos != 0) { return false; }
-        iSearchPos = iFoundPos + StrLen(sSeg);
-    }
-    if (!bTrailingStar && iSearchPos != iTextLen) { return false; }
-    return true;
-}
+
 
 /*
  * Проверяет текст против списка паттернов, разделённых ";". true, если текст подходит ХОТЯ БЫ
@@ -820,17 +733,7 @@ function WildcardMatch(sPattern, sText, bIgnoreCase)
  * @param {boolean} bIgnoreCase
  * @returns {boolean}
  */
-function MatchAnySemicolonPattern(sPatternsList, sText, bIgnoreCase)
-{
-    var patterns, i;
-    if (sPatternsList == undefined || sPatternsList == "") { return false; }
-    patterns = ArraySelect(String(sPatternsList).split(";"), "This != ''");
-    for (i = 0; i < ArrayCount(patterns); i++)
-    {
-        if (WildcardMatch(patterns[i], sText, bIgnoreCase)) { return true; }
-    }
-    return false;
-}
+
 
 /*
  * Одна "положительная" ось аудитории (f_position_names/f_org_names/f_subdivision_names).
@@ -839,11 +742,7 @@ function MatchAnySemicolonPattern(sPatternsList, sText, bIgnoreCase)
  * @param {string} sSingleValue
  * @returns {boolean}
  */
-function AxisMatches(sPatternsList, sSingleValue)
-{
-    if (sPatternsList == undefined || String(sPatternsList) == "") { return true; }
-    return MatchAnySemicolonPattern(sPatternsList, sSingleValue, true);
-}
+
 
 /*
  * Ось-ИСКЛЮЧЕНИЕ (f_position_names_exclude и т.п.) -- ПУСТОЙ список = никого не исключаем.
@@ -851,11 +750,7 @@ function AxisMatches(sPatternsList, sSingleValue)
  * @param {string} sSingleValue
  * @returns {boolean}
  */
-function AxisExcludeMatches(sPatternsList, sSingleValue)
-{
-    if (sPatternsList == undefined || String(sPatternsList) == "") { return false; }
-    return MatchAnySemicolonPattern(sPatternsList, sSingleValue, true);
-}
+
 
 /*
  * Ось мир-кода -- у сотрудника МОЖЕТ БЫТЬ НЕСКОЛЬКО кодов (ExtractMirCodes()) -- совпадение,
@@ -864,27 +759,9 @@ function AxisExcludeMatches(sPatternsList, sSingleValue)
  * @param {string[]} employeeCodes
  * @returns {boolean}
  */
-function MirCodeAxisMatches(sPatternsList, employeeCodes)
-{
-    var i;
-    if (sPatternsList == undefined || String(sPatternsList) == "") { return true; }
-    for (i = 0; i < ArrayCount(employeeCodes); i++)
-    {
-        if (MatchAnySemicolonPattern(sPatternsList, employeeCodes[i], true)) { return true; }
-    }
-    return false;
-}
 
-function MirCodeAxisExcludeMatches(sPatternsList, employeeCodes)
-{
-    var i;
-    if (sPatternsList == undefined || String(sPatternsList) == "") { return false; }
-    for (i = 0; i < ArrayCount(employeeCodes); i++)
-    {
-        if (MatchAnySemicolonPattern(sPatternsList, employeeCodes[i], true)) { return true; }
-    }
-    return false;
-}
+
+
 
 /*
  * ГЛАВНАЯ функция аудитории HREDU-237 -- заменяет CollaboratorInProgramAudience() (УБРАНА).
