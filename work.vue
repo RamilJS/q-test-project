@@ -5,207 +5,31 @@ function alert(_string) {
 }
  
  
-// HREDU-183. ТЭП_общее_кол-во / ТЭП_план / ТЭП_факт / ТЭП_обязательно -- выборка для
-// Табличных данных. Один файл, четыре режима через параметр result_type -- по образцу
-// education_accept_event_card (там тоже один result_type переключает поведение одной
-// выборки). Построено на основе HREDU-181_vostok_polny_spisok_draft.js -- та же матрица/
-// программы/сотрудники/даты/фильтры, плюс новое: аудитория матрицы и разбиение по
-// результату (см. ниже).
-//
-// ТЗ (HREDU-183, полный текст прислан пользователем 10.09.2026):
-//   Общее кол-во сотрудников -- все, кто подходят под матрицу (должность + мир-код).
-//   План -- кол-во сотрудников которые подходят под матрицу и у кого уже наступил
-//     период прохождения тренинга.
-//   Факт -- кол-во сотрудников, прошедших тренинг (НЕ ЗАВИСИМО от условий матрицы).
-//   Обязательно к прохождению -- все, кто подходят под матрицу и при этом ещё не
-//     проходили тренинг.
-//   % обученных -- факт/план (уточнено с пользователем 10.09.2026 -- в тексте ТЗ
-//     написано "план/факт", но по смыслу метрики и по факту подтверждения это факт/план;
-//     сам % не входит в эту выборку -- это отдельный лёгкий расчёт для "Процент обученных",
-//     не список сотрудников).
-//
-// РЕШЕНИЯ, ПРИНЯТЫЕ С ПОЛЬЗОВАТЕЛЕМ (10.09.2026), ЧАСТИЧНО ПЕРЕСМОТРЕНЫ (17.09.2026,
-// HREDU-215 "Правки 1" -- см. ниже):
-//   1. Аудитория (должность + мир-код) -- РЕАЛИЗУЕМ. ИЗМЕНЕНО (17.09.2026, HREDU-215
-//      "Правки 1", по прямому указанию тим-лида пользователя -- "ошиблись в архитектуре"):
-//      РАНЬШЕ поля position_common_id/mir_code_id жили НА САМОЙ МАТРИЦЕ (cc_learning_matrice),
-//      аудитория была ОДНА на всю матрицу. ТЕПЕРЬ эти поля УДАЛЕНЫ с типа документа
-//      "Матрицы обучения" и ДОБАВЛЕНЫ на тип документа "Элементы матриц обучения"
-//      (cc_learning_matrice_element, у которых уже были education_method_id/
-//      start_study_period/end_study_period) -- значит аудитория теперь СВОЯ У КАЖДОГО
-//      ЭЛЕМЕНТА (по факту -- у каждой программы, а если у одной программы несколько
-//      элементов с разными position_common_id -- у неё НЕСКОЛЬКО аудиторий, объединяемых
-//      через ИЛИ). См. BuildProgramAudienceIndex()/CollaboratorInProgramAudience() ниже.
-//      Это МАНДАТОРНОЕ условие "кому вообще адресована ЭТА программа" -- отдельная вещь
-//      от РУЧНЫХ фильтров пользователя (те же имена полей, но разный смысл): ручные
-//      фильтры дополнительно СУЖАЮТ то, что уже прошло через аудиторию, а не заменяют её.
-//   2. "Период прохождения тренинга" (нужен для честного "План") -- НЕ РЕАЛИЗОВАН. На
-//      элементе есть start_study_period=1/end_study_period=4 (числа, не даты -- см.
-//      диагностику), но неясно: единицы измерения и от какой даты сотрудника отсчитывать.
-//      Пользователь решил не тратить на это время сейчас -- УПРОЩЕНИЕ: План = Общее (без
-//      доп. фильтра по периоду). Это совпадает с тем, что мы уже видели на тестовых
-//      данных пользователя раньше в этом тикете (план и общее количество были равны).
-//      ОТКРЫТЫЙ ВОПРОС, вернуться при необходимости -- аналогично открытым вопросам
-//      №1-3 в HREDU-181_vostok_polny_spisok_draft.js.
-//   3. Факт -- ПЕРЕСМОТРЕНО ПОВТОРНО (17.09.2026, тот же день, что и п.1, но отдельным
-//      уточнением от пользователя -- см. AskUserQuestion): раньше "не зависимо от условий
-//      матрицы" понималось БУКВАЛЬНО -- фильтр аудитории для "fact" вообще не применялся
-//      (сотрудник мог быть кем угодно по должности). Реальный тест (матрица
-//      "Менеджер"/"Стандарт менеджер", город Воронеж) показал, что это даёт СТРАННЫЙ
-//      результат -- в "Факт" попадали сотрудники СОВСЕМ ДРУГИХ должностей (Экономисты),
-//      просто когда-то прошедшие ту же программу по не связанной с этой матрицей причине
-//      (программа -- общий каталог, не привязана к конкретной матрице). ПОДТВЕРЖДЕНО
-//      пользователем: "Факт" ТЕПЕРЬ ТОЖЕ должен ограничиваться аудиторией (должность+
-//      мир-код ХОТЯ БЫ ОДНОГО элемента этой программы) -- "не зависимо от условий
-//      матрицы" означает "не зависимо от ПЕРИОДА" (см. п.2 -- он всё равно не
-//      реализован), а НЕ "вообще без каких-либо условий". Базовый пул для факта -- все
-//      активные сотрудники (как и раньше), ручные фильтры пользователя применяются, ПЛЮС
-//      теперь и аудитория программы -- см. п. "б" ниже.
-//   4. Обязательно -- аудитория программы (как Общее) МИНУС те, кто прошёл (т.е. строки
-//      с пустой датой прохождения).
-//
-// ИТОГОВАЯ АРХИТЕКТУРА: сначала строим ряды "сотрудник x программа" ТОЧНО как в
-// HREDU-181 (программы матрицы, активные сотрудники, дата прохождения, все 4 ручных
-// фильтра из URL). Разница только в ДВУХ местах:
-//   а) ИЗМЕНЕНО (17.09.2026, дважды в один день -- см. п.3 выше): аудитория применяется
-//      НЕ к общему пулу сотрудников ДО построения строк (раньше -- GetMatrixAudienceCollaboratorRows(),
-//      убрана), а К КАЖДОЙ ГОТОВОЙ СТРОКЕ (сотрудник x программа) ПОСЛЕ построения --
-//      потому что у разных программ в одной и той же строке-сотруднике может быть РАЗНАЯ
-//      аудитория (см. row.in_audience в BuildReportRows(), фильтр в Run() сразу после
-//      сборки RESULT). Применяется ко ВСЕМ 4 режимам ОДИНАКОВО, включая "fact" (было
-//      исключение для "fact" -- убрано по итогам теста, см. п.3);
-//   б) ПОСЛЕ того, как готовые строки (с completion_date) собраны -- для "fact" оставляем
-//      только строки с НЕпустой датой, для "mandatory" -- только с ПУСТОЙ датой,
-//      для "total"/"plan" -- оставляем все строки без изменений.
-//
-// Параметр result_type -- один из: "total" | "plan" | "fact" | "mandatory".
-//   ИЗМЕНЕНО (10.09.2026): раньше читался ТОЛЬКО как фиксированное значение на вкладке
-//   "Параметры" отдельного виджета (по виджету на режим). Теперь читается СНАЧАЛА из
-//   URL (как остальные фильтры) -- это открывает дорогу к переключению режима самим
-//   пользователем на фронтенде (вкладки/ссылки/поле в модалке -- способ ещё
-//   обсуждается). Если в URL параметра нет -- запасной путь: старое фиксированное
-//   значение LPE (обратная совместимость с уже настроенными виджетами), иначе "total".
-//   Подробности -- в начале Run().
-// Фильтры (matrix_id, macroregion, mir_code, position_common_id, program_id) читаются
-// ТАК ЖЕ, как в HREDU-181 -- из Request.Url (см. HREDU-183_diagnostic_get_params.js) --
-// это работает надёжно в контексте ВЫБОРКИ (не удалённого действия, там был другой
-// механизм через {{curEnv.curEnvUrl}}, здесь он не нужен).
-//
-// ВАЖНО про RESULT: как и в HREDU-181 -- RESULT это ПРЯМО массив строк, без обёртки.
+DEBUG = true;              
+LOG_NAME = "agent";        
+CUR_OBJECT_ID = 7683878110140100214;         
+ 
 
-// =====================================================================
-// ИСТОЧНИК ДАННЫХ HREDU-237 (29.09.2026, по прямому указанию пользователя -- та же смена
-// архитектуры, что уже сделана и подтверждена реальным тестом в HREDU-182_procent_obuchennyh.js,
-// теперь переносится сюда). ЧИТАТЬ ПЕРЕД ВСЕЙ ИСТОРИЕЙ ВЫШЕ -- она описывает ПРЕЖНЮЮ (СЕЙЧАС
-// ЗАМЕНЁННУЮ) модель данных на кастомных каталогах cc_learning_matrice/
-// cc_learning_matrice_element -- оставлена как есть для истории решений (не переписана и не
-// удалена), но actual источник данных теперь ДРУГОЙ:
-//
-//   БЫЛО (до 29.09.2026): cc_learning_matrice (матрица) + cc_learning_matrice_element
-//   (элементы, каждый со своей аудиторией: position_common_id/mir_code_id, объединяемых по
-//   education_method_id через BuildProgramAudienceIndex()/CollaboratorInProgramAudience()).
-//
-//   СТАЛО: коробочная сущность WebSoft "Модульные программы" (compound_program) --
-//   matrix_id из URL теперь id документа compound_program, а не cc_learning_matrice. Внутри --
-//   вложенная коллекция programs/program (задачи), нам нужны ТОЛЬКО задачи с type ==
-//   "education_method", эл. курсы (type == "course") игнорируются. Аудитория (должность/
-//   мир-код/орг-структура/подразделение + статус-исключения) теперь ОДНА НА ВСЮ МОДУЛЬНУЮ
-//   ПРОГРАММУ (custom_elems самого compound_program), а НЕ своя у каждого элемента, как было --
-//   значит проверка аудитории теперь делается ОДИН РАЗ НА ПАРУ (сотрудник x матрица), а НЕ на
-//   каждую пару (сотрудник x программа), как раньше (см. CollaboratorMatchesMatrixAudience()
-//   ниже и её использование в Run() -- ПЕРЕД циклом по programIds, а не внутри него). Значения
-//   этих полей -- СВОБОДНЫЙ ТЕКСТ с wildcard-паттернами через "*" (не FK-ссылки на каталоги,
-//   как было у position_common_id/mir_code_id) -- см. WildcardMatch().
-//
-//   "Факт" (дата прохождения через GetCompletionDateRows()) НЕ ЗАТРОНУТ этой сменой
-//   архитектуры -- education_method_id общее понятие в обеих моделях.
-//
-//   Названия программ теперь берутся напрямую из taskRows (задачи compound_program уже
-//   содержат собственное поле name) -- БЕЗ N x tools.open_doc() (см. GetProgramTitles(),
-//   УБРАНА, замена -- programNames, собирается в Run()).
-//
-//   ПОДТВЕРЖДЕНО РЕАЛЬНЫМ ТЕСТОМ (28-29.09.2026, HREDU-182_procent_obuchennyh.js): таблицы
-//   compound_programs/compound_program, техника c.data.value() для custom_elems, массовое
-//   чтение вложенных задач через SQL .nodes(), гейт видимости и сама аудитория
-//   (CollaboratorMatchesMatrixAudience()) -- всё это уже отработало на реальном тесте (295
-//   строк город x программа для матрицы 6946532362879990227, без ошибок). Здесь -- перенос
-//   ТЕХ ЖЕ проверенных функций, БЕЗ изменений в их логике.
-//
-//   НЕ ПЕРЕНЕСЕНО (по решению пользователя, 29.09.2026 -- "удаленное действие по этим
-//   отчетам на твое усмотрение"): гейт видимости по роли/иерархии (IsUorApMember()/
-//   GetManagerIdRows() и т.д. из HREDU-182_procent_obuchennyh.js) -- в ТЗ HREDU-183 такого
-//   требования не было, здесь не добавлялся, чтобы не выйти за рамки текущей задачи (только
-//   смена источника данных). Если понадобится -- отдельным шагом, по образцу соседнего файла.
-// =====================================================================
- 
-DEBUG = true;              // На проде поставить false после тестирования
-LOG_NAME = "agent";        // TODO: уточнить после создания документа в админке
-CUR_OBJECT_ID = 7683878110140100214;         // TODO: заполнить ID документа выборки после её создания в админке
- 
-//-------------------------------------------------------------------------
-//              Область функций
-//-------------------------------------------------------------------------
- 
 function LogAlert(typeLog, message)
 {
-    // ЗАЩИЩЕНО (10.09.2026, по мотивам реальной поломки): если LOG_NAME/CUR_OBJECT_ID
-    // ещё не настроены (например CUR_OBJECT_ID=0 -- заглушка "TODO: заполнить после
-    // создания документа в админке"), вызов может упасть с ошибкой -- а LogAlert()
-    // вызывается ДО главного try/catch в Run(), поэтому необработанное исключение тут
-    // рушило ВЕСЬ Run() целиком: RESULT никогда не устанавливался, таблица оставалась
-    // пустой БЕЗ какого-либо сообщения об ошибке (именно это и произошло на реальном
-    // тесте). Логирование -- вспомогательная вещь, её сбой не должен ронять сам отчёт.
+    
+    
     try
     {
         tools.call_code_library_method("vtbl_log_lib", "LogAlert", [LOG_NAME, typeLog, CUR_OBJECT_ID, message, DEBUG]);
     }
     catch (_exLog)
     {
-        // ничего -- сбой логирования не должен ронять основной код
+        
     }
 }
  
-//-------------------------------------------------------------------------
-//              ЗАМЕР ПРОИЗВОДИТЕЛЬНОСТИ (18.09.2026, по просьбе тим-лида
-//              пользователя -- медленно грузятся страницы после смены фильтров,
-//              нужно понять, тормозит БД (SQL/XQuery/tools.open_doc()) или сам код)
-//-------------------------------------------------------------------------
-// ВРЕМЕННАЯ ДИАГНОСТИКА. Когда причина тормозов найдена -- этот блок и все вызовы
-// PerfStart()/PerfCheckpoint() ниже можно спокойно удалить, на остальную логику файла
-// это никак не влияет (отдельный флаг PERF_DEBUG, отдельные функции -- ничего не
-// переиспользуется в основном коде отчёта).
-//
-// КАК ЧИТАТЬ: PerfStart() -- один раз в начале Run(), дальше PerfCheckpoint("название
-// шага") после каждого интересующего шага (SQL/XQuery-запрос, tools.open_doc(), тяжёлый
-// цикл). Каждый вызов -- это alert() с ТРЕМЯ цифрами: текущее время, сколько прошло С
-// ПРЕДЫДУЩЕЙ точки (это и есть время именно ЭТОГО шага) и сколько прошло С САМОГО НАЧАЛА
-// (общее время на данный момент). Если "с предыдущей точки" у конкретного шага большое --
-// значит тормозит именно он. В названии каждого шага ниже (см. Run()) явно помечено,
-// SQL/БД это или ЧИСТЫЙ КОД -- так сразу видно, куда смотреть: в СУБД или в сам скрипт.
-//
-// ЧЕСТНО ПРО ТОЧНОСТЬ: подсчёт секунд ((dTo - dFrom) * 86400) -- ЭКСПЕРИМЕНТАЛЬНЫЙ.
-// Арифметика вычитания дат на этой платформе раньше в проекте нигде не проверялась (в
-// отличие от Date()/StrDate()/DateOffset() -- они точно рабочие, см. FindCompletionDate()
-// в этом же файле). Точно известно: сравнение дат (">=") работает (см.
-// HREDU-176_integration_final_working.js), а DateOffset(date, секунды) прибавляет к дате
-// секунды -- это похоже на тип, где дата хранится числом (целая часть -- дни, дробная --
-// доля суток), поэтому вычитание, скорее всего, даёт разницу В ДНЯХ, а *86400 переводит
-// в секунды. НО если цифра в alert'е выглядит абсурдно (отрицательная, огромная, "?") --
-// НЕ доверяй числу секунд, доверяй RAW-таймштампам ("время сейчас: ...") -- разницу по
-// ним можно посчитать вручную, Date()/StrDate() -- точно рабочие функции. Вся арифметика
-// обёрнута в try/catch -- если вычитание дат не поддерживается, вместо числа увидишь "?".
-//
-// И сами alert() тоже обёрнуты в try/catch -- если alert() почему-то недоступен в
-// контексте исполнения выборки, замер просто промолчит, а не уронит отчёт.
- 
-PERF_DEBUG = true; // поставь false, чтобы быстро выключить весь этот блок целиком
+
+PERF_DEBUG = true; 
 gPerfStartTime = undefined;
 gPerfLastTime = undefined;
  
-/*
-* Начинает замер -- запоминает "сейчас" как точку отсчёта. Вызвать ОДИН РАЗ в начале Run().
-* @returns {void}
-*/
+
 function PerfStart()
 {
     if (!PERF_DEBUG) { return; }
@@ -214,12 +38,7 @@ function PerfStart()
     PerfAlertSafe("[ЗАМЕР] СТАРТ. Время: " + PerfFormatTimestamp(gPerfStartTime));
 }
  
-/*
-* Точка замера -- alert() с текущим временем, временем ЭТОГО шага (с предыдущей точки) и
-* временем с начала (с PerfStart()). См. подробности в шапке блока выше.
-* @param {string} sLabel   -   Название шага, например "GetActiveCollaboratorRows() -- SQL".
-* @returns {void}
-*/
+
 function PerfCheckpoint(sLabel)
 {
     if (!PERF_DEBUG) { return; }
@@ -257,14 +76,10 @@ function PerfDiffSafe(dFrom, dTo)
  
 function PerfAlertSafe(sMsg)
 {
-    try { alert(sMsg); } catch (_ex) { /* alert недоступен в этом контексте -- не роняем код */ }
+    try { alert(sMsg); } catch (_ex) {  }
 }
  
-/*
-* Достаёт полный URL текущей страницы (см. HREDU-181_vostok_polny_spisok_draft.js --
-* тот же приём, подтверждён диагностикой). В контексте ВЫБОРКИ Request.Url надёжен.
-* @returns {string}
-*/
+
 function GetRequestUrlSafe()
 {
     try
@@ -277,15 +92,7 @@ function GetRequestUrlSafe()
     }
 }
  
-/*
-* Вырезает значение GET-параметра из полного URL строки -- без regex, без методов
-* строк (их нет в этом движке), через штатный API платформы (StrOptSubStrPos/
-* StrRangePos/StrLen), декодирование через UrlDecode(). Идентична версии в
-* HREDU-181_vostok_polny_spisok_draft.js.
-* @param {string} sUrl
-* @param {string} sParamName
-* @returns {string}
-*/
+
 function GetQueryParam(sUrl, sParamName)
 {
     var sAmpMarker, sQMarkMarker, iParamPos, iValueStart, iAmpPos, iValueEnd, sRawValue, iUrlLen;
@@ -324,66 +131,7 @@ function GetQueryParam(sUrl, sParamName)
     }
 }
  
-/*
-* УБРАНО (29.09.2026, HREDU-237): GetMatrixRows(matrixName)/GetMatrixElementRows(matrixIds) --
-* искали матрицу по имени в cc_learning_matrices/cc_learning_matrice_elements. Заменены на
-* GetCompoundProgramRows()/GetEducationMethodTaskRows() ниже -- та же техника, что уже
-* подтверждена реальным тестом в HREDU-182_procent_obuchennyh.js (см. "ИСТОЧНИК ДАННЫХ
-* HREDU-237" в шапке файла).
-*/
 
-/*
- * ДОБАВЛЕНО (29.09.2026, HREDU-237). Безопасно интерпретирует текстовое "булево" значение
- * custom_elem (f_matrix_active и т.п.). Идентична версии из HREDU-182_procent_obuchennyh.js,
- * где уже подтверждена реальным тестом (fallback на try/catch -- на случай, если tools_web
- * недоступен в контексте ВЫБОРКИ).
- * @param {string} sValue
- * @returns {boolean}
- */
-
-
-/*
- * ДОБАВЛЕНО (29.09.2026, HREDU-237). Массовое чтение самих модульных программ
- * (compound_program) -- id, название и ВСЕ custom_elems аудитории -- ОДНИМ SQL-запросом по
- * ВСЕМ документам сразу. Идентична версии из HREDU-182_procent_obuchennyh.js.
- * @returns {Object[]}   -   {id, name, f_matrix_active, f_position_names, f_position_names_exclude,
- *                            f_mir_code, f_mir_code_exclude, f_org_names, f_org_names_exclude,
- *                            f_subdivision_names, f_subdivision_names_exclude, f_subdivision_child,
- *                            f_collaborator_statuses_exclude}.
- */
-
-
-/*
- * ДОБАВЛЕНО (29.09.2026, HREDU-237). Массовое чтение задач типа "Учебная программа"
- * (education_method) из ВСЕХ модульных программ ОДНИМ SQL-запросом через XML .nodes().
- * Идентична версии из HREDU-182_procent_obuchennyh.js.
- * @returns {Object[]}   -   {matrix_id, object_id, education_method_id, ptype, delay_days, pname}.
- */
-
-
-/*
-* ПЕРЕПИСАНО (29.09.2026, HREDU-237): раньше собирала programIds из elementRows (элементы
-* матрицы cc_learning_matrice_element). Теперь -- из taskRows (задачи compound_program, уже
-* отфильтрованные по type=education_method в самом SQL), только для ОДНОЙ конкретной матрицы
-* (matrixId) -- taskRows читаются сразу по ВСЕМ матрицам одним запросом, фильтр по matrixId
-* делаем здесь же, в JS. Идентична версии из HREDU-182_procent_obuchennyh.js.
-* @param {Object[]} taskRows
-* @param {number} matrixId
-* @returns {number[]}
-*/
-
-
-// УБРАНО (29.09.2026, HREDU-237): GetProgramTitles(programIds) -- строила справочник
-// {id, title} через N x tools.open_doc(programID) (открывала документ КАЖДОЙ программы).
-// Больше не нужна -- задачи compound_program (taskRows, см. GetEducationMethodTaskRows() выше)
-// уже содержат собственное поле name (pname) для каждой программы, справочник programNames
-// теперь строится прямо из taskRows одним циклом в Run(), без единого tools.open_doc().
- 
-/*
-* Читает всех действующих сотрудников (базовый пул, ДО аудитории матрицы и ДО ручных
-* фильтров).
-* @returns {Object[]}
-*/
 function GetActiveCollaboratorRows()
 {
     LogAlert(1, "GetActiveCollaboratorRows(). НАЧАЛО");
@@ -394,12 +142,7 @@ function GetActiveCollaboratorRows()
     return collaboratorRows;
 }
  
-/*
-* Находит ID документов коллекции "positions", у которых position_common_id совпадает
-* с переданным ID (см. подробное объяснение схемы в HREDU-181_vostok_polny_spisok_draft.js).
-* @param {number} iCommonPositionFilter
-* @returns {number[]}
-*/
+
 function GetPositionIdsByCommonPosition(iCommonPositionFilter)
 {
     LogAlert(1, "GetPositionIdsByCommonPosition(). НАЧАЛО. iCommonPositionFilter=" + iCommonPositionFilter);
@@ -415,13 +158,7 @@ function GetPositionIdsByCommonPosition(iCommonPositionFilter)
     return positionIds;
 }
  
-/*
-* Проверяет вхождение числа в массив чисел обычным циклом (без ArraySelect()/строк-
-* выражений со ссылкой на внешние переменные -- см. объяснение в HREDU-181).
-* @param {number[]} idArray
-* @param {number} value
-* @returns {boolean}
-*/
+
 function IdArrayContains(idArray, value)
 {
     var i;
@@ -435,10 +172,7 @@ function IdArrayContains(idArray, value)
     return false;
 }
  
-/*
-* Достаёт макрорегион (custom_elem f_2ewj) по всем действующим сотрудникам одним SQL-запросом.
-* @returns {Object[]}
-*/
+
 function GetMacroregionRows()
 {
     LogAlert(1, "GetMacroregionRows(). НАЧАЛО");
@@ -455,14 +189,7 @@ function GetMacroregionRows()
     return macroRows;
 }
  
-/*
-* ДОБАВЛЕНО (14.09.2026, для drill-down из "Процент обученных"): город -- custom_elem
-* "sity" (имя технического поля подтверждено пользователем реальным XML документа
-* collaborator -- см. HREDU-182_procent_obuchennyh.js). Нужен, чтобы клик по конкретной
-* строке-городу в таблице "Процент обученных" открывал список ТОЛЬКО по этому городу,
-* а не по всей матрице.
-* @returns {Object[]}   -   Массив {id, sity}.
-*/
+
 function GetCityRows()
 {
     LogAlert(1, "GetCityRows(). НАЧАЛО");
@@ -479,56 +206,13 @@ function GetCityRows()
     return rows;
 }
  
-/*
-* НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ (18.09.2026, реальный тест пользователя, см.
-* PerfCheckpoint() в Run()): "Ручной фильтр по макрорегиону" занял ~3 сек, "Фильтр по
-* городу" ~1 сек -- ПРИ ЭТОМ все SQL/XQuery-запросы заняли КАЖДЫЙ 0-1 сек. Т.е. БД тут ни
-* при чём -- тормозил ИМЕННО ЭТОТ КОД. Причина: FindCity()/FindMacroregion()/
-* FindCompletionDate() делали ArrayOptFind() -- ЛИНЕЙНЫЙ поиск по ВСЕМУ массиву
-* (macroRows/cityRows/dateRows -- это ВСЕ активные сотрудники компании) -- внутри цикла по
-* каждому сотруднику. Классическая O(n^2)-ловушка.
-*
-* ПЕРВАЯ ПОПЫТКА ФИКСА (18.09.2026, ОТКАЧЕНА В ТОТ ЖЕ ДЕНЬ): строили индекс через
-* обычный объект-словарь с динамическим ключом (object[String(id)]). РЕАЛЬНЫЙ ТЕСТ
-* пользователя это СЛОМАЛ -- платформа выдала "Unknown object property:
-* 6088495934734023244_6696477179940732741" -- т.е. динамический доступ к свойству
-* объекта по ВЫЧИСЛЯЕМОМУ строковому ключу (object[stringKey], в отличие от
-* object.fixedName) НЕ ПОДДЕРЖИВАЕТСЯ этим движком. Это подтверждённый факт, а не
-* гипотеза -- как в своё время не поддержались regex/.indexOf/.substring.
-*
-* ИТОГОВЫЙ ФИКС (18.09.2026, ВТОРАЯ ПОПЫТКА): вместо объекта-словаря -- БИНАРНЫЙ ПОИСК по
-* массиву, ПРЕДВАРИТЕЛЬНО ОТСОРТИРОВАННОМУ через ArraySort(). Использует ТОЛЬКО
-* конструкции, уже подтверждённые в проекте: доступ к элементу массива по ЧИСЛОВОМУ
-* индексу (array[i] -- используется вообще везде в этом файле), ArraySort() (подтверждена
-* РЕАЛЬНО РАБОТАЮЩЕЙ в HREDU-176_integration_final_working.js: "ArraySort(snilsPersons,
-* ...HiringDate..., "+")"), сравнения и арифметика. Сложность: O(n log n) на сортировку
-* (один раз) + O(log n) на каждый поиск -- гораздо лучше O(n^2), хоть и не идеальный O(1),
-* зато не опирается на непроверенный (и теперь уже опровергнутый) механизм.
-*
-* ЧЕСТНО ПРО РИСК №2: ArraySort() подтверждена РАБОЧЕЙ в другом файле этого же проекта --
-* это МНОГО надёжнее, чем "непроверенная гипотеза" (какой была динамическая индексация),
-* но не 100% гарантия именно в ЭТОМ контексте (выборка, а не удалённое действие). ОБЯЗАТЕЛЬНО
-* проверь на реальных данных: (а) что отчёт снова показывает те же строки, что и раньше;
-* (б) что новые PerfCheckpoint() для "сортировки" в логе быстрые, а сами фильтры больше НЕ
-* занимают 3 сек/1 сек. Если ArraySort() тоже поведёт себя не так, как ожидается -- пришли
-* мне точный текст ошибки, откатимся на самый надёжный (хоть и медленный) вариант --
-* исходный ArrayOptFind() -- и будем думать дальше.
-* @param {Object[]} rows   -   Строки с полем "id" (macroRows/cityRows).
-* @returns {Object[]}       -   Тот же массив строк, отсортированный по возрастанию id.
-*/
+
 function SortRowsById(rows)
 {
     return ArraySort(rows, "Int(This.id)", "+");
 }
  
-/*
-* Бинарный поиск строки с полем "id" == targetId в МАССИВЕ, ОТСОРТИРОВАННОМ ПО ВОЗРАСТАНИЮ
-* id (см. SortRowsById()). Использует только доступ к массиву по числовому индексу --
-* никакого object[computedKey], см. "ЧЕСТНО ПРО РИСК" выше.
-* @param {Object[]} sortedRows   -   Массив, УЖЕ отсортированный через SortRowsById().
-* @param {number} targetId
-* @returns {Object}               -   Найденная строка или undefined.
-*/
+
 function BinarySearchById(sortedRows, targetId)
 {
     var lo, hi, mid, midId, iTarget;
@@ -546,32 +230,13 @@ function BinarySearchById(sortedRows, targetId)
     return undefined;
 }
  
-/*
-* НАЙДЕНО (18.09.2026, ЧЕТВЁРТЫЙ раунд замера -- уже ПОСЛЕ фикса macro/city/date/mirCode
-* бинарным поиском в HREDU-182_procent_obuchennyh.js): реальный тест там показал, что "Цикл
-* total/mandatory" всё ещё занимает ~14 сек. Подозреваемый источник -- IdArrayContains()
-* (см. ниже): вызывается из CollaboratorInProgramAudience() (проверка должности сотрудника)
-* И из ручного фильтра по должности -- В ОБОИХ МЕСТАХ на КАЖДОГО сотрудника, линейным
-* перебором по списку position_id для "общей должности" (GetPositionIdsByCommonPosition()) --
-* список может быть большим (десятки-сотни конкретных должностей на одну "общую"), то есть
-* тот же O(n x m)-паттерн, что был у macro/city/date/mirCode, просто на ДРУГОМ поле.
-* Идентичный фикс здесь -- сортируем список один раз сразу после получения, ищем бинарным
-* поиском.
-* @param {number[]} idArray
-* @returns {number[]}
-*/
+
 function SortIdArray(idArray)
 {
     return ArraySort(idArray, "Int(This)", "+");
 }
  
-/*
-* Бинарный поиск значения в МАССИВЕ ЧИСЕЛ (не объектов), ОТСОРТИРОВАННОМ через
-* SortIdArray(). Идентична версии в HREDU-182_procent_obuchennyh.js.
-* @param {number[]} sortedIdArray
-* @param {number} value
-* @returns {boolean}
-*/
+
 function IdArrayContainsSorted(sortedIdArray, value)
 {
     var lo, hi, mid, midVal, iTarget;
@@ -589,15 +254,7 @@ function IdArrayContainsSorted(sortedIdArray, value)
     return false;
 }
  
-/*
-* Находит город конкретного сотрудника; "(без города)" если поле пустое/не найдено --
-* та же условность, что в HREDU-182_procent_obuchennyh.js.
-* ИЗМЕНЕНО (18.09.2026, см. "НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ" выше): теперь принимает
-* ОТСОРТИРОВАННЫЙ по id массив (см. SortRowsById()) и ищет БИНАРНЫМ ПОИСКОМ, а не линейно.
-* @param {Object[]} sortedCityRows
-* @param {number} collaboratorID
-* @returns {string}
-*/
+
 function FindCity(sortedCityRows, collaboratorID)
 {
     var cityRow, sCity;
@@ -606,22 +263,13 @@ function FindCity(sortedCityRows, collaboratorID)
     return (sCity != "" ? sCity : "(без города)");
 }
  
-/*
-* Сортирует dateRows по collaborator_id (не по id -- у этих строк нет своего "id",
-* ключевое поле здесь -- collaborator_id, см. GetCompletionDateRows()).
-* @param {Object[]} dateRows
-* @returns {Object[]}
-*/
+
 function SortDateRowsByCollaboratorId(dateRows)
 {
     return ArraySort(dateRows, "Int(This.collaborator_id)", "+");
 }
  
-/*
-* Достаёт сырое значение мир-кодов (custom_elem f_mir_codes) по всем действующим
-* сотрудникам одним SQL-запросом.
-* @returns {Object[]}
-*/
+
 function GetMirCodeRows()
 {
     LogAlert(1, "GetMirCodeRows(). НАЧАЛО");
@@ -638,11 +286,7 @@ function GetMirCodeRows()
     return rows;
 }
  
-/*
-* Разбирает сырое значение f_mir_codes ("#LASK#17#|#LASM#17#...") в массив кодов без процентов.
-* @param {string} rawValue
-* @returns {string[]}
-*/
+
 function ExtractMirCodes(rawValue)
 {
     var parts, fields, codes, i;
@@ -659,23 +303,7 @@ function ExtractMirCodes(rawValue)
     return codes;
 }
  
-/*
-* Проверяет, есть ли у сотрудника указанный мир-код среди любых его мир-кодов.
-* НАЙДЕНО (18.09.2026, замер на "Процент обученных" ПОСЛЕ фикса macro/city/date бинарным
-* поиском): реальный тест показал провал в 31 сек ИМЕННО на шаге "Цикл total/mandatory" --
-* виновата была ЭТА функция: CollaboratorInProgramAudience() (см. ниже) вызывает её на
-* каждую пару сотрудник x программа-с-мир-кодовым-сегментом, а она делала линейный
-* ArrayOptFind() по mirCodeRows -- ТАКОМУ ЖЕ полному массиву по ВСЕМ активным сотрудникам
-* компании, как macroRows/cityRows/dateRows до фикса -- та же O(n^2)-ловушка, пропущенная
-* в первых двух раундах правки ЭТОГО файла (тестовая матрица ТЭП не содержала элементов с
-* непустым мир-кодовым сегментом, поэтому баг здесь не проявился, хотя код был тот же).
-* Исправлено идентично остальным трём полям -- бинарный поиск по mirCodeRows,
-* отсортированному через SortRowsById() один раз в Run().
-* @param {Object[]} sortedMirCodeRows
-* @param {number} collaboratorID
-* @param {string} mirCodeFilter
-* @returns {boolean}
-*/
+
 function CollaboratorHasMirCode(sortedMirCodeRows, collaboratorID, mirCodeFilter)
 {
     var row, codes;
@@ -688,98 +316,7 @@ function CollaboratorHasMirCode(sortedMirCodeRows, collaboratorID, mirCodeFilter
     return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
 }
  
-// УБРАНО (29.09.2026, HREDU-237): ResolveMirCodeText(iMirCodeID) -- резолвила mir_code_id
-// (FK на cc_mir_codes) в текст. Больше не нужна -- f_mir_code у compound_program уже
-// свободный текст (не FK), см. "ИСТОЧНИК ДАННЫХ HREDU-237" в шапке файла.
-//
-// УБРАНО (29.09.2026, HREDU-237): BuildProgramAudienceIndex()/SummarizeAudienceIndex()/
-// FindProgramAudienceSegments()/CollaboratorInProgramAudience() -- в старой модели аудитория
-// была своя у КАЖДОГО ЭЛЕМЕНТА (программы внутри матрицы, через position_common_id/
-// mir_code_id). В новой -- ОДНА НА ВСЮ МАТРИЦУ (custom_elems compound_program) -- поэтому
-// проверка теперь ОДИН РАЗ НА ПАРУ (сотрудник x матрица), а не на каждую пару (сотрудник x
-// программа). Заменены на CollaboratorMatchesMatrixAudience() ниже -- перенесена БЕЗ изменений
-// в логике из HREDU-182_procent_obuchennyh.js (уже подтверждена реальным тестом там).
 
-/*
- * ДОБАВЛЕНО (29.09.2026, HREDU-237). Статус сотрудника -- custom_elem "CurrentState" на
- * карточке collaborator. Нужен для f_collaborator_statuses_exclude у модульной программы.
- * Идентична версии из HREDU-182_procent_obuchennyh.js.
- * @returns {Object[]}   -   Массив {id, status}.
- */
-
-
-/*
- * ДОБАВЛЕНО (29.09.2026, HREDU-237). Матчинг "* текст *"/"текст*"/"*текст" БЕЗ regex --
- * идентична версии из HREDU-182_procent_obuchennyh.js (см. там же историю находок про
- * StrOptSubStrPos()).
- */
-
-
-/*
- * @param {string} sPattern
- * @param {string} sText
- * @param {boolean} bIgnoreCase   -   true -- игнорировать регистр (см. находку про
- *                                    StrOptSubStrPos в HREDU-182_procent_obuchennyh.js --
- *                                    ИМЕННО true игнорирует регистр, обратное названию).
- * @returns {boolean}
- */
-
-
-/*
- * Проверяет текст против списка паттернов, разделённых ";". true, если текст подходит ХОТЯ БЫ
- * ПОД ОДИН паттерн из списка (ИЛИ).
- * @param {string} sPatternsList
- * @param {string} sText
- * @param {boolean} bIgnoreCase
- * @returns {boolean}
- */
-
-
-/*
- * Одна "положительная" ось аудитории (f_position_names/f_org_names/f_subdivision_names).
- * ПУСТОЙ список паттернов = ось не задана = БЕЗ ОГРАНИЧЕНИЯ по этой оси.
- * @param {string} sPatternsList
- * @param {string} sSingleValue
- * @returns {boolean}
- */
-
-
-/*
- * Ось-ИСКЛЮЧЕНИЕ (f_position_names_exclude и т.п.) -- ПУСТОЙ список = никого не исключаем.
- * @param {string} sPatternsList
- * @param {string} sSingleValue
- * @returns {boolean}
- */
-
-
-/*
- * Ось мир-кода -- у сотрудника МОЖЕТ БЫТЬ НЕСКОЛЬКО кодов (ExtractMirCodes()) -- совпадение,
- * если ХОТЯ БЫ ОДИН код сотрудника подходит ХОТЯ БЫ ПОД ОДИН паттерн программы.
- * @param {string} sPatternsList
- * @param {string[]} employeeCodes
- * @returns {boolean}
- */
-
-
-
-
-/*
- * ГЛАВНАЯ функция аудитории HREDU-237 -- заменяет CollaboratorInProgramAudience() (УБРАНА).
- * Проверяется ОДИН РАЗ НА ПАРУ (сотрудник x матрица) -- см. блок выше. Перенесена БЕЗ
- * изменений в логике из HREDU-182_procent_obuchennyh.js, где уже подтверждена реальным тестом
- * (29.09.2026, гейт + аудитория прошли без ошибок на матрице 6946532362879990227).
- * @param {Object} collaboratorRow      -   Строка из GetActiveCollaboratorRows().
- * @param {Object} matrixRow            -   Строка из GetCompoundProgramRows() -- аудитория ЭТОЙ матрицы.
- * @param {Object[]} sortedMirCodeRows  -   GetMirCodeRows() + SortRowsById().
- * @param {Object[]} sortedStatusRows   -   GetStatusRows() + SortRowsById().
- * @returns {boolean}
- */
-
-/*
-* Находит минимальную дату прохождения по каждому сотруднику и программе.
-* @param {number[]} programIds
-* @returns {Object[]}
-*/
 function GetCompletionDateRows(programIds)
 {
     LogAlert(1, "GetCompletionDateRows(). НАЧАЛО");
@@ -796,20 +333,7 @@ function GetCompletionDateRows(programIds)
     return dateRows;
 }
  
-/*
-* Ищет дату прохождения конкретного сотрудника по конкретной программе.
-* ИЗМЕНЕНО (18.09.2026, см. "НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ" над SortRowsById()):
-* dateRows У ОДНОГО сотрудника обычно немного строк (по числу программ, которые он вообще
-* когда-либо проходил -- НЕ пропорционально общему числу сотрудников компании), поэтому
-* здесь -- БИНАРНЫЙ ПОИСК первой строки этого сотрудника (по sortedDateRows,
-* отсортированному через SortDateRowsByCollaboratorId()), а дальше короткий линейный
-* проход ТОЛЬКО по строкам ЭТОГО сотрудника (их мало) в поисках нужной программы -- без
-* object[computedKey], см. объяснение риска выше.
-* @param {Object[]} sortedDateRows   -   Массив, УЖЕ отсортированный через SortDateRowsByCollaboratorId().
-* @param {number} collaboratorID
-* @param {number} programID
-* @returns {string}
-*/
+
 function FindCompletionDate(sortedDateRows, collaboratorID, programID)
 {
     var lo, hi, mid, midId, iTarget, iProgram, startIdx, i, n;
@@ -817,8 +341,7 @@ function FindCompletionDate(sortedDateRows, collaboratorID, programID)
     iTarget = Int(collaboratorID);
     iProgram = Int(programID);
  
-    // Бинарный поиск ЛЮБОЙ строки этого сотрудника, затем сдвигаемся к ПЕРВОЙ такой строке
-    // (могут быть дубликаты collaborator_id -- по одной строке на каждую пройденную программу).
+    
     lo = 0;
     hi = ArrayCount(sortedDateRows) - 1;
     startIdx = -1;
@@ -829,7 +352,7 @@ function FindCompletionDate(sortedDateRows, collaboratorID, programID)
         if (midId == iTarget)
         {
             startIdx = mid;
-            hi = mid - 1; // ищем более ранний индекс с тем же collaborator_id
+            hi = mid - 1; 
         }
         else if (midId < iTarget) { lo = mid + 1; }
         else { hi = mid - 1; }
@@ -848,14 +371,7 @@ function FindCompletionDate(sortedDateRows, collaboratorID, programID)
     return "";
 }
  
-/*
-* Ищет макрорегион конкретного сотрудника.
-* ИЗМЕНЕНО (18.09.2026, см. "НАЙДЕНО ЗАМЕРОМ ПРОИЗВОДИТЕЛЬНОСТИ" над SortRowsById()) --
-* бинарный поиск по отсортированному массиву вместо линейного ArrayOptFind().
-* @param {Object[]} sortedMacroRows   -   Массив, УЖЕ отсортированный через SortRowsById().
-* @param {number} collaboratorID
-* @returns {string}
-*/
+
 function FindMacroregion(sortedMacroRows, collaboratorID)
 {
     var macroRow;
@@ -863,73 +379,12 @@ function FindMacroregion(sortedMacroRows, collaboratorID)
     return (macroRow != undefined && macroRow.macroregion != undefined ? String(macroRow.macroregion) : "");
 }
  
-// УБРАНО (29.09.2026, HREDU-237): FindProgramTitle(programTitles, programID) -- искала
-// название программы в справочнике, построенном через GetProgramTitles() (N x tools.open_doc(),
-// УБРАНА). Заменена на FindProgramName(programNames, iProgramId) ниже (см. рядом с
-// ResolveMatrixContext()) -- источник имён теперь taskRows, без единого tools.open_doc().
- 
-/*
-* Собирает строки отчёта для ОДНОГО сотрудника -- по одной строке на каждую программу
-* матрицы (те же 6 полей, что в HREDU-181, ПЛЮС город -- см. ниже).
-* ИЗМЕНЕНО (16.09.2026, по просьбе пользователя): добавлено поле row.city -- отдельная
-* колонка "Город" рядом с "Макрорегион".
-* ИЗМЕНЕНО (29.09.2026, HREDU-237): раньше принимала audienceIndex/mirCodeSorted и считала
-* row.in_audience ПО КАЖДОЙ ПРОГРАММЕ (CollaboratorInProgramAudience(), УБРАНА) -- в новой
-* модели аудитория ОДНА НА ВСЮ МАТРИЦУ, поэтому проверяется ОДИН РАЗ НА СОТРУДНИКА В Run()
-* (CollaboratorMatchesMatrixAudience()), а сюда приходит уже готовым булевым результатом
-* (bInAudience) -- одинаковым для всех строк этого сотрудника. programTitles/FindProgramTitle
-* заменены на programNames/FindProgramName (имена программ теперь из taskRows, а не из
-* N x tools.open_doc() -- см. "ИСТОЧНИК ДАННЫХ HREDU-237" в шапке файла).
-* @param {Object} collaborator
-* @param {Object[]} macroSorted
-* @param {Object[]} citySorted
-* @param {Object[]} dateSorted
-* @param {Object[]} programNames   -   Массив {id, name}, собран в Run() из taskRows.
-* @param {number[]} programIds
-* @param {boolean} bInAudience     -   Результат CollaboratorMatchesMatrixAudience() для ЭТОГО
-*                                      сотрудника и ТЕКУЩЕЙ матрицы -- один на всех программ.
-* @returns {Object[]}
-*/
 
-
-/*
-* Резолвит id программы в текст через уже готовый кэш (см. Run() -- programNames строится
-* ОДИН РАЗ на все уникальные programIds, прямо из taskRows -- см. GetEducationMethodTaskRows()).
-* ПЕРЕИМЕНОВАНА (29.09.2026, HREDU-237, было FindProgramTitle -- принимала programTitles,
-* собранные через N x tools.open_doc()).
-* @param {Object[]} programNames   -   Массив {id, name}.
-* @param {number} iProgramId
-* @returns {string}
-*/
-
-
-/*
-* ПЕРЕПИСАНО (29.09.2026, HREDU-237): раньше искала матрицу по ИМЕНИ (GetMatrixRows(matrixName),
-* УБРАНА) двумя отдельными XQuery-запросами. Теперь ищет ОДНИМ бинарным поиском по id в уже
-* загруженном bulk-SQL результате (GetCompoundProgramRows()) -- отличать "нет вообще" от
-* "деактивирована" можно по ОДНОМУ и тому же результату, без повторного запроса. Идентична
-* версии из HREDU-182_procent_obuchennyh.js (там же подтверждена реальным тестом).
-* @param {number} matrixId
-* @param {Object[]} allProgramRows   -   Результат GetCompoundProgramRows().
-* @param {Object[]} taskRows         -   Результат GetEducationMethodTaskRows() (по ВСЕМ матрицам).
-* @returns {Object}   -   { matrixRow: Object, programIds: number[] }.
-*/
-
- 
-/*
-* Точка входа. Собирает данные ОДНОГО из 4 отчётов-представлений ТЭП, в зависимости от
-* result_type -- см. подробности архитектуры и принятых решений в шапке файла.
-* @returns {void}
-*/
 function Run()
 {
     LogAlert(1, "Run() -- БИСЕКЦИОННЫЙ ТЕСТ HREDU-183: все 5 НОВЫХ/уникальных функций (GetProgramIds/CollaboratorMatchesMatrixAudience/FindProgramName/ResolveMatrixContext/BuildReportRows) и их вызовы ВЫРЕЗАНЫ. Осталось только то, что byte-identical скопировано из проверенного рабочего файла HREDU-182, плюс шапка/логирование этого файла.");
     RESULT = [{ fullname: "ТЕСТ БИСЕКЦИИ HREDU-183", position_name: "-", subdivision_name: "-", macroregion: "-", city: "-", program_name: "-", completion_date: "", in_audience: true }];
 }
 
- 
-//-------------------------------------------------------------------------
-//              Область основного кода
-//-------------------------------------------------------------------------
  
 Run();
