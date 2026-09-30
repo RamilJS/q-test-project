@@ -1,63 +1,110 @@
-function SortRowsById(rows)
+function GetMirCodeRows()
 {
-    return ArraySort(rows, "Int(This.id)", "+");
+    LogAlert(1, "GetMirCodeRows(). НАЧАЛО");
+    var sqlText, rows;
+    sqlText = "";
+    sqlText = sqlText + "select cs.id,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_codes'']/value)[1]', 'varchar(max)') as mir_codes\r\n";
+    sqlText = sqlText + "from collaborators cs\r\n";
+    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText = sqlText + "where cs.is_dismiss != 1";
+    rows = ArraySelectAll(XQuery("sql:" + sqlText));
+    LogAlert(1, "GetMirCodeRows(). Строк: " + ArrayCount(rows));
+    LogAlert(1, "GetMirCodeRows(). КОНЕЦ");
+    return rows;
 }
  
 
-function BinarySearchById(sortedRows, targetId)
+function ExtractMirCodes(rawValue)
 {
-    var lo, hi, mid, midId, iTarget;
-    iTarget = Int(targetId);
+    var parts, fields, codes, i;
+    codes = [];
+    parts = ArrayDirect(ArraySelect(String(rawValue).split("|"), "This != ''"));
+    for (i = 0; i < ArrayCount(parts); i++)
+    {
+        fields = ArrayDirect(ArraySelect(String(parts[i]).split("#"), "This != ''"));
+        if (ArrayCount(fields) > 0)
+        {
+            codes.push(String(fields[0]));
+        }
+    }
+    return codes;
+}
+ 
+
+function CollaboratorHasMirCode(sortedMirCodeRows, collaboratorID, mirCodeFilter)
+{
+    var row, codes;
+    row = BinarySearchById(sortedMirCodeRows, collaboratorID);
+    if (row == undefined)
+    {
+        return false;
+    }
+    codes = ExtractMirCodes(row.mir_codes);
+    return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
+}
+ 
+
+function GetCompletionDateRows(programIds)
+{
+    LogAlert(1, "GetCompletionDateRows(). НАЧАЛО");
+    var sqlText, dateRows;
+    sqlText = "";
+    sqlText = sqlText + "select ec.collaborator_id, e.education_method_id, min(ec.start_date) as first_date\r\n";
+    sqlText = sqlText + "from event_collaborators ec\r\n";
+    sqlText = sqlText + "join events e on e.id = ec.event_id\r\n";
+    sqlText = sqlText + "where e.education_method_id in (" + ArrayMerge(programIds, "This", ",") + ")\r\n";
+    sqlText = sqlText + "group by ec.collaborator_id, e.education_method_id";
+    dateRows = ArraySelectAll(XQuery("sql:" + sqlText));
+    LogAlert(1, "GetCompletionDateRows(). Строк: " + ArrayCount(dateRows));
+    LogAlert(1, "GetCompletionDateRows(). КОНЕЦ");
+    return dateRows;
+}
+ 
+
+function FindCompletionDate(sortedDateRows, collaboratorID, programID)
+{
+    var lo, hi, mid, midId, iTarget, iProgram, startIdx, i, n;
+ 
+    iTarget = Int(collaboratorID);
+    iProgram = Int(programID);
+ 
+    
     lo = 0;
-    hi = ArrayCount(sortedRows) - 1;
+    hi = ArrayCount(sortedDateRows) - 1;
+    startIdx = -1;
     while (lo <= hi)
     {
         mid = Int((lo + hi) / 2);
-        midId = Int(sortedRows[mid].id);
-        if (midId == iTarget) { return sortedRows[mid]; }
-        else if (midId < iTarget) { lo = mid + 1; }
+        midId = Int(sortedDateRows[mid].collaborator_id);
+        if (midId == iTarget)
+        {
+            startIdx = mid;
+            hi = mid - 1; 
+        }
+        else if (midId < iTarget) { lo = mid + 1; }
         else { hi = mid - 1; }
     }
-    return undefined;
-}
  
-
-function SortIdArray(idArray)
-{
-    return ArraySort(idArray, "Int(This)", "+");
-}
+    if (startIdx == -1) { return ""; }
  
-
-function IdArrayContainsSorted(sortedIdArray, value)
-{
-    var lo, hi, mid, midVal, iTarget;
-    iTarget = Int(value);
-    lo = 0;
-    hi = ArrayCount(sortedIdArray) - 1;
-    while (lo <= hi)
+    n = ArrayCount(sortedDateRows);
+    for (i = startIdx; i < n && Int(sortedDateRows[i].collaborator_id) == iTarget; i++)
     {
-        mid = Int((lo + hi) / 2);
-        midVal = Int(sortedIdArray[mid]);
-        if (midVal == iTarget) { return true; }
-        else if (midVal < iTarget) { lo = mid + 1; }
-        else { hi = mid - 1; }
+        if (Int(sortedDateRows[i].education_method_id) == iProgram)
+        {
+            return StrDate(Date(sortedDateRows[i].first_date), false);
+        }
     }
-    return false;
+    return "";
 }
  
 
-function FindCity(sortedCityRows, collaboratorID)
+function FindMacroregion(sortedMacroRows, collaboratorID)
 {
-    var cityRow, sCity;
-    cityRow = BinarySearchById(sortedCityRows, collaboratorID);
-    sCity = (cityRow != undefined && cityRow.sity != undefined ? String(cityRow.sity) : "");
-    return (sCity != "" ? sCity : "(без города)");
-}
- 
-
-function SortDateRowsByCollaboratorId(dateRows)
-{
-    return ArraySort(dateRows, "Int(This.collaborator_id)", "+");
+    var macroRow;
+    macroRow = BinarySearchById(sortedMacroRows, collaboratorID);
+    return (macroRow != undefined && macroRow.macroregion != undefined ? String(macroRow.macroregion) : "");
 }
  
 
