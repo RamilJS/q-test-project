@@ -752,21 +752,13 @@ function MatchAnySemicolonPattern(sPatternsList, sText, bIgnoreCase)
 * читает больше полей аудитории -- здесь достаточно f_mir_code, остальные оси этому
 * пикеру не нужны).
 *
-* ДОБАВЛЕНО (01.10.2026, реальный тест -- см. hex_id ниже). Обнаружено: пикер поля
-* matrix_id (foreign_elem, catalog: "compound_program") ВСЕГДА показывал ПУСТОЙ список у
-* руководителей, у которых query_qual строился как "MatchSome($elem/id,(<десятичный
-* id>))" -- при этом у УОРиАП (query_qual = "", без фильтра вовсе) пикер показывал
-* программы корректно, включая ТЕ ЖЕ самые id, что не показывались руководителям. Разбор
-* XML-экспорта тестовой модульной программы показал: id самого документа хранится как
-* HEX-СТРОКА с префиксом "0x" (например "0x6ABE0F840A6730B8"), а не как десятичное число
-* -- то есть $elem/id внутри query_qual (внутренний XQuery самого пикера, ОТДЕЛЬНЫЙ
-* механизм от нашего SQL/c.data.value()) сравнивает hex-строку с голым десятичным
-* числом и никогда не совпадает (без ошибки -- просто "ничего не найдено"). ФИКС: читаем
-* id ТЕКСТОМ прямо из XML (hex_id ниже) -- без единого арифметического преобразования,
-* чтобы не рисковать точностью на 19-значных id (см. общую находку про ненадёжность
-* числовых операций с такими id). Это сравнение строка-со-строкой, hex-с-hex, как и
-* хранится в документе на самом деле.
-* @returns {Object[]}   -   {id, name, f_matrix_active, f_mir_code, hex_id}.
+* ОТКАЧЕНО (01.10.2026) -- см. "ОТКАЧЕНО" у GetMatrixIdsByMirCodes() ниже: добавлялась
+* колонка hex_id в предположении, что id документа реально хранится как hex-строка --
+* реальный тест ПОКАЗАЛ, что это НЕВЕРНО (XQuery-выражение "(star-slash id)[1]" вернул тот же
+* ГОЛЫЙ ДЕСЯТИЧНЫЙ ТЕКСТ, что и cs.id, а не "0x..."). Hex в экспорте документа -- судя по
+* всему, ТОЛЬКО косметика самого экспорта/просмотра, а не реальное хранимое значение (та
+* же категория сюрприза, что уже была с is_native/person_id). Колонка убрана.
+* @returns {Object[]}   -   {id, name, f_matrix_active, f_mir_code}.
 */
 function GetCompoundProgramRowsForFilter()
 {
@@ -775,8 +767,7 @@ function GetCompoundProgramRowsForFilter()
     sqlText = sqlText + "select cs.id,\r\n";
     sqlText = sqlText + "       c.data.value('(*/name)[1]', 'varchar(max)') as name,\r\n";
     sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_matrix_active'']/value)[1]', 'varchar(max)') as f_matrix_active,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_code'']/value)[1]', 'varchar(max)') as f_mir_code,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/id)[1]', 'varchar(max)') as hex_id\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_code'']/value)[1]', 'varchar(max)') as f_mir_code\r\n";
     sqlText = sqlText + "from compound_programs cs\r\n";
     sqlText = sqlText + "inner join compound_program c on c.id = cs.id";
     return ArraySelectAll(XQuery("sql:" + sqlText));
@@ -798,46 +789,44 @@ function GetCompoundProgramRowsForFilter()
 * что была у старой модели: элемент БЕЗ mir_code_id тоже не делал матрицу "подходящей"
 * через этот механизм).
 *
-* ИЗМЕНЕНО (01.10.2026, см. находку про hex_id у GetCompoundProgramRowsForFilter() выше).
-* Раньше возвращала только числовой id (number[]) -- этого было достаточно для лога, но
-* НЕ годилось для query_qual пикера (сравнение $elem/id там идёт с hex-строкой документа,
-* не с десятичным числом). Теперь возвращает ОБА представления: десятичные id (для лога,
-* как раньше) и уже ГОТОВЫЕ К ВСТАВКЕ в query_qual hex-строки в кавычках (каждая вида
-* "0x6ABE0F840A6730B8" -- кавычки добавлены здесь же, чтобы не собирать их отдельно через
-* ArrayMerge с хитрым transform-выражением).
+* ОТКАЧЕНО (01.10.2026, реальный тест): пробовали версию, где эта функция возвращала
+* {ids, quotedHexIds} и query_qual строился на ЗАКВОЧЕННЫХ hex-строках
+* (MatchSome($elem/id,("0x..."))) -- результат ХУЖЕ: пикер теперь падает с ошибкой прямо
+* при клике (XAML-исключение в диалоге выбора), а не просто показывает пустой список, как
+* раньше. Это означает, что $elem/id на самом деле ЧИСЛО (не строка) -- сравнение с
+* заквоченным строковым литералом ломает XQuery-выражение целиком. ОТКАЧЕНО обратно к
+* голым десятичным id без кавычек -- см. функцию ниже и её использование в Run(). Причина
+* исходной проблемы (пикер пуст у руководителей) ПОКА НЕ НАЙДЕНА -- нужен другой подход,
+* не угадывание формата id.
 * @param {string[]} aTargetMirCodes
-* @returns {Object}   -   {ids: number[], quotedHexIds: string[]}.
+* @returns {number[]}
 */
 function GetMatrixIdsByMirCodes(aTargetMirCodes)
 {
-    var allRows, i, j, row, matrixIdSet, matrixQuotedHexIdSet;
+    var allRows, i, j, row, matrixIdSet;
 
     allRows = GetCompoundProgramRowsForFilter();
     alert("GetMatrixIdsByMirCodes(). Всего модульных программ (compound_program): " + ArrayCount(allRows));
 
     matrixIdSet = [];
-    matrixQuotedHexIdSet = [];
     for (i = 0; i < ArrayCount(allRows); i++)
     {
         row = allRows[i];
         if (!IsActiveText(row.f_matrix_active)) { continue; }
         if (row.f_mir_code == undefined || String(row.f_mir_code) == "") { continue; }
-        if (row.hex_id == undefined || String(row.hex_id) == "") { continue; }
         for (j = 0; j < ArrayCount(aTargetMirCodes); j++)
         {
             if (MatchAnySemicolonPattern(row.f_mir_code, aTargetMirCodes[j], true))
             {
                 matrixIdSet.push(Int(row.id));
-                matrixQuotedHexIdSet.push("\"" + String(row.hex_id) + "\"");
                 break;
             }
         }
     }
 
     matrixIdSet = ArraySelectDistinct(matrixIdSet, "This");
-    matrixQuotedHexIdSet = ArraySelectDistinct(matrixQuotedHexIdSet, "This");
     alert("GetMatrixIdsByMirCodes(). Подходящих активных модульных программ: " + ArrayCount(matrixIdSet));
-    return { ids: matrixIdSet, quotedHexIds: matrixQuotedHexIdSet };
+    return matrixIdSet;
 }
 
 DebugAlert("0. Файл начал выполняться");
@@ -916,19 +905,17 @@ try
         relevantMirCodes = GetRelevantMirCodes(iCurUserId, subordinateIds);
         DebugAlert("3e. Мир-коды (свой + подчинённых), всего: " + ArrayCount(relevantMirCodes) + " -- [" + ArrayMerge(relevantMirCodes, "This", ", ") + "]");
 
-        matrixMatch = GetMatrixIdsByMirCodes(relevantMirCodes);
-        matrixIds = matrixMatch.ids;
-        matrixQuotedHexIds = matrixMatch.quotedHexIds;
-        DebugAlert("3f. Матриц, подходящих под эти мир-коды: " + ArrayCount(matrixIds) + " -- [" + ArrayMerge(matrixIds, "This", ", ")
-            + "] (hex: [" + ArrayMerge(matrixQuotedHexIds, "This", ", ") + "])");
+        matrixIds = GetMatrixIdsByMirCodes(relevantMirCodes);
+        DebugAlert("3f. Матриц, подходящих под эти мир-коды: " + ArrayCount(matrixIds) + " -- [" + ArrayMerge(matrixIds, "This", ", ") + "]");
 
-        // ИЗМЕНЕНО (01.10.2026, см. находку про hex_id в GetCompoundProgramRowsForFilter()) --
-        // раньше здесь стояли ГОЛЫЕ ДЕСЯТИЧНЫЕ id (matrixIds), из-за чего query_qual никогда не
-        // совпадал ни с одним элементом пикера (id документа внутри $elem/id -- hex-строка).
-        // Теперь используем ГОТОВЫЕ К ВСТАВКЕ, уже заквоченные hex-строки (matrixQuotedHexIds).
-        if (ArrayCount(matrixQuotedHexIds) > 0)
+        // ОТКАЧЕНО (01.10.2026) -- см. ОТКАЧЕНО у GetMatrixIdsByMirCodes() выше. Версия с
+        // заквоченными hex-строками реально ЛОМАЛА пикер (падал при клике), а не просто не
+        // фильтровала. Возвращено к голым десятичным id без кавычек -- это ПРЕЖНЕЕ состояние
+        // (пикер пуст у руководителей, но хотя бы не падает) -- причина пустого пикера ещё не
+        // найдена, нужен другой подход.
+        if (ArrayCount(matrixIds) > 0)
         {
-            sMatrixQueryQual = "MatchSome($elem/id,(" + ArrayMerge(matrixQuotedHexIds, "This", ",") + "))";
+            sMatrixQueryQual = "MatchSome($elem/id,(" + ArrayMerge(matrixIds, "This", ",") + "))";
         }
         else
         {
