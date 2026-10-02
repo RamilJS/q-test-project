@@ -1,125 +1,265 @@
-sLogName = 'HREDU_182_DIAG_LINKS_TEST';
-EnableLog(sLogName, true);
-function alert(sInputObj) {
-    LogEvent(sLogName, sInputObj);
-    return sInputObj;
-};
+EnableLog('matrix_filters_btn_plan', true);
+function alert(_string) {
+    LogEvent('matrix_filters_btn_plan', _string);
+    return _string;
+}
 
-// =====================================================================
-// HREDU-237. ДИАГНОСТИЧЕСКАЯ выборка -- ТОЛЬКО для проверки поведения клика
-// по колонке в виджете "Табличные данные" (view:"link" в поле "Конфигурация").
-//
-// НЕ СВЯЗАНА с реальным отчётом "Процент обученных" (HREDU-182_procent_obuchennyh.js) --
-// никакого SQL, никакой compound_program, никакой аудитории, никакой иерархии. Единственная
-// задача -- отдать в RESULT несколько простых заранее заданных строк с полями, совпадающими
-// по имени с полями в пользовательской "Конфигурации" (city/program/total/plan/fact/percent/
-// mandatory), чтобы можно было отдельно, в полной изоляции от реальной бизнес-логики,
-// проверить -- работает ли переход по ссылке при клике на ячейку колонки вообще, на этом
-// виджете/инсталляции платформы.
-//
-// ПРЕДЫСТОРИЯ (02.10.2026, HREDU-237): в реальном отчёте per-column ссылки (view:"link" в
-// Конфигурации виджета) были реализованы ДВУМЯ документированными способами -- через ссылку
-// на имя поля ("link":"total_link" и т.п., где total_link -- скрытое поле в RESULT с готовым
-// URL) и через шаблон ("link":"/view_doc.html?...&city={{ITEM.city}}" и т.п.). Оба способа
-// в реальном тесте НЕ сработали -- клик по любой ячейке колонки total/plan/fact/mandatory
-// всё равно уводил на старый отчёт "общее количество". Пользователь в качестве решающей
-// проверки захардкодил "link":"/home" (тривиальный статический адрес, одинаковый для всех
-// четырёх колонок) прямо в Конфигурации виджета -- и это ТОЖЕ не сработало, клик всё равно
-// уходил на "общее количество". Это сильно говорит о том, что параметры view/link в
-// Конфигурации виджета не влияют на переход по клику вообще, независимо от содержимого
-// ссылки и механизма (имя поля vs шаблон) -- но остаётся неясным, в коде это (RESULT/
-// COLUMNS реального отчёта) или в самом виджете/платформе. Эта выборка должна ответить
-// именно на этот вопрос: если клик НЕ заработает и здесь, на полностью новой, предельно
-// простой выборке и новой странице с виджетом -- значит дело не в реальном отчёте, а в
-// виджете/платформе (или в способе применения Конфигурации), и следующий шаг -- не в этом
-// файле.
-//
-// Конфигурация виджета "Табличные данные" для теста (подготовлена пользователем 02.10.2026,
-// хардкодит "link":"/home" для всех четырёх числовых колонок -- вставить в поле
-// "Конфигурация" виджета, привязанного к ЭТОЙ выборке):
-//
-// [
-//   {"name": "city", "width": "20%"},
-//   {"name": "program", "width": "20%"},
-//   {"name": "total", "width": "10%", "view": "link", "link": "/home"},
-//   {"name": "plan", "width": "10%", "view": "link", "link": "/home"},
-//   {"name": "fact", "width": "10%", "view": "link", "link": "/home"},
-//   {"name": "percent", "width": "20%"},
-//   {"name": "mandatory", "width": "10%", "view": "link", "link": "/home"}
-// ]
-//
-// =====================================================================
-
-function Run()
+/*
+ * Чек-пойнт для отладки -- alert() с номером шага, только если DEBUG = true.
+ * @param {string} sStep
+ */
+DEBUG = true;
+function DebugAlert(sStep)
 {
-    alert("Run(). НАЧАЛО (HREDU-182_DIAG_links_test)");
-
-    RESULT = [];
-
+    if (!DEBUG)
+    {
+        return;
+    }
     try
     {
-        // Три простые строки + одна "итоговая" -- этого достаточно, чтобы проверить клик,
-        // никакой реальной нагрузки/агрегации тут нет и не должно быть.
-        RESULT = [
-            {
-                city: "Москва",
-                program: "Тестовая программа 1",
-                total: "100",
-                plan: "80",
-                fact: "60",
-                percent: "75%",
-                mandatory: "50"
-            },
-            {
-                city: "Санкт-Петербург",
-                program: "Тестовая программа 2",
-                total: "40",
-                plan: "30",
-                fact: "20",
-                percent: "67%",
-                mandatory: "10"
-            },
-            {
-                city: "Новосибирск",
-                program: "Тестовая программа 1",
-                total: "15",
-                plan: "15",
-                fact: "15",
-                percent: "100%",
-                mandatory: "5"
-            },
-            {
-                city: "Общий итог",
-                program: "",
-                total: "155",
-                plan: "125",
-                fact: "95",
-                percent: "76%",
-                mandatory: "65"
-            }
-        ];
-
-        alert("Run(). ГОТОВО (успех) -- строк: " + String(ArrayCount(RESULT)));
+        alert("[DEBUG] " + sStep);
     }
-    catch (_ex)
+    catch (_exDebug)
     {
-        RESULT = [];
-        alert("Run(). ОШИБКА: " + String(_ex));
+        // ничего -- отладочная печать не должна ронять основной код
     }
 }
 
-// =====================================================================
-// COLUMNS -- только для того, чтобы поля были видимы/подписаны и в самой выборке (не
-// обязательно для проверки виджета, но удобно при отладке через стандартный предпросмотр
-// выборки). Реальная кликабельность задаётся ИСКЛЮЧИТЕЛЬНО полем "Конфигурация" виджета
-// (см. JSON в комментарии выше), а не этим массивом.
-// =====================================================================
-COLUMNS = [
-    { "data": "city", "title": "Город" },
-    { "data": "program", "title": "Учебная программа" },
-    { "data": "total", "title": "Общее количество" },
-    { "data": "plan", "title": "План" },
-    { "data": "fact", "title": "Факт" },
-    { "data": "percent", "title": "Процент" },
-    { "data": "mandatory", "title": "Обязательно к прохождению" }
-];
+function getParam(sName, sDefault) {
+    var sValue = PARAMETERS.GetOptProperty(sName);
+    if (sDefault != undefined && (sValue == undefined || sValue == "")) {
+        sValue = sDefault;
+    }
+    return sValue;
+}
+
+/*
+ * Резолвит ID объекта cc_mir_codes в его текстовый код -- см. подробный комментарий в
+ * HREDU-183_filtry_modal_shag1.js (не менялось, скопировано без изменений).
+ * @param {number} iMirCodeID
+ * @returns {string}
+ */
+function ResolveMirCodeText(iMirCodeID)
+{
+    if (OptInt(iMirCodeID, 0) <= 0)
+    {
+        return "";
+    }
+    try
+    {
+        return String(tools.open_doc(Int(iMirCodeID)).TopElem.name);
+    }
+    catch (_ex)
+    {
+        return "";
+    }
+}
+
+/*
+ * Достаёт полный URL текущей страницы -- см. подробный комментарий в
+ * HREDU-183_filtry_modal_shag1.js (не менялось, скопировано без изменений). Способ 1:
+ * параметр cur_page_url ({{curEnv.curEnvUrl}}), способ 2 (запасной): Request.Url.
+ * @returns {string}
+ */
+function GetCurPageUrlSafe()
+{
+    var sUrl;
+
+    sUrl = getParam("cur_page_url", "");
+    if (sUrl != "")
+    {
+        return sUrl;
+    }
+
+    try
+    {
+        return String(Request.Url);
+    }
+    catch (_ex)
+    {
+        return "";
+    }
+}
+
+/*
+ * Вырезает значение GET-параметра из URL -- см. HREDU-183_filtry_modal_shag1.js
+ * (не менялось, скопировано без изменений).
+ * @param {string} sUrl
+ * @param {string} sParamName
+ * @returns {string}
+ */
+function GetQueryParam(sUrl, sParamName)
+{
+    var sAmpMarker, sQMarkMarker, iParamPos, iValueStart, iAmpPos, iValueEnd, sRawValue, iUrlLen;
+
+    iUrlLen = StrLen(sUrl);
+
+    sAmpMarker = "&" + sParamName + "=";
+    iParamPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
+    if (iParamPos != undefined)
+    {
+        iValueStart = iParamPos + StrLen(sAmpMarker);
+    }
+    else
+    {
+        sQMarkMarker = "?" + sParamName + "=";
+        iParamPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
+        if (iParamPos == undefined)
+        {
+            return "";
+        }
+        iValueStart = iParamPos + StrLen(sQMarkMarker);
+    }
+
+    iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
+    iValueEnd = (iAmpPos != undefined ? iAmpPos : iUrlLen);
+
+    sRawValue = StrRangePos(sUrl, iValueStart, iValueEnd);
+
+    try
+    {
+        return UrlDecode(sRawValue);
+    }
+    catch (_exDecode)
+    {
+        return sRawValue;
+    }
+}
+
+/*
+ * Превращает "0" (признак "ничего не выбрано" для picker-полей) обратно в "" -- см.
+ * HREDU-183_filtry_modal_shag1.js (не менялось, скопировано без изменений).
+ * @param {string} sValue
+ * @returns {string}
+ */
+function SanitizeIdFieldValue(sValue)
+{
+    if (sValue == "0" || sValue == undefined)
+    {
+        return "";
+    }
+    return sValue;
+}
+
+/*
+ * Убирает из URL старое значение GET-параметра -- см. HREDU-183_filtry_modal_shag1.js
+ * (не менялось, скопировано без изменений).
+ * @param {string} sUrl
+ * @param {string} sParamName
+ * @returns {string}
+ */
+function RemoveQueryParam(sUrl, sParamName)
+{
+    var sAmpMarker, sQMarkMarker, iMarkerPos, iValueStart, iAmpPos, iUrlLen, sBefore, sAfter;
+
+    iUrlLen = StrLen(sUrl);
+
+    sAmpMarker = "&" + sParamName + "=";
+    iMarkerPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
+    if (iMarkerPos != undefined)
+    {
+        iValueStart = iMarkerPos + StrLen(sAmpMarker);
+        iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
+        sBefore = StrRangePos(sUrl, 0, iMarkerPos);
+        sAfter = (iAmpPos != undefined ? StrRangePos(sUrl, iAmpPos, iUrlLen) : "");
+        return sBefore + sAfter;
+    }
+
+    sQMarkMarker = "?" + sParamName + "=";
+    iMarkerPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
+    if (iMarkerPos != undefined)
+    {
+        iValueStart = iMarkerPos + StrLen(sQMarkMarker);
+        iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
+        sBefore = StrRangePos(sUrl, 0, iMarkerPos + 1); // включая сам "?"
+        sAfter = (iAmpPos != undefined ? StrRangePos(sUrl, iAmpPos + 1, iUrlLen) : "");
+        return sBefore + sAfter;
+    }
+
+    return sUrl;
+}
+
+DebugAlert("0. Файл начал выполняться (кнопка 'План', result_type зашит как 'plan')");
+
+try
+{
+    // ДОБАВЛЕНО (02.10.2026): в отличие от HREDU-183_filtry_modal_shag1.js здесь НЕТ формы и
+    // НЕТ выбора пользователя -- result_type ЗАШИТ прямо в код, под эту конкретную кнопку.
+    sResultType = "plan";
+
+    DebugAlert("1. Читаем текущий URL страницы (cur_page_url, затем Request.Url как запасной план)");
+    sModalPageUrl = GetCurPageUrlSafe();
+    DebugAlert("1b. Итоговый URL, который используем: [" + sModalPageUrl + "]");
+
+    // Остальные фильтры (matrix_id/macroregion/mir_code_id/position_common_id/program_id/
+    // city) -- те же самые СКВОЗНЫЕ параметры, что в HREDU-183_filtry_modal_shag1.js (там
+    // поля формы для них уже скрыты -- см. комментарий в том файле -- значит и там, и
+    // здесь их значение берётся НАПРЯМУЮ из текущего URL, без формы).
+    sDefaultMatrixID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "matrix_id"));
+    sDefaultMacroregion = GetQueryParam(sModalPageUrl, "macroregion");
+    sDefaultMirCodeID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "mir_code_id"));
+    sDefaultPositionCommonID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "position_common_id"));
+    sDefaultProgramID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "program_id"));
+    sDefaultCity = GetQueryParam(sModalPageUrl, "city");
+
+    DebugAlert("1c. Сквозные значения из URL: matrix_id=[" + sDefaultMatrixID + "] macroregion=[" + sDefaultMacroregion
+        + "] mir_code_id=[" + sDefaultMirCodeID + "] position_common_id=[" + sDefaultPositionCommonID
+        + "] program_id=[" + sDefaultProgramID + "] city=[" + sDefaultCity + "]");
+
+    iMatrixID = OptInt(sDefaultMatrixID, 0);
+    sMacroregion = String(sDefaultMacroregion);
+    iMirCodeID = OptInt(sDefaultMirCodeID, 0);
+    iPositionCommonID = OptInt(sDefaultPositionCommonID, 0);
+    iProgramID = OptInt(sDefaultProgramID, 0);
+    sCity = String(sDefaultCity);
+
+    sMirCodeText = ResolveMirCodeText(iMirCodeID);
+    DebugAlert("2. mir_code резолвлен в текст: [" + sMirCodeText + "]");
+
+    // Стираем старые значения всех 7 параметров со страницы и дописываем новые (та же
+    // логика переносимости, что в HREDU-183_filtry_modal_shag1.js) -- result_type среди
+    // них ВСЕГДА result_type=plan для этой кнопки.
+    sCleanBaseUrl = sModalPageUrl;
+    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "matrix_id");
+    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "macroregion");
+    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "mir_code_id");
+    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "mir_code");
+    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "position_common_id");
+    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "program_id");
+    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "result_type");
+    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "city");
+    DebugAlert("3. Текущая страница без старых фильтров: [" + sCleanBaseUrl + "]");
+
+    oQueryParams = {
+        matrix_id: String(iMatrixID),
+        macroregion: sMacroregion,
+        mir_code: sMirCodeText,
+        mir_code_id: String(iMirCodeID),
+        position_common_id: String(iPositionCommonID),
+        program_id: String(iProgramID),
+        result_type: sResultType,
+        city: sCity
+    };
+    sQueryString = UrlEncodeQuery(oQueryParams);
+
+    sSeparator = (StrOptSubStrPos(sCleanBaseUrl, "?", false) != undefined ? "&" : "?");
+    sFullUrl = sCleanBaseUrl + sSeparator + sQueryString;
+    DebugAlert("4. Итоговый URL redirect: " + sFullUrl);
+
+    // ПРОВЕРИТЬ РЕАЛЬНЫМ ТЕСТОМ (см. флаг в шапке файла) -- простой redirect без
+    // close_form/confirm_result, т.к. кнопка не открывает модалку.
+    RESULT = {
+        command: "redirect",
+        url: sFullUrl
+    };
+
+    DebugAlert("5. RESULT собран (redirect на result_type=plan)");
+}
+catch (_exMain)
+{
+    RESULT = {
+        command: "alert",
+        msg: ("Ошибка в кнопке 'План' (HREDU-183_set_mode_plan.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
+        title: "ОШИБКА"
+    };
+}
