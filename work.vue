@@ -1,11 +1,15 @@
 [
   {"name": "city", "width": "20%"},
   {"name": "program", "width": "20%"},
-  {"name": "total", "width": "10%", "view": "link", "link": "total_link"},
-  {"name": "plan", "width": "10%", "view": "link", "link": "plan_link"},
-  {"name": "fact", "width": "10%", "view": "link", "link": "fact_link"},
+  {"name": "total", "width": "10%", "view": "link",
+   "link": "/view_doc.html?mode=matrix_report&matrix_id={{ITEM.part_matrix_id}}&macroregion={{ITEM.part_macroregion}}&mir_code={{ITEM.part_mir_code}}&position_common_id={{ITEM.part_position_common_id}}&program_id={{ITEM.part_program_id}}&result_type=total&city={{ITEM.city}}"},
+  {"name": "plan", "width": "10%", "view": "link",
+   "link": "/view_doc.html?mode=matrix_report&matrix_id={{ITEM.part_matrix_id}}&macroregion={{ITEM.part_macroregion}}&mir_code={{ITEM.part_mir_code}}&position_common_id={{ITEM.part_position_common_id}}&program_id={{ITEM.part_program_id}}&result_type=plan&city={{ITEM.city}}"},
+  {"name": "fact", "width": "10%", "view": "link",
+   "link": "/view_doc.html?mode=matrix_report&matrix_id={{ITEM.part_matrix_id}}&macroregion={{ITEM.part_macroregion}}&mir_code={{ITEM.part_mir_code}}&position_common_id={{ITEM.part_position_common_id}}&program_id={{ITEM.part_program_id}}&result_type=fact&city={{ITEM.city}}"},
   {"name": "percent", "width": "20%"},
-  {"name": "mandatory", "width": "10%", "view": "link", "link": "mandatory_link"}
+  {"name": "mandatory", "width": "10%", "view": "link",
+   "link": "/view_doc.html?mode=matrix_report&matrix_id={{ITEM.part_matrix_id}}&macroregion={{ITEM.part_macroregion}}&mir_code={{ITEM.part_mir_code}}&position_common_id={{ITEM.part_position_common_id}}&program_id={{ITEM.part_program_id}}&result_type=mandatory&city={{ITEM.city}}"}
 ]
 
 sLogName = 'HREDU_182_7685313676595870594';
@@ -2084,7 +2088,30 @@ function Run()
                 total_link: BuildTepLink(matrixId, (row.macroregion != "" ? row.macroregion : sMacroregionFilter), sMirCodeFilter, iPositionFilter, row.programId, "total", row.city),
                 plan_link: BuildTepLink(matrixId, (row.macroregion != "" ? row.macroregion : sMacroregionFilter), sMirCodeFilter, iPositionFilter, row.programId, "plan", row.city),
                 fact_link: BuildTepLink(matrixId, (row.macroregion != "" ? row.macroregion : sMacroregionFilter), sMirCodeFilter, iPositionFilter, row.programId, "fact", row.city),
-                mandatory_link: BuildTepLink(matrixId, (row.macroregion != "" ? row.macroregion : sMacroregionFilter), sMirCodeFilter, iPositionFilter, row.programId, "mandatory", row.city)
+                mandatory_link: BuildTepLink(matrixId, (row.macroregion != "" ? row.macroregion : sMacroregionFilter), sMirCodeFilter, iPositionFilter, row.programId, "mandatory", row.city),
+                // ДОБАВЛЕНО (02.10.2026, по предложению пользователя -- "зашить ссылки
+                // прямо в Конфигурацию" через {{ITEM.поле}}-подстановку, см. документацию
+                // WebSoft про `view:"link"` + `link`/`url_from`). Это АЛЬТЕРНАТИВНЫЙ способ
+                // задать ссылку -- не через отдельное готовое поле-URL (total_link и т.п.
+                // выше), а через ШАБЛОН прямо в LPE "Конфигурации" виджета, собирающий URL
+                // из СЫРЫХ (не склеенных/не закодированных) значений строки. "part_"-поля
+                // ниже -- именно такие сырые значения, нужны ТОЛЬКО для этого альтернативного
+                // способа (если он не потребуется -- можно будет убрать). matrix_id/mir_code/
+                // position_common_id ОДИНАКОВЫ у всех строк этого прогона (общие фильтры из
+                // URL страницы) -- дублируются в каждой строке только потому, что шаблон в
+                // Конфигурации читает ТОЛЬКО ITEM текущей строки, обратиться к "глобальному"
+                // значению отдельно он не может.
+                // ВНИМАНИЕ, НЕ ПРОВЕРЕНО РЕАЛЬНЫМ ТЕСТОМ: city/macroregion могут содержать
+                // кириллицу и (у macroregion) пробелы -- неизвестно, кодирует ли платформа
+                // {{ITEM.*}}-подстановку в href автоматически (в наших РУЧНЫХ ссылках выше
+                // это делают UrlEncodeQuery()/HtmlEscapeAmp() -- см. BuildTepLink()). Если
+                // ссылка после подстановки окажется битой на city/macroregion с пробелом --
+                // это и есть причина, нужно будет проверять отдельно.
+                part_matrix_id: String(matrixId),
+                part_macroregion: (row.macroregion != "" ? row.macroregion : sMacroregionFilter),
+                part_mir_code: sMirCodeFilter,
+                part_position_common_id: String(iPositionFilter),
+                part_program_id: String(row.programId)
             });
             totalAcc.total = totalAcc.total + row.total;
             totalAcc.mandatory = totalAcc.mandatory + row.mandatory;
@@ -2109,7 +2136,15 @@ function Run()
             total_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, 0, "total", ""),
             plan_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, 0, "plan", ""),
             fact_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, 0, "fact", ""),
-            mandatory_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, 0, "mandatory", "")
+            mandatory_link: BuildTepLink(matrixId, sMacroregionFilter, sMirCodeFilter, iPositionFilter, 0, "mandatory", ""),
+            // ДОБАВЛЕНО (02.10.2026) -- те же "сырые" поля для альтернативного способа
+            // ссылки через {{ITEM.*}}-шаблон, см. комментарий над push() в цикле выше.
+            // sCity="" и iProgramId=0 для "Общего итога" -- см. комментарий над этим push().
+            part_matrix_id: String(matrixId),
+            part_macroregion: sMacroregionFilter,
+            part_mir_code: sMirCodeFilter,
+            part_position_common_id: String(iPositionFilter),
+            part_program_id: "0"
         });
 
         PerfCheckpoint("Сборка resultRows + построение BuildTepLink() на каждую строку -- ЧИСТЫЙ КОД");
@@ -2181,6 +2216,13 @@ COLUMNS = [
     { "data": "plan_link", "hidden": true, "editable": false, "sortable": false },
     { "data": "fact_link", "hidden": true, "editable": false, "sortable": false },
     { "data": "mandatory_link", "hidden": true, "editable": false, "sortable": false },
+    // ДОБАВЛЕНО (02.10.2026) -- "сырые" поля для альтернативного способа ссылки через
+    // {{ITEM.*}}-шаблон прямо в LPE "Конфигурации" (см. part_*-поля в push() в Run()).
+    { "data": "part_matrix_id", "hidden": true, "editable": false, "sortable": false },
+    { "data": "part_macroregion", "hidden": true, "editable": false, "sortable": false },
+    { "data": "part_mir_code", "hidden": true, "editable": false, "sortable": false },
+    { "data": "part_position_common_id", "hidden": true, "editable": false, "sortable": false },
+    { "data": "part_program_id", "hidden": true, "editable": false, "sortable": false },
     { "data": "city", "title": "Город", "type": "string", "editable": false, "sortable": true },
     { "data": "program", "title": "Учебная программа", "type": "string", "editable": false, "sortable": true },
     { "data": "total", "title": "Общее кол-во сотрудников", "type": "integer", "editable": false, "sortable": true },
