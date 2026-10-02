@@ -1,3 +1,13 @@
+[
+  {"name": "city", "width": "20%"},
+  {"name": "program", "width": "20%"},
+  {"name": "total", "width": "10%", "view": "link", "link": "total_link"},
+  {"name": "plan", "width": "10%", "view": "link", "link": "plan_link"},
+  {"name": "fact", "width": "10%", "view": "link", "link": "fact_link"},
+  {"name": "percent", "width": "20%"},
+  {"name": "mandatory", "width": "10%", "view": "link", "link": "mandatory_link"}
+]
+
 sLogName = 'HREDU_182_7685313676595870594';
 EnableLog(sLogName, true);
 function alert(sInputObj) {
