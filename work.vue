@@ -1,6 +1,6 @@
-EnableLog('matrix_filters_btn_fact', true);
+EnableLog('matrix_filters_btn_mandatory', true);
 function alert(_string) {
-    LogEvent('matrix_filters_btn_fact', _string);
+    LogEvent('matrix_filters_btn_mandatory', _string);
     return _string;
 }
 
@@ -179,13 +179,13 @@ function RemoveQueryParam(sUrl, sParamName)
     return sUrl;
 }
 
-DebugAlert("0. Файл начал выполняться (кнопка 'Факт', result_type зашит как 'fact')");
+DebugAlert("0. Файл начал выполняться (кнопка 'Обязательно к прохождению', result_type зашит как 'mandatory')");
 
 try
 {
     // ДОБАВЛЕНО (02.10.2026): в отличие от HREDU-183_filtry_modal_shag1.js здесь НЕТ формы и
     // НЕТ выбора пользователя -- result_type ЗАШИТ прямо в код, под эту конкретную кнопку.
-    sResultType = "fact";
+    sResultType = "mandatory";
 
     DebugAlert("1. Читаем текущий URL страницы (cur_page_url, затем Request.Url как запасной план)");
     sModalPageUrl = GetCurPageUrlSafe();
@@ -218,7 +218,7 @@ try
 
     // Стираем старые значения всех 7 параметров со страницы и дописываем новые (та же
     // логика переносимости, что в HREDU-183_filtry_modal_shag1.js) -- result_type среди
-    // них ВСЕГДА result_type=fact для этой кнопки.
+    // них ВСЕГДА result_type=mandatory для этой кнопки.
     sCleanBaseUrl = sModalPageUrl;
     sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "matrix_id");
     sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "macroregion");
@@ -253,13 +253,13 @@ try
         url: sFullUrl
     };
 
-    DebugAlert("5. RESULT собран (redirect на result_type=fact)");
+    DebugAlert("5. RESULT собран (redirect на result_type=mandatory)");
 }
 catch (_exMain)
 {
     RESULT = {
         command: "alert",
-        msg: ("Ошибка в кнопке 'Факт' (HREDU-183_set_mode_fact.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
+        msg: ("Ошибка в кнопке 'Обязательно к прохождению' (HREDU-183_set_mode_mandatory.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
         title: "ОШИБКА"
     };
 }
