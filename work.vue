@@ -1,6 +1,6 @@
-EnableLog('matrix_filters_btn_plan', true);
+EnableLog('matrix_filters_btn_fact', true);
 function alert(_string) {
-    LogEvent('matrix_filters_btn_plan', _string);
+    LogEvent('matrix_filters_btn_fact', _string);
     return _string;
 }
 
@@ -179,13 +179,13 @@ function RemoveQueryParam(sUrl, sParamName)
     return sUrl;
 }
 
-DebugAlert("0. Файл начал выполняться (кнопка 'План', result_type зашит как 'plan')");
+DebugAlert("0. Файл начал выполняться (кнопка 'Факт', result_type зашит как 'fact')");
 
 try
 {
     // ДОБАВЛЕНО (02.10.2026): в отличие от HREDU-183_filtry_modal_shag1.js здесь НЕТ формы и
     // НЕТ выбора пользователя -- result_type ЗАШИТ прямо в код, под эту конкретную кнопку.
-    sResultType = "plan";
+    sResultType = "fact";
 
     DebugAlert("1. Читаем текущий URL страницы (cur_page_url, затем Request.Url как запасной план)");
     sModalPageUrl = GetCurPageUrlSafe();
@@ -218,7 +218,7 @@ try
 
     // Стираем старые значения всех 7 параметров со страницы и дописываем новые (та же
     // логика переносимости, что в HREDU-183_filtry_modal_shag1.js) -- result_type среди
-    // них ВСЕГДА result_type=plan для этой кнопки.
+    // них ВСЕГДА result_type=fact для этой кнопки.
     sCleanBaseUrl = sModalPageUrl;
     sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "matrix_id");
     sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "macroregion");
@@ -253,13 +253,13 @@ try
         url: sFullUrl
     };
 
-    DebugAlert("5. RESULT собран (redirect на result_type=plan)");
+    DebugAlert("5. RESULT собран (redirect на result_type=fact)");
 }
 catch (_exMain)
 {
     RESULT = {
         command: "alert",
-        msg: ("Ошибка в кнопке 'План' (HREDU-183_set_mode_plan.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
+        msg: ("Ошибка в кнопке 'Факт' (HREDU-183_set_mode_fact.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
         title: "ОШИБКА"
     };
 }
