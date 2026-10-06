@@ -1062,7 +1062,7 @@ function BuildStatusColor(bPassed, iDaysWorked, iDelayDays, iDurationDays)
 function BuildStatusHtml(bPassed)
 {
     var sColor;
-    sColor = (bPassed ? "#28a745" : "#dc3545");
+    sColor = (bPassed ? "#85d698" : "#e96256");
     return "<div style=\"width:100%;height:100%;background-color:" + sColor + ";\">&nbsp;</div>";
 }
  
