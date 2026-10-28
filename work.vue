@@ -115,7 +115,7 @@
                     <img
                       class="courses-themes-icon"
                       src="../icons/checklist.svg"
-                      alt="Иконка тем теста"
+                      alt="Иконка тем опроса"
                     />
                   </div>
 
@@ -124,7 +124,7 @@
                       class="main-themes-title text-secondary text-h6 text-black text-bold q-mb-xs"
                       style="font-size: 1.5em"
                     >
-                      Основные темы теста
+                      Основные темы опроса
                     </p>
 
                     <ul class="courses-themes-list">
@@ -185,46 +185,12 @@
                   </div>
 
                   <div
-                    v-if="category.attempNum !== ''"
-                    class="small-container time column"
-                  >
-                    <div class="time-content">
-                      <p class="main-purpose-title text-black q-mb-sm">
-                        Количество попыток
-                      </p>
-                    </div>
-
-                    <div class="time">
-                      <p class="competency-title text-grey">
-                        {{ category.attempNum }} попыток
-                      </p>
-                    </div>
-                  </div>
-
-                  <div
-                    v-if="category.passingScore !== ''"
-                    class="small-container time column"
-                  >
-                    <div class="time-content">
-                      <p class="main-purpose-title text-black q-mb-sm">
-                        Проходной балл
-                      </p>
-                    </div>
-
-                    <div class="time">
-                      <p class="competency-title text-grey">
-                        {{ category.passingScore }} баллов
-                      </p>
-                    </div>
-                  </div>
-
-                  <div
                     v-if="category.dateStart !== ''"
                     class="small-container date-start column"
                   >
                     <div class="date-start-content">
                       <p class="main-date-start-title text-black q-mb-sm">
-                        Тест назначен
+                        Опрос назначен
                       </p>
                     </div>
 
@@ -241,7 +207,7 @@
                   >
                     <div class="date-finish-content">
                       <p class="main-date-finish-title text-black q-mb-sm">
-                        Пройти тест до
+                        Пройти опрос до
                       </p>
                     </div>
 
@@ -319,7 +285,7 @@
                     v-if="category.reviewLink !== '#'"
                   >
                     <a :href="category.reviewLink" class="review-link">
-                      Оставить отзыв о тесте
+                      Оставить отзыв об опросе
                     </a>
                   </div>
                 </div>
@@ -350,23 +316,23 @@ const mainThemes = ref([]);
 const courseButtons = ref([]);
 const cancelMessage = ref(""); // Для отображения сообщения об отмене
 
-// Загрузка данных теста
+// Загрузка данных опроса
 async function fetchCourseData() {
   try {
     const params = {
-      collection_code: "vtbl_quasar_test_data",
-      parameters: "test_id=" + route.params.id,
+      collection_code: "vtbl_quasar_survey_data",
+      parameters: "survey_id=" + route.params.id,
     };
     const { data } = await axios.post(
       BACKEND_URL,
       new URLSearchParams(params).toString(),
     );
-    const courseData = data.results[0]; // Данные теста
+    const courseData = data.results[0]; // Данные опроса
     category.value = courseData;
     mainThemes.value = courseData.courses; // Основные темы
     courseButtons.value = courseData.buttons; // Кнопки управления
   } catch (error) {
-    console.error("Ошибка загрузки теста", error);
+    console.error("Ошибка загрузки опроса", error);
   }
 }
 
@@ -392,15 +358,15 @@ async function cancelCourse() {
     const cancelUrl = `${category.value.buttons[1].url}`;
     const { data } = await axios.post(cancelUrl); // Проверка ответа сервера
     if (data.is_done === 1) {
-      // Успешная отмена — обновить данные теста
+      // Успешная отмена — обновить данные опроса
       fetchCourseData();
     } else {
       // Отобразить сообщение об ошибке от сервера
       showCancelMessage(data.message);
     }
   } catch (error) {
-    console.error("Ошибка при отмене теста:", error);
-    showCancelMessage("Произошла ошибка при отмене теста.");
+    console.error("Ошибка при отмене опроса:", error);
+    showCancelMessage("Произошла ошибка при отмене опроса.");
   }
 }
 
@@ -454,7 +420,7 @@ onMounted(() => {
 }
 .breadcrumb-item {
   cursor: pointer;
-  color: #4176ea;
+  color: #4176EA;
 }
 .small-container {
   margin-right: 30px;
