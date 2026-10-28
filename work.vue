@@ -853,7 +853,7 @@ try
     // ДОБАВЛЕНО (28.10.2026): поле "Макрорегион" теперь select -- если в URL осталось
     // старое значение, введённое вручную и отсутствующее в списке, сбрасываем на "" ("Все
     // макрорегионы"), чтобы значение select всегда совпадало с одним из entries.
-    if (sDefaultMacroregion != "Сибирь" && sDefaultMacroregion != "Юг" && sDefaultMacroregion != "Москва" && sDefaultMacroregion != "СЗФО")
+    if (sDefaultMacroregion != "Сибирь" && sDefaultMacroregion != "ЮГ" && sDefaultMacroregion != "Москва" && sDefaultMacroregion != "СЗФО")
     {
         sDefaultMacroregion = "";
     }
@@ -1001,7 +1001,7 @@ try
             entries: [
                 { name: "Все макрорегионы", value: "" },
                 { name: "Сибирь", value: "Сибирь" },
-                { name: "Юг", value: "Юг" },
+                { name: "ЮГ", value: "ЮГ" },
                 { name: "Москва", value: "Москва" },
                 { name: "СЗФО", value: "СЗФО" }
             ],
