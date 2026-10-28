@@ -850,6 +850,13 @@ try
     DebugAlert("3b2. Итоговый URL, который используем: [" + sModalPageUrl + "]");
     sDefaultMatrixID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "matrix_id"));
     sDefaultMacroregion = GetQueryParam(sModalPageUrl, "macroregion");
+    // ДОБАВЛЕНО (28.10.2026): поле "Макрорегион" теперь select -- если в URL осталось
+    // старое значение, введённое вручную и отсутствующее в списке, сбрасываем на "" ("Все
+    // макрорегионы"), чтобы значение select всегда совпадало с одним из entries.
+    if (sDefaultMacroregion != "Сибирь" && sDefaultMacroregion != "Юг" && sDefaultMacroregion != "Москва" && sDefaultMacroregion != "СЗФО")
+    {
+        sDefaultMacroregion = "";
+    }
     sDefaultMirCodeID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "mir_code_id"));
     sDefaultPositionCommonID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "position_common_id"));
     sDefaultProgramID = SanitizeIdFieldValue(GetQueryParam(sModalPageUrl, "program_id"));
@@ -980,16 +987,24 @@ try
             query_qual: sMatrixQueryQual
         },
         {
-            // ИЗМЕНЕНО (16.09.2026, по прямой просьбе пользователя): было select со
-            // списком значений из GetMacroregionEntries() (SQL DISTINCT, убрана) -- стало
-            // обычное текстовое поле, значение вводится вручную и сравнивается "как есть".
-            // Убрано и visibility: false -- поле было скрыто, для текстового поля ввода
-            // это не нужно. См. тот же комментарий про непроверенность типа "string" в
-            // HREDU-183_filtry_modal_shag1.js -- относится и сюда.
+            // ИЗМЕНЕНО (28.10.2026, по прямой просьбе пользователя): текстовое поле снова
+            // стало select -- фиксированный список макрорегионов (значения -- БУКВАЛЬНО как
+            // прислал пользователь, должны совпадать с custom_elem f_2ewj у сотрудников, с
+            // которым выборка сравнивает "как есть"). Первый пункт "Все макрорегионы" с
+            // пустым значением -- фильтр не применяется (как раньше при пустом поле).
+            // Формат entries ({ name, value }) -- тот же, что у рабочего select "Режим
+            // отчёта" в HREDU-183_filtry_modal_shag1.js. Было (16.09.2026): type "string".
             name: "macroregion",
-           label: "Макрорегион",
-            type: "string",
+            label: "Макрорегион",
+            type: "select",
             value: sDefaultMacroregion,
+            entries: [
+                { name: "Все макрорегионы", value: "" },
+                { name: "Сибирь", value: "Сибирь" },
+                { name: "Юг", value: "Юг" },
+                { name: "Москва", value: "Москва" },
+                { name: "СЗФО", value: "СЗФО" }
+            ],
             mandatory: false
         }
         /* ЗАКОММЕНТИРОВАНО (05.10.2026, по прямой просьбе пользователя -- "закомментировать
