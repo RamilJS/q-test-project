@@ -1,18 +1,17 @@
 // =====================================================================
-// HREDU-182. Модальное окно фильтров для страницы "Процент обученных".
+// HREDU-239. "Полный отчёт по матрицам" -- удалённое действие на кнопку "Выгрузить отчёт".
 //
-// Поля формы: matrix_id (модульная программа, catalog "compound_program") и macroregion
-// (select). Скрытые фильтры mir_code_id / position_common_id / program_id не выводятся в
-// форме, а сквозно переносятся из текущего URL. По "Применить" -- redirect на ту же
-// страницу (cur_page_url -> {{curEnv.curEnvUrl}}) с новыми параметрами в URL.
+// Строит Excel (HTML-таблица с Office-namespace): одна строка на сотрудника (ФИО,
+// Должность, Подразделение, Макрорегион) и по одной колонке на каждую учебную программу
+// выбранной матрицы -- дата прохождения или пусто. Порядок колонок -- порядок задач в
+// матрице.
 //
-// Видимость пикера матриц:
-//   - член группы УОРиАП -- все матрицы;
-//   - остальные -- только активные матрицы, у которых f_mir_code подходит под мир-код
-//     самого пользователя или его подчинённых по всей цепочке вниз (непосредственный
-//     руководитель, is_native=true);
-//   - если таких нет -- пустой список и поясняющее сообщение.
-// curUserId должен быть привязан в LPE к {{curUser.id}}.
+// Фильтры matrix_id и macroregion берутся из URL страницы (cur_page_url ->
+// {{curEnv.curEnvUrl}}). Видимость: член УОРиАП видит всех, остальные -- только
+// подчинённых по всей цепочке вниз (curUserId -> {{curUser.id}} в LPE).
+//
+// Готовый HTML кладётся в кэш tools_web.set_user_data("excel_html_" + curUserID), его
+// отдаёт на скачивание страница assessment_excel_export.html.
 // =====================================================================
 
 //-------------------------------------------------------------------------
@@ -21,10 +20,9 @@
 
 DEBUG = false;                          // Включает подробные логи для дебага
 LOG_NAME = "remote_action";             // Имя журнала на сервере, куда будут писаться логи
-CUR_OBJECT_ID = 7685325909044809318;    // ID текущего удалённого действия для подстановки в логи
+CUR_OBJECT_ID = 7681618713416661052;    // ID текущего удалённого действия для подстановки в логи
 
-UORIAP_GROUP_ID = "7687978602560891542";
-UORIAP_GROUP_XQUERY_TYPE = "groups";
+EXPORT_PAGE_URL = "assessment_excel_export.html";
 
 //-------------------------------------------------------------------------
 //              Область функций
@@ -47,58 +45,6 @@ function LogAlert(typeLog, message)
     }
 }
 
-function GetParam(sName, sDefault)
-{
-    var sValue = PARAMETERS.GetOptProperty(sName);
-    if (sDefault != undefined && (sValue == undefined || sValue == ""))
-    {
-        sValue = sDefault;
-    }
-    return sValue;
-}
-
-function GetFormField(sName, sDefault)
-{
-    var sValue = ArrayOptFind(aFormFields, ("This.name == " + XQueryLiteral(sName)));
-    sValue = (sValue != undefined ? sValue.value : sValue);
-    if (sDefault != undefined && (sValue == undefined || sValue == ""))
-    {
-        sValue = sDefault;
-    }
-    return sValue;
-}
-
-function GetFormFieldDefault(sName, sDefault)
-{
-    var sValue = ArrayOptFind(aFormFieldsDef, ("This.name == " + XQueryLiteral(sName)));
-    sValue = (sValue != undefined ? sValue.value : sValue);
-    if (sDefault != undefined && (sValue == undefined || sValue == ""))
-    {
-        sValue = sDefault;
-    }
-    return sValue;
-}
-
-/*
-* ID документа cc_mir_code -> текстовый код (то, что лежит в f_mir_codes у сотрудников).
-*/
-function ResolveMirCodeText(iMirCodeID)
-{
-    if (OptInt(iMirCodeID, 0) <= 0)
-    {
-        return "";
-    }
-    try
-    {
-        return String(tools.open_doc(Int(iMirCodeID)).TopElem.name);
-    }
-    catch (_ex)
-    {
-        LogAlert(3, "ResolveMirCodeText(). Не удалось открыть мир-код id=" + iMirCodeID + ": " + ExtractUserError(_ex));
-        return "";
-    }
-}
-
 /*
 * URL текущей страницы: в удалённом действии Request.Url ненадёжен, основной источник --
 * параметр cur_page_url.
@@ -106,22 +52,15 @@ function ResolveMirCodeText(iMirCodeID)
 function GetCurPageUrlSafe()
 {
     var sUrl;
-
-    sUrl = GetParam("cur_page_url", "");
+    try { sUrl = String(PARAMETERS.GetOptProperty("cur_page_url", "")); }
+    catch (_exParam) { sUrl = ""; }
     if (sUrl != "")
     {
         return sUrl;
     }
-
     LogAlert(3, "GetCurPageUrlSafe(). Параметр cur_page_url пуст -- пробуем Request.Url");
-    try
-    {
-        return String(Request.Url);
-    }
-    catch (_ex)
-    {
-        return "";
-    }
+    try { return String(Request.Url); }
+    catch (_ex) { return ""; }
 }
 
 /*
@@ -130,9 +69,7 @@ function GetCurPageUrlSafe()
 function GetQueryParam(sUrl, sParamName)
 {
     var sAmpMarker, sQMarkMarker, iParamPos, iValueStart, iAmpPos, iValueEnd, sRawValue, iUrlLen;
-
     iUrlLen = StrLen(sUrl);
-
     sAmpMarker = "&" + sParamName + "=";
     iParamPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
     if (iParamPos != undefined)
@@ -143,72 +80,14 @@ function GetQueryParam(sUrl, sParamName)
     {
         sQMarkMarker = "?" + sParamName + "=";
         iParamPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
-        if (iParamPos == undefined)
-        {
-            return "";
-        }
+        if (iParamPos == undefined) { return ""; }
         iValueStart = iParamPos + StrLen(sQMarkMarker);
     }
-
     iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
     iValueEnd = (iAmpPos != undefined ? iAmpPos : iUrlLen);
-
     sRawValue = StrRangePos(sUrl, iValueStart, iValueEnd);
-
-    try
-    {
-        return UrlDecode(sRawValue);
-    }
-    catch (_exDecode)
-    {
-        return sRawValue;
-    }
-}
-
-/*
-* "0" в picker-поле платформа воспринимает как ID документа -- превращаем в "".
-*/
-function SanitizeIdFieldValue(sValue)
-{
-    if (sValue == "0" || sValue == undefined)
-    {
-        return "";
-    }
-    return sValue;
-}
-
-/*
-* Убирает из URL указанный GET-параметр вместе со значением.
-*/
-function RemoveQueryParam(sUrl, sParamName)
-{
-    var sAmpMarker, sQMarkMarker, iMarkerPos, iValueStart, iAmpPos, iUrlLen, sBefore, sAfter;
-
-    iUrlLen = StrLen(sUrl);
-
-    sAmpMarker = "&" + sParamName + "=";
-    iMarkerPos = StrOptSubStrPos(sUrl, sAmpMarker, false);
-    if (iMarkerPos != undefined)
-    {
-        iValueStart = iMarkerPos + StrLen(sAmpMarker);
-        iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
-        sBefore = StrRangePos(sUrl, 0, iMarkerPos);
-        sAfter = (iAmpPos != undefined ? StrRangePos(sUrl, iAmpPos, iUrlLen) : "");
-        return sBefore + sAfter;
-    }
-
-    sQMarkMarker = "?" + sParamName + "=";
-    iMarkerPos = StrOptSubStrPos(sUrl, sQMarkMarker, false);
-    if (iMarkerPos != undefined)
-    {
-        iValueStart = iMarkerPos + StrLen(sQMarkMarker);
-        iAmpPos = StrOptSubStrPos(sUrl, "&", false, iValueStart);
-        sBefore = StrRangePos(sUrl, 0, iMarkerPos + 1);
-        sAfter = (iAmpPos != undefined ? StrRangePos(sUrl, iAmpPos + 1, iUrlLen) : "");
-        return sBefore + sAfter;
-    }
-
-    return sUrl;
+    try { return UrlDecode(sRawValue); }
+    catch (_exDecode) { return sRawValue; }
 }
 
 /*
@@ -220,7 +99,6 @@ function GetCurUserIdSafe()
     try
     {
         sRaw = String(curUserId);
-        LogAlert(1, "GetCurUserIdSafe(). curUserId: [" + sRaw + "]");
         if (sRaw != "" && sRaw != "0" && sRaw != "undefined" && sRaw != "null")
         {
             return curUserId;
@@ -239,28 +117,29 @@ function GetCurUserIdSafe()
 */
 function IsUorApMember(iCurUserId)
 {
-    var groupRows, iGroupId, groupDoc, collabList, foundRow, sRawUserId;
+    var groupRows, iGroupId, groupDoc, collabList, foundRow, sRawUserId, sGroupId, sGroupXQueryType;
+
+    sGroupId = "7687978602560891542";
+    sGroupXQueryType = "groups";
 
     sRawUserId = String(iCurUserId);
     if (sRawUserId == "" || sRawUserId == "0" || sRawUserId == "undefined" || sRawUserId == "null")
     {
-        LogAlert(3, "IsUorApMember(). iCurUserId пустой/нулевой -- считаем, что не УОРиАП.");
         return false;
     }
 
     try
     {
         groupRows = ArraySelectAll(XQuery(
-            "for $elem in " + UORIAP_GROUP_XQUERY_TYPE + " where $elem/id = '" + UORIAP_GROUP_ID + "' return $elem"
+            "for $elem in " + sGroupXQueryType + " where $elem/id = '" + sGroupId + "' return $elem"
         ));
         if (ArrayCount(groupRows) == 0)
         {
-            throw ("Группа с id=" + UORIAP_GROUP_ID + " не найдена через тип '" + UORIAP_GROUP_XQUERY_TYPE + "'");
+            throw ("Группа с id=" + sGroupId + " не найдена через тип '" + sGroupXQueryType + "'");
         }
         iGroupId = Int(groupRows[0].id);
         groupDoc = tools.open_doc(iGroupId).TopElem;
         collabList = groupDoc.collaborators.collaborator;
-
         foundRow = ArrayOptFind(collabList, "String(This.collaborator_id) == String(iCurUserId)");
         LogAlert(1, "IsUorApMember(). userId=" + sRawUserId + "; совпадение=" + (foundRow != undefined));
         return (foundRow != undefined);
@@ -286,7 +165,6 @@ function GetManagerIdRows()
     sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
     sqlText = sqlText + "where cs.is_dismiss != 1";
     rows = ArraySelectAll(XQuery("sql:" + sqlText));
-    LogAlert(1, "GetManagerIdRows(). Строк: " + ArrayCount(rows));
     return rows;
 }
 
@@ -309,11 +187,7 @@ function FindManagerRangeStart(sortedByManagerRows, iManagerId)
     {
         mid = Int((lo + hi) / 2);
         midVal = OptInt(sortedByManagerRows[mid].manager_id, 0);
-        if (midVal == iTarget)
-        {
-            startIdx = mid;
-            hi = mid - 1;
-        }
+        if (midVal == iTarget) { startIdx = mid; hi = mid - 1; }
         else if (midVal < iTarget) { lo = mid + 1; }
         else { hi = mid - 1; }
     }
@@ -373,7 +247,6 @@ function GetManagerHierarchySubordinateIds(sortedByManagerRows, iCurUserId)
         }
         frontier = nextFrontier;
     }
-
     return allSubordinates;
 }
 
@@ -421,6 +294,116 @@ function BinarySearchById(sortedRows, targetId)
     return undefined;
 }
 
+function IsActiveText(sValue)
+{
+    try { return tools_web.is_true(sValue); }
+    catch (_ex) { return (String(sValue) == "true" || String(sValue) == "1"); }
+}
+
+/*
+* Все модульные программы (compound_program) с полями аудитории -- одним SQL.
+*/
+function GetCompoundProgramRows()
+{
+    var sqlText;
+    sqlText = "";
+    sqlText = sqlText + "select cs.id,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/name)[1]', 'varchar(max)') as name,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_matrix_active'']/value)[1]', 'varchar(max)') as f_matrix_active,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_position_names'']/value)[1]', 'varchar(max)') as f_position_names,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_position_names_exclude'']/value)[1]', 'varchar(max)') as f_position_names_exclude,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_code'']/value)[1]', 'varchar(max)') as f_mir_code,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_code_exclude'']/value)[1]', 'varchar(max)') as f_mir_code_exclude,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_org_names'']/value)[1]', 'varchar(max)') as f_org_names,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_org_names_exclude'']/value)[1]', 'varchar(max)') as f_org_names_exclude,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_subdivision_names'']/value)[1]', 'varchar(max)') as f_subdivision_names,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_subdivision_names_exclude'']/value)[1]', 'varchar(max)') as f_subdivision_names_exclude,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_collaborator_statuses_exclude'']/value)[1]', 'varchar(max)') as f_collaborator_statuses_exclude\r\n";
+    sqlText = sqlText + "from compound_programs cs\r\n";
+    sqlText = sqlText + "inner join compound_program c on c.id = cs.id";
+    return ArraySelectAll(XQuery("sql:" + sqlText));
+}
+
+/*
+* Задачи типа "Учебная программа" (education_method) всех модульных программ -- одним SQL.
+*/
+function GetEducationMethodTaskRows()
+{
+    var sqlText;
+    sqlText = "";
+    sqlText = sqlText + "select cs.id as matrix_id,\r\n";
+    sqlText = sqlText + "       t.p.value('(education_method_id)[1]', 'bigint') as education_method_id,\r\n";
+    sqlText = sqlText + "       t.p.value('(type)[1]', 'varchar(50)') as ptype,\r\n";
+    sqlText = sqlText + "       t.p.value('(name)[1]', 'varchar(max)') as pname\r\n";
+    sqlText = sqlText + "from compound_programs cs\r\n";
+    sqlText = sqlText + "inner join compound_program c on c.id = cs.id\r\n";
+    sqlText = sqlText + "cross apply c.data.nodes('/*/programs/program') as t(p)\r\n";
+    sqlText = sqlText + "where t.p.value('(type)[1]', 'varchar(50)') = 'education_method'";
+    return ArraySelectAll(XQuery("sql:" + sqlText));
+}
+
+/*
+* Колонки-программы выбранной матрицы {id, name} в порядке задач, без дублей.
+*/
+function GetOrderedProgramColumns(taskRows, matrixId)
+{
+    var columns, seenIds, i, iProgramId;
+    columns = [];
+    seenIds = [];
+    for (i = 0; i < ArrayCount(taskRows); i++)
+    {
+        if (Int(taskRows[i].matrix_id) != Int(matrixId)) { continue; }
+        iProgramId = OptInt(taskRows[i].education_method_id, 0);
+        if (iProgramId <= 0) { continue; }
+        if (ArrayOptFind(seenIds, "Int(This) == Int(iProgramId)") != undefined) { continue; }
+        seenIds.push(iProgramId);
+        columns.push({ id: iProgramId, name: String(taskRows[i].pname) });
+    }
+    return columns;
+}
+
+/*
+* Строка матрицы по id; ошибка, если не найдена или деактивирована.
+*/
+function ResolveMatrixRow(matrixId, allProgramRows)
+{
+    var matrixRow;
+    matrixRow = ArrayOptFind(allProgramRows, "Int(This.id) == Int(matrixId)");
+    if (matrixRow == undefined)
+    {
+        throw ("Не найдено модульной программы (compound_program) с id=" + matrixId);
+    }
+    if (!IsActiveText(matrixRow.f_matrix_active))
+    {
+        throw ("Модульная программа [" + matrixRow.name + "] (id=" + matrixId + ") деактивирована (f_matrix_active) -- отчёт недоступен для деактивированных программ.");
+    }
+    return matrixRow;
+}
+
+function GetActiveCollaboratorRows()
+{
+    return ArraySelectAll(XQuery("for $elem in collaborators where $elem/is_dismiss=false() return $elem"));
+}
+
+function GetMacroregionRows()
+{
+    var sqlText;
+    sqlText = "";
+    sqlText = sqlText + "select cs.id,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_2ewj'']/value)[1]', 'varchar(max)') as macroregion\r\n";
+    sqlText = sqlText + "from collaborators cs\r\n";
+    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText = sqlText + "where cs.is_dismiss != 1";
+    return ArraySelectAll(XQuery("sql:" + sqlText));
+}
+
+function FindMacroregion(sortedMacroRows, collaboratorID)
+{
+    var macroRow;
+    macroRow = BinarySearchById(sortedMacroRows, collaboratorID);
+    return (macroRow != undefined && macroRow.macroregion != undefined ? String(macroRow.macroregion) : "");
+}
+
 function GetMirCodeRows()
 {
     var sqlText;
@@ -447,11 +430,7 @@ function SplitByDelimiter(sText, sDelim)
     while (true)
     {
         iPos = StrOptSubStrPos(sText, sDelim, false, iStart);
-        if (iPos == undefined)
-        {
-            parts.push(StrRangePos(sText, iStart, iLen));
-            break;
-        }
+        if (iPos == undefined) { parts.push(StrRangePos(sText, iStart, iLen)); break; }
         parts.push(StrRangePos(sText, iStart, iPos));
         iStart = iPos + iDelimLen;
     }
@@ -474,35 +453,16 @@ function ExtractMirCodes(rawValue)
     return codes;
 }
 
-/*
-* Мир-коды пользователя и всех его подчинённых, без дублей.
-*/
-function GetRelevantMirCodes(iCurUserId, subordinateIds)
+function GetStatusRows()
 {
-    var mirCodeRows, sortedMirCodeRows, relevantIds, i, row, codes, j, allCodes;
-
-    mirCodeRows = GetMirCodeRows();
-    sortedMirCodeRows = SortRowsById(mirCodeRows);
-
-    relevantIds = [Int(iCurUserId)];
-    for (i = 0; i < ArrayCount(subordinateIds); i++) { relevantIds.push(Int(subordinateIds[i])); }
-
-    allCodes = [];
-    for (i = 0; i < ArrayCount(relevantIds); i++)
-    {
-        row = BinarySearchById(sortedMirCodeRows, relevantIds[i]);
-        if (row == undefined) { continue; }
-        codes = ExtractMirCodes(row.mir_codes);
-        for (j = 0; j < ArrayCount(codes); j++) { allCodes.push(codes[j]); }
-    }
-
-    return ArraySelectDistinct(allCodes, "This");
-}
-
-function IsActiveText(sValue)
-{
-    try { return tools_web.is_true(sValue); }
-    catch (_ex) { return (String(sValue) == "true" || String(sValue) == "1"); }
+    var sqlText;
+    sqlText = "";
+    sqlText = sqlText + "select cs.id,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''CurrentState'']/value)[1]', 'varchar(max)') as status\r\n";
+    sqlText = sqlText + "from collaborators cs\r\n";
+    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText = sqlText + "where cs.is_dismiss != 1";
+    return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
 function SplitByStar(sPattern)
@@ -514,11 +474,7 @@ function SplitByStar(sPattern)
     while (true)
     {
         iPos = StrOptSubStrPos(sPattern, "*", true, iStart);
-        if (iPos == undefined)
-        {
-            parts.push(StrRangePos(sPattern, iStart, iLen));
-            break;
-        }
+        if (iPos == undefined) { parts.push(StrRangePos(sPattern, iStart, iLen)); break; }
         parts.push(StrRangePos(sPattern, iStart, iPos));
         iStart = iPos + 1;
     }
@@ -566,216 +522,325 @@ function MatchAnySemicolonPattern(sPatternsList, sText, bIgnoreCase)
     return false;
 }
 
-function GetCompoundProgramRowsForFilter()
+/*
+* Положительная ось аудитории: пустой список паттернов -- без ограничения.
+*/
+function AxisMatches(sPatternsList, sSingleValue)
+{
+    if (sPatternsList == undefined || String(sPatternsList) == "") { return true; }
+    return MatchAnySemicolonPattern(sPatternsList, sSingleValue, true);
+}
+
+/*
+* Ось-исключение: пустой список паттернов -- никого не исключаем.
+*/
+function AxisExcludeMatches(sPatternsList, sSingleValue)
+{
+    if (sPatternsList == undefined || String(sPatternsList) == "") { return false; }
+    return MatchAnySemicolonPattern(sPatternsList, sSingleValue, true);
+}
+
+/*
+* Ось мир-кода: у сотрудника может быть несколько кодов, достаточно совпадения одного.
+*/
+function MirCodeAxisMatches(sPatternsList, employeeCodes)
+{
+    var i;
+    if (sPatternsList == undefined || String(sPatternsList) == "") { return true; }
+    for (i = 0; i < ArrayCount(employeeCodes); i++)
+    {
+        if (MatchAnySemicolonPattern(sPatternsList, employeeCodes[i], true)) { return true; }
+    }
+    return false;
+}
+
+function MirCodeAxisExcludeMatches(sPatternsList, employeeCodes)
+{
+    var i;
+    if (sPatternsList == undefined || String(sPatternsList) == "") { return false; }
+    for (i = 0; i < ArrayCount(employeeCodes); i++)
+    {
+        if (MatchAnySemicolonPattern(sPatternsList, employeeCodes[i], true)) { return true; }
+    }
+    return false;
+}
+
+/*
+* Входит ли сотрудник в аудиторию матрицы: сначала исключения (хватает одного
+* совпадения), затем "И" между заполненными осями.
+*/
+function CollaboratorMatchesMatrixAudience(collaboratorRow, matrixRow, sortedMirCodeRows, sortedStatusRows)
+{
+    var sPosition, sOrg, sSubdivision, sStatus, employeeCodes, mirCodeRow, statusRow;
+
+    sPosition = String(collaboratorRow.position_name);
+    sOrg = String(collaboratorRow.org_name);
+    sSubdivision = String(collaboratorRow.position_parent_name);
+
+    mirCodeRow = BinarySearchById(sortedMirCodeRows, Int(collaboratorRow.id));
+    employeeCodes = (mirCodeRow != undefined ? ExtractMirCodes(mirCodeRow.mir_codes) : []);
+
+    statusRow = BinarySearchById(sortedStatusRows, Int(collaboratorRow.id));
+    sStatus = (statusRow != undefined && statusRow.status != undefined ? String(statusRow.status) : "");
+
+    if (AxisExcludeMatches(matrixRow.f_position_names_exclude, sPosition)) { return false; }
+    if (AxisExcludeMatches(matrixRow.f_org_names_exclude, sOrg)) { return false; }
+    if (AxisExcludeMatches(matrixRow.f_subdivision_names_exclude, sSubdivision)) { return false; }
+    if (MirCodeAxisExcludeMatches(matrixRow.f_mir_code_exclude, employeeCodes)) { return false; }
+    if (AxisExcludeMatches(matrixRow.f_collaborator_statuses_exclude, sStatus)) { return false; }
+
+    if (!AxisMatches(matrixRow.f_position_names, sPosition)) { return false; }
+    if (!AxisMatches(matrixRow.f_org_names, sOrg)) { return false; }
+    if (!AxisMatches(matrixRow.f_subdivision_names, sSubdivision)) { return false; }
+    if (!MirCodeAxisMatches(matrixRow.f_mir_code, employeeCodes)) { return false; }
+
+    return true;
+}
+
+/*
+* Минимальная дата прохождения по каждой паре (сотрудник, программа).
+*/
+function GetCompletionDateRows(programIds)
 {
     var sqlText;
     sqlText = "";
-    sqlText = sqlText + "select cs.id,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/name)[1]', 'varchar(max)') as name,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_matrix_active'']/value)[1]', 'varchar(max)') as f_matrix_active,\r\n";
-    sqlText = sqlText + "       c.data.value('(*/custom_elems/custom_elem[name=''f_mir_code'']/value)[1]', 'varchar(max)') as f_mir_code\r\n";
-    sqlText = sqlText + "from compound_programs cs\r\n";
-    sqlText = sqlText + "inner join compound_program c on c.id = cs.id";
+    sqlText = sqlText + "select ec.collaborator_id, e.education_method_id, min(ec.start_date) as first_date\r\n";
+    sqlText = sqlText + "from event_collaborators ec\r\n";
+    sqlText = sqlText + "join events e on e.id = ec.event_id\r\n";
+    sqlText = sqlText + "where e.education_method_id in (" + ArrayMerge(programIds, "This", ",") + ")\r\n";
+    sqlText = sqlText + "group by ec.collaborator_id, e.education_method_id";
     return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-/*
-* ID активных модульных программ, у которых f_mir_code подходит хотя бы под один из
-* переданных мир-кодов. Программа без f_mir_code не подходит ни под один.
-*/
-function GetMatrixIdsByMirCodes(aTargetMirCodes)
+function SortDateRowsByCollaboratorId(dateRows)
 {
-    var allRows, i, j, row, matrixIdSet;
-
-    allRows = GetCompoundProgramRowsForFilter();
-
-    matrixIdSet = [];
-    for (i = 0; i < ArrayCount(allRows); i++)
-    {
-        row = allRows[i];
-        if (!IsActiveText(row.f_matrix_active)) { continue; }
-        if (row.f_mir_code == undefined || String(row.f_mir_code) == "") { continue; }
-        for (j = 0; j < ArrayCount(aTargetMirCodes); j++)
-        {
-            if (MatchAnySemicolonPattern(row.f_mir_code, aTargetMirCodes[j], true))
-            {
-                matrixIdSet.push(Int(row.id));
-                break;
-            }
-        }
-    }
-
-    matrixIdSet = ArraySelectDistinct(matrixIdSet, "This");
-    LogAlert(1, "GetMatrixIdsByMirCodes(). Всего программ: " + ArrayCount(allRows) + "; подходящих активных: " + ArrayCount(matrixIdSet));
-    return matrixIdSet;
+    return ArraySort(dateRows, "Int(This.collaborator_id)", "+");
 }
 
 /*
-* query_qual для пикера матриц по правилам видимости (см. шапку файла). Если подходящих
-* матриц нет -- пишет пояснение в oForm.message.
-* @param {Object} oForm
+* Дата прохождения сотрудником программы: бинарный поиск первой строки сотрудника,
+* затем короткий проход по его строкам. "" -- не проходил.
+*/
+function FindCompletionDate(sortedDateRows, collaboratorID, programID)
+{
+    var lo, hi, mid, midId, iTarget, iProgram, startIdx, i, n;
+    iTarget = Int(collaboratorID);
+    iProgram = Int(programID);
+    lo = 0;
+    hi = ArrayCount(sortedDateRows) - 1;
+    startIdx = -1;
+    while (lo <= hi)
+    {
+        mid = Int((lo + hi) / 2);
+        midId = Int(sortedDateRows[mid].collaborator_id);
+        if (midId == iTarget) { startIdx = mid; hi = mid - 1; }
+        else if (midId < iTarget) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    if (startIdx == -1) { return ""; }
+    n = ArrayCount(sortedDateRows);
+    for (i = startIdx; i < n && Int(sortedDateRows[i].collaborator_id) == iTarget; i++)
+    {
+        if (Int(sortedDateRows[i].education_method_id) == iProgram)
+        {
+            return StrDate(Date(sortedDateRows[i].first_date), false);
+        }
+    }
+    return "";
+}
+
+/*
+* HTML-таблица для Excel: шапка с названием матрицы, заголовки колонок, строки сотрудников.
+* @param {string} sMatrixName
+* @param {Object[]} programColumns   -   {id, name}.
+* @param {Object[]} employeeRows     -   {id, fullname, position_name, position_parent_name, macroregion}.
+* @param {Object[]} sortedDateRows
 * @returns {string}
 */
-function GetMatrixQueryQual(oForm)
+function BuildExcelHtml(sMatrixName, programColumns, employeeRows, sortedDateRows)
 {
-    var iCurUserId, managerRows, sortedByManagerRows, subordinateIds, relevantMirCodes, matrixIds;
+    var html, i, j, emp, sDate;
 
-    iCurUserId = GetCurUserIdSafe();
+    html = new Binary();
+    html.AppendStr("<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\" xmlns=\"http://www.w3.org/TR/REC-html40\"><head><meta charset=\"utf-8\"></head><body>");
+    html.AppendStr("<table border=\"1\" cellpadding=\"2\" cellspacing=\"0\">");
+
+    html.AppendStr("<tr><td colspan=\"4\"></td>");
+    for (j = 0; j < ArrayCount(programColumns); j++)
+    {
+        html.AppendStr("<td bgcolor=\"#98ddfc\"><b>" + HtmlEncode(sMatrixName) + "</b></td>");
+    }
+    html.AppendStr("</tr>");
+
+    html.AppendStr("<tr>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>ФИО</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Должность</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Подразделение</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Макрорегион</b></td>");
+    for (j = 0; j < ArrayCount(programColumns); j++)
+    {
+        html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>" + HtmlEncode(programColumns[j].name) + "</b></td>");
+    }
+    html.AppendStr("</tr>");
+
+    for (i = 0; i < ArrayCount(employeeRows); i++)
+    {
+        emp = employeeRows[i];
+        html.AppendStr("<tr>");
+        html.AppendStr("<td>" + HtmlEncode(emp.fullname) + "</td>");
+        html.AppendStr("<td>" + HtmlEncode(emp.position_name) + "</td>");
+        html.AppendStr("<td>" + HtmlEncode(emp.position_parent_name) + "</td>");
+        html.AppendStr("<td>" + HtmlEncode(emp.macroregion) + "</td>");
+        for (j = 0; j < ArrayCount(programColumns); j++)
+        {
+            sDate = FindCompletionDate(sortedDateRows, Int(emp.id), programColumns[j].id);
+            html.AppendStr("<td align=\"center\">" + HtmlEncode(sDate) + "</td>");
+        }
+        html.AppendStr("</tr>");
+    }
+
+    html.AppendStr("</table></body></html>");
+    return html.GetStr();
+}
+
+/*
+* Матрица по id и её колонки-программы; ошибка, если матрица не выбрана или у неё нет
+* учебных программ.
+* @param {number} iMatrixId
+* @returns {Object}   -   {matrixRow, programColumns}.
+*/
+function ResolveMatrixContext(iMatrixId)
+{
+    var allProgramRows, taskRows, matrixRow, programColumns;
+
+    if (iMatrixId == 0)
+    {
+        throw "Не выбрана матрица обучения -- настройте фильтры перед выгрузкой.";
+    }
+
+    allProgramRows = GetCompoundProgramRows();
+    taskRows = GetEducationMethodTaskRows();
+
+    matrixRow = ResolveMatrixRow(iMatrixId, allProgramRows);
+    programColumns = GetOrderedProgramColumns(taskRows, iMatrixId);
+    if (ArrayCount(programColumns) == 0)
+    {
+        throw ("У модульной программы [" + matrixRow.name + "] не найдено ни одной задачи с типом \"Учебная программа\" (education_method)");
+    }
+    return { matrixRow: matrixRow, programColumns: programColumns };
+}
+
+/*
+* Отсортированные ID подчинённых пользователя (вся цепочка вниз) или undefined для
+* члена УОРиАП (без ограничения). Нет подчинённых -- ошибка.
+* @param {number} iCurUserId
+* @returns {number[]}
+*/
+function GetSortedSubordinateIds(iCurUserId)
+{
+    var managerRows, sortedByManagerRows, subordinateIds;
+
     if (IsUorApMember(iCurUserId))
     {
-        LogAlert(1, "GetMatrixQueryQual(). userId=" + iCurUserId + " -- УОРиАП, пикер без ограничений.");
-        return "";
+        LogAlert(1, "GetSortedSubordinateIds(). userId=" + iCurUserId + " -- УОРиАП, без ограничения.");
+        return undefined;
     }
 
     managerRows = GetManagerIdRows();
     sortedByManagerRows = SortRowsByManagerId(managerRows);
     subordinateIds = GetManagerHierarchySubordinateIds(sortedByManagerRows, iCurUserId);
-    relevantMirCodes = GetRelevantMirCodes(iCurUserId, subordinateIds);
-    matrixIds = GetMatrixIdsByMirCodes(relevantMirCodes);
-    LogAlert(1, "GetMatrixQueryQual(). userId=" + iCurUserId + "; подчинённых: " + ArrayCount(subordinateIds)
-        + "; мир-коды: [" + ArrayMerge(relevantMirCodes, "This", ", ") + "]; матриц: [" + ArrayMerge(matrixIds, "This", ", ") + "]");
-
-    if (ArrayCount(matrixIds) == 0)
+    LogAlert(1, "GetSortedSubordinateIds(). userId=" + iCurUserId + "; подчинённых: " + ArrayCount(subordinateIds));
+    if (ArrayCount(subordinateIds) == 0)
     {
-        oForm.message = "У вас и ваших подчинённых нет ни одной подходящей активной учебной программы -- список матриц обучения пуст.";
-        // id=0 не существует -- пикер покажет пустой список.
-        return "MatchSome($elem/id,(0))";
+        throw "У вас нет ни одного подчинённого -- отчёт недоступен.";
     }
-
-    // ID матриц -- числами, без кавычек (в кавычках пикер падает).
-    return "MatchSome($elem/id,(" + ArrayMerge(matrixIds, "This", ",") + "))";
+    return SortIdArray(subordinateIds);
 }
 
 /*
-* Значения фильтров из текущего URL страницы.
-* @param {string} sPageUrl
-* @returns {Object}
-*/
-function ReadDefaultsFromUrl(sPageUrl)
-{
-    var sMacroregion;
-
-    sMacroregion = GetQueryParam(sPageUrl, "macroregion");
-    // Значение select должно совпадать с одним из entries -- иначе "Все макрорегионы".
-    if (sMacroregion != "Сибирь" && sMacroregion != "Юг" && sMacroregion != "Москва" && sMacroregion != "СЗФО")
-    {
-        sMacroregion = "";
-    }
-
-    return {
-        matrixId: SanitizeIdFieldValue(GetQueryParam(sPageUrl, "matrix_id")),
-        macroregion: sMacroregion,
-        mirCodeId: SanitizeIdFieldValue(GetQueryParam(sPageUrl, "mir_code_id")),
-        positionCommonId: SanitizeIdFieldValue(GetQueryParam(sPageUrl, "position_common_id")),
-        programId: SanitizeIdFieldValue(GetQueryParam(sPageUrl, "program_id"))
-    };
-}
-
-/*
-* Поля формы фильтров.
-* @param {Object} oDefaults
-* @param {string} sMatrixQueryQual
+* Оставляет в пуле только подчинённых; sortedSubordinateIds == undefined -- без изменений.
+* @param {Object[]} activeRows
+* @param {number[]} sortedSubordinateIds
 * @returns {Object[]}
 */
-function BuildFormFields(oDefaults, sMatrixQueryQual)
+function FilterBySubordinates(activeRows, sortedSubordinateIds)
 {
-    return [
-        {
-            name: "matrix_id",
-            label: "Матрица обучения",
-            title: "Выберите матрицу обучения",
-            type: "foreign_elem",
-            value: oDefaults.matrixId,
-            mandatory: true,
-            multiple: false,
-            catalog: "compound_program",
-            query_qual: sMatrixQueryQual
-        },
-        {
-            // Значения должны буквально совпадать с f_2ewj у сотрудников.
-            name: "macroregion",
-            label: "Макрорегион",
-            type: "select",
-            value: oDefaults.macroregion,
-            entries: [
-                { name: "Все макрорегионы", value: "" },
-                { name: "Сибирь", value: "Сибирь" },
-                { name: "Юг", value: "Юг" },
-                { name: "Москва", value: "Москва" },
-                { name: "СЗФО", value: "СЗФО" }
-            ],
-            mandatory: false
-        }
-    ];
-}
+    var subFilteredRows, k;
 
-/*
-* Форма фильтров (первый шаг).
-* @param {Object} oDefaults
-* @returns {Object}
-*/
-function BuildFilterForm(oDefaults)
-{
-    var oForm, oField;
-
-    oForm = new Object();
-    oForm.command = "display_form";
-    oForm.height = 320;
-    oForm.title = "Фильтры отчёта (Процент обученных)";
-    oForm.message = null;
-
-    oForm.form_fields = BuildFormFields(oDefaults, GetMatrixQueryQual(oForm));
-    for (oField in oForm.form_fields)
+    if (sortedSubordinateIds == undefined)
     {
-        oField.value = GetFormField(oField.name, oField.value);
+        return activeRows;
     }
-
-    oForm.no_buttons = false;
-    oForm.buttons = [
-        { name: "submit", submit_type: "apply", label: "Применить", type: "submit" },
-        { name: "cancel", label: "Отмена", type: "cancel" }
-    ];
-    return oForm;
+    subFilteredRows = [];
+    for (k = 0; k < ArrayCount(activeRows); k++)
+    {
+        if (IdArrayContainsSorted(sortedSubordinateIds, Int(activeRows[k].id))) { subFilteredRows.push(activeRows[k]); }
+    }
+    return subFilteredRows;
 }
 
 /*
-* "Применить": redirect на ту же страницу с новыми фильтрами. Скрытых полей нет в форме --
-* для них фолбэк на значения из текущего URL, иначе они сбрасывались бы.
-* @param {string} sPageUrl
-* @param {Object} oDefaults
+* Строки сотрудников для Excel: аудитория матрицы + фильтр по макрорегиону.
+* @param {Object[]} activeRows
+* @param {Object} matrixRow
+* @param {string} sMacroregionFilter
+* @returns {Object[]}
+*/
+function CollectEmployeeRows(activeRows, matrixRow, sMacroregionFilter)
+{
+    var macroSorted, mirCodeSorted, statusSorted, employeeRows, i, bInAudience, sMacroregionForRow;
+
+    macroSorted = SortRowsById(GetMacroregionRows());
+    mirCodeSorted = SortRowsById(GetMirCodeRows());
+    statusSorted = SortRowsById(GetStatusRows());
+
+    employeeRows = [];
+    for (i = 0; i < ArrayCount(activeRows); i++)
+    {
+        bInAudience = CollaboratorMatchesMatrixAudience(activeRows[i], matrixRow, mirCodeSorted, statusSorted);
+        if (!bInAudience) { continue; }
+
+        sMacroregionForRow = FindMacroregion(macroSorted, Int(activeRows[i].id));
+        if (sMacroregionFilter != "" && sMacroregionForRow != sMacroregionFilter) { continue; }
+
+        employeeRows.push({
+            id: Int(activeRows[i].id),
+            fullname: String(activeRows[i].fullname),
+            position_name: String(activeRows[i].position_name),
+            position_parent_name: String(activeRows[i].position_parent_name),
+            macroregion: sMacroregionForRow
+        });
+    }
+    LogAlert(1, "CollectEmployeeRows(). Сотрудников в пуле: " + ArrayCount(activeRows) + "; в выгрузке: " + ArrayCount(employeeRows));
+    return employeeRows;
+}
+
+/*
+* Кладёт HTML в кэш и возвращает команду открыть страницу скачивания. Ключ кэша --
+* "голая" curUserID (её читает assessment_excel_export.html), запасной -- iCurUserId.
+* @param {string} sHtml
+* @param {number} iCurUserId
 * @returns {Object}
 */
-function BuildApplyResult(sPageUrl, oDefaults)
+function SaveExportAndGetResult(sHtml, iCurUserId)
 {
-    var iMirCodeID, sCleanBaseUrl, oQueryParams, sSeparator, sFullUrl;
+    var sBareCurUserId;
 
-    iMirCodeID = OptInt(GetFormField("mir_code_id", oDefaults.mirCodeId), 0);
-    oQueryParams = {
-        matrix_id: String(OptInt(GetFormField("matrix_id", ""), 0)),
-        macroregion: String(GetFormField("macroregion", "")),
-        mir_code: ResolveMirCodeText(iMirCodeID),
-        mir_code_id: String(iMirCodeID),
-        position_common_id: String(OptInt(GetFormField("position_common_id", oDefaults.positionCommonId), 0)),
-        program_id: String(OptInt(GetFormField("program_id", oDefaults.programId), 0))
-    };
-
-    sCleanBaseUrl = sPageUrl;
-    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "matrix_id");
-    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "macroregion");
-    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "mir_code_id");
-    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "mir_code");
-    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "position_common_id");
-    sCleanBaseUrl = RemoveQueryParam(sCleanBaseUrl, "program_id");
-
-    sSeparator = (StrOptSubStrPos(sCleanBaseUrl, "?", false) != undefined ? "&" : "?");
-    sFullUrl = sCleanBaseUrl + sSeparator + UrlEncodeQuery(oQueryParams);
-    LogAlert(1, "BuildApplyResult(). Redirect: " + sFullUrl);
+    try { sBareCurUserId = String(curUserID); }
+    catch (_exBareUserId) { sBareCurUserId = ""; }
+    if (sBareCurUserId == "" || sBareCurUserId == "undefined" || sBareCurUserId == "null")
+    {
+        LogAlert(3, "SaveExportAndGetResult(). curUserID недоступна -- ключ кэша по curUserId=" + iCurUserId);
+        sBareCurUserId = String(iCurUserId);
+    }
+    tools_web.set_user_data("excel_html_" + sBareCurUserId, ({ "html": sHtml }), 3600);
 
     return {
-        command: "close_form",
+        command: "alert",
+        msg: "Файл готов в выгрузке",
         confirm_result: {
-            command: "redirect",
-            url: sFullUrl
+            command: "new_window",
+            url: EXPORT_PAGE_URL
         }
     };
 }
@@ -786,39 +851,49 @@ function BuildApplyResult(sPageUrl, oDefaults)
 */
 function Run()
 {
-    var sSubmitType, sPageUrl, oDefaults;
+    var sPageUrl, iMatrixId, sMacroregionFilter, matrixContext;
+    var iCurUserId, sortedSubordinateIds, activeRows, dateSorted, employeeRows, sHtml;
+
+    ERROR = 0;
+    MESSAGE = "";
+    RESULT = new Object();
 
     LogAlert(2, "Run(). НАЧАЛО");
 
     try
     {
-        aFormFields = ParseJson(GetParam("form_fields", "[]"));
-        aFormFieldsDef = ParseJson(GetParam("form_fields_default", "[]"));
-        sSubmitType = GetFormField("__submit_type__", GetFormFieldDefault("__submit_type__", "step_0"));
+        iCurUserId = GetCurUserIdSafe();
+        sortedSubordinateIds = GetSortedSubordinateIds(iCurUserId);
 
         sPageUrl = GetCurPageUrlSafe();
-        oDefaults = ReadDefaultsFromUrl(sPageUrl);
-        LogAlert(1, "Run(). sSubmitType=[" + sSubmitType + "]; URL=[" + sPageUrl + "]; matrix_id=[" + oDefaults.matrixId
-            + "] macroregion=[" + oDefaults.macroregion + "] mir_code_id=[" + oDefaults.mirCodeId
-            + "] position_common_id=[" + oDefaults.positionCommonId + "] program_id=[" + oDefaults.programId + "]");
+        iMatrixId = OptInt(GetQueryParam(sPageUrl, "matrix_id"), 0);
+        sMacroregionFilter = GetQueryParam(sPageUrl, "macroregion");
+        LogAlert(1, "Run(). URL=[" + sPageUrl + "]; matrix_id=" + iMatrixId + "; macroregion=[" + sMacroregionFilter + "]");
 
-        if (sSubmitType == "apply")
+        matrixContext = ResolveMatrixContext(iMatrixId);
+        activeRows = FilterBySubordinates(GetActiveCollaboratorRows(), sortedSubordinateIds);
+        dateSorted = SortDateRowsByCollaboratorId(GetCompletionDateRows(ArrayExtract(matrixContext.programColumns, "Int(id)")));
+        employeeRows = CollectEmployeeRows(activeRows, matrixContext.matrixRow, sMacroregionFilter);
+
+        if (ArrayCount(employeeRows) == 0)
         {
-            RESULT = BuildApplyResult(sPageUrl, oDefaults);
+            RESULT = { command: "alert", view: "warning", msg: "Данных не найдено -- попробуйте изменить параметры фильтра (матрица/макрорегион) или проверьте, что у вас/ваших подчинённых есть сотрудники в аудитории этой матрицы." };
+            LogAlert(3, "Run(). Данных не найдено -- файл не сформирован.");
         }
         else
         {
-            RESULT = BuildFilterForm(oDefaults);
+            employeeRows = ArraySort(employeeRows, "This.fullname", "+");
+            sHtml = BuildExcelHtml(String(matrixContext.matrixRow.name), matrixContext.programColumns, employeeRows, dateSorted);
+            RESULT = SaveExportAndGetResult(sHtml, iCurUserId);
+            LogAlert(2, "Run(). Выгрузка готова: сотрудников " + ArrayCount(employeeRows) + ", колонок-программ " + ArrayCount(matrixContext.programColumns));
         }
     }
-    catch (_exMain)
+    catch (_ex)
     {
-        LogAlert(4, "Run(). КРИТИЧЕСКАЯ ОШИБКА: " + ExtractUserError(_exMain));
-        RESULT = {
-            command: "alert",
-            msg: ("Ошибка в модалке фильтров (HREDU_182_filtry_percent.js):<br/><pre>" + ExtractUserError(_exMain) + "</pre>"),
-            title: "ОШИБКА"
-        };
+        ERROR = 1;
+        MESSAGE = String(_ex);
+        RESULT = { command: "alert", view: "warning", msg: MESSAGE };
+        LogAlert(4, "Run(). КРИТИЧЕСКАЯ ОШИБКА: " + MESSAGE);
     }
 
     LogAlert(2, "Run(). КОНЕЦ");
