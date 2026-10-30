@@ -1,19 +1,18 @@
 // =====================================================================
-// HREDU-183. Отчёты ТЭП (Общее кол-во / План / Факт / Обязательно к прохождению) --
-// удалённое действие на кнопку "Выгрузить в Excel".
+// HREDU-182. "Процент обученных" -- удалённое действие на кнопку "Выгрузить в Excel".
 //
-// Выгружает ту же таблицу, что показывает выборка HREDU-183_tep_reports.js, для текущего
-// режима отчёта и с теми же фильтрами. Расчёт -- копия выборки: при изменении логики в
-// выборке нужно так же поменять её здесь, иначе Excel разойдётся с таблицей.
+// Выгружает ту же таблицу, что показывает выборка HREDU-182_procent_obuchennyh.js: строки
+// (город x учебная программа), колонки Общее / План / Факт / Процент / Обязательно и
+// итоговая строка "Общий итог", в том же порядке. Расчёт -- копия выборки: при изменении
+// логики в выборке нужно так же поменять её здесь, иначе Excel разойдётся с таблицей.
 //
-// Режим отчёта: result_type из URL страницы -> параметр кнопки result_type -> "total".
 // Фильтры берутся из URL страницы (cur_page_url -> {{curEnv.curEnvUrl}} в LPE).
-// Видимость: как в выборке ТЭП -- без ограничения по подчинённым.
+// Видимость -- только сужение пула, как в выборке: член УОРиАП видит всех, остальные --
+// подчинённых по всей цепочке вниз (curUserId -> {{curUser.id}} в LPE). Нет подчинённых --
+// сообщение "нет данных" (на странице в этом случае тоже пустая таблица).
 //
-// Колонки -- как в конфигурации виджета: статус (заливка цветом), ФИО, Должность,
-// Подразделение, Дата прохождения. Готовый HTML кладётся в кэш
-// tools_web.set_user_data("excel_html_" + curUserID), его отдаёт на скачивание страница
-// assessment_excel_export.html.
+// Готовый HTML кладётся в кэш tools_web.set_user_data("excel_html_" + curUserID), его
+// отдаёт на скачивание страница assessment_excel_export.html.
 // =====================================================================
 
 //-------------------------------------------------------------------------
@@ -22,7 +21,7 @@
 
 DEBUG = false;                          // Включает подробные логи для дебага
 LOG_NAME = "remote_action";             // Имя журнала на сервере, куда будут писаться логи
-CUR_OBJECT_ID = 7698682660711222927;    // ID текущего удалённого действия для подстановки в логи
+CUR_OBJECT_ID = 7698662221284771962;    // ID текущего удалённого действия для подстановки в логи
 
 EXPORT_PAGE_URL = "assessment_excel_export.html";
 
@@ -66,18 +65,6 @@ function GetCurPageUrlSafe()
 }
 
 /*
-* Необязательный параметр кнопки "result_type" -- запасной источник режима отчёта.
-*/
-function GetResultTypeParamSafe()
-{
-    var sValue;
-    try { sValue = String(PARAMETERS.GetOptProperty("result_type", "")); }
-    catch (_exParam) { sValue = ""; }
-    if (sValue == "undefined" || sValue == "null") { sValue = ""; }
-    return sValue;
-}
-
-/*
 * Значение GET-параметра из URL (без regex и строковых методов JS).
 */
 function GetQueryParam(sUrl, sParamName)
@@ -102,6 +89,214 @@ function GetQueryParam(sUrl, sParamName)
     sRawValue = StrRangePos(sUrl, iValueStart, iValueEnd);
     try { return UrlDecode(sRawValue); }
     catch (_exDecode) { return sRawValue; }
+}
+
+/*
+* ID текущего пользователя из LPE-параметра curUserId; 0, если параметр не привязан.
+*/
+function GetCurUserIdSafe()
+{
+    var sRaw;
+    try
+    {
+        sRaw = String(curUserId);
+        if (sRaw != "" && sRaw != "0" && sRaw != "undefined" && sRaw != "null")
+        {
+            return curUserId;
+        }
+    }
+    catch (_exDirect)
+    {
+        LogAlert(3, "GetCurUserIdSafe(). curUserId недоступна (не привязана в LPE к кнопке?): " + ExtractUserError(_exDirect));
+    }
+    LogAlert(3, "GetCurUserIdSafe(). curUserId не дала валидного значения -- возвращаем 0.");
+    return 0;
+}
+
+/*
+* Входит ли пользователь в группу УОРиАП. Сравнение ID -- строками (19-значные ID).
+*/
+function IsUorApMember(iCurUserId)
+{
+    var groupRows, iGroupId, groupDoc, collabList, foundRow, sRawUserId, sGroupId, sGroupXQueryType;
+ 
+    sGroupId = "7687978602560891542";
+    sGroupXQueryType = "groups";
+ 
+    sRawUserId = String(iCurUserId);
+    if (sRawUserId == "" || sRawUserId == "0" || sRawUserId == "undefined" || sRawUserId == "null")
+    {
+        return false;
+    }
+ 
+    try
+    {
+        groupRows = ArraySelectAll(XQuery(
+            "for $elem in " + sGroupXQueryType + " where $elem/id = '" + sGroupId + "' return $elem"
+        ));
+        if (ArrayCount(groupRows) == 0)
+        {
+            throw ("Группа с id=" + sGroupId + " не найдена через тип '" + sGroupXQueryType + "'");
+        }
+        iGroupId = Int(groupRows[0].id);
+        groupDoc = tools.open_doc(iGroupId).TopElem;
+        collabList = groupDoc.collaborators.collaborator;
+        foundRow = ArrayOptFind(collabList, "String(This.collaborator_id) == String(iCurUserId)");
+        LogAlert(1, "IsUorApMember(). userId=" + sRawUserId + "; совпадение=" + (foundRow != undefined));
+        return (foundRow != undefined);
+    }
+    catch (_exDoc)
+    {
+        LogAlert(4, "IsUorApMember(). ОШИБКА: " + ExtractUserError(_exDoc) + " -- считаем, что не УОРиАП.");
+        return false;
+    }
+}
+
+/*
+* {id, manager_id} всех действующих сотрудников, manager_id -- непосредственный
+* руководитель (func_manager с is_native=true).
+*/
+function GetManagerIdRows()
+{
+    var sqlText;
+    sqlText = "";
+    sqlText = sqlText + "select cs.id,\r\n";
+    sqlText = sqlText + "       c.data.value('(*/func_managers/func_manager[is_native=true()]/person_id)[1]', 'varchar(max)') as manager_id\r\n";
+    sqlText = sqlText + "from collaborators cs\r\n";
+    sqlText = sqlText + "inner join collaborator c on c.id = cs.id\r\n";
+    sqlText = sqlText + "where cs.is_dismiss != 1";
+    return ArraySelectAll(XQuery("sql:" + sqlText));
+}
+
+function SortRowsByManagerId(managerRows)
+{
+    return ArraySort(managerRows, "OptInt(This.manager_id, 0)", "+");
+}
+
+/*
+* Индекс первой строки с данным manager_id (бинарный поиск), -1 если нет.
+*/
+function FindManagerRangeStart(sortedByManagerRows, iManagerId)
+{
+    var lo, hi, mid, midVal, iTarget, startIdx;
+    iTarget = Int(iManagerId);
+    lo = 0;
+    hi = ArrayCount(sortedByManagerRows) - 1;
+    startIdx = -1;
+    while (lo <= hi)
+    {
+        mid = Int((lo + hi) / 2);
+        midVal = OptInt(sortedByManagerRows[mid].manager_id, 0);
+        if (midVal == iTarget) { startIdx = mid; hi = mid - 1; }
+        else if (midVal < iTarget) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    return startIdx;
+}
+
+/*
+* Прямые подчинённые руководителя (один уровень). Самого руководителя исключаем --
+* у вершины иерархии is_native-запись указывает на него самого.
+*/
+function CollectDirectSubordinateIds(sortedByManagerRows, iManagerId)
+{
+    var startIdx, i, n, result, iTarget, iRowId;
+    result = [];
+    iTarget = Int(iManagerId);
+    startIdx = FindManagerRangeStart(sortedByManagerRows, iTarget);
+    if (startIdx == -1) { return result; }
+    n = ArrayCount(sortedByManagerRows);
+    for (i = startIdx; i < n && OptInt(sortedByManagerRows[i].manager_id, 0) == iTarget; i++)
+    {
+        iRowId = Int(sortedByManagerRows[i].id);
+        if (iRowId != iTarget) { result.push(iRowId); }
+    }
+    return result;
+}
+
+/*
+* Все подчинённые по цепочке вниз -- BFS без рекурсии, с защитой от циклов.
+*/
+function GetManagerHierarchySubordinateIds(sortedByManagerRows, iCurUserId)
+{
+    var visitedIds, visitedSorted, frontier, nextFrontier, allSubordinates;
+    var i, j, directIds, iManagerId, iSubId;
+ 
+    allSubordinates = [];
+    visitedIds = [Int(iCurUserId)];
+    frontier = [Int(iCurUserId)];
+ 
+    while (ArrayCount(frontier) > 0)
+    {
+        visitedSorted = SortIdArray(visitedIds);
+        nextFrontier = [];
+        for (i = 0; i < ArrayCount(frontier); i++)
+        {
+            iManagerId = frontier[i];
+            directIds = CollectDirectSubordinateIds(sortedByManagerRows, iManagerId);
+            for (j = 0; j < ArrayCount(directIds); j++)
+            {
+                iSubId = directIds[j];
+                if (!IdArrayContainsSorted(visitedSorted, iSubId))
+                {
+                    allSubordinates.push(iSubId);
+                    visitedIds.push(iSubId);
+                    nextFrontier.push(iSubId);
+                }
+            }
+        }
+        frontier = nextFrontier;
+    }
+    return allSubordinates;
+}
+
+function SortRowsById(rows)
+{
+    return ArraySort(rows, "Int(This.id)", "+");
+}
+
+function BinarySearchById(sortedRows, targetId)
+{
+    var lo, hi, mid, midId, iTarget;
+    iTarget = Int(targetId);
+    lo = 0;
+    hi = ArrayCount(sortedRows) - 1;
+    while (lo <= hi)
+    {
+        mid = Int((lo + hi) / 2);
+        midId = Int(sortedRows[mid].id);
+        if (midId == iTarget) { return sortedRows[mid]; }
+        else if (midId < iTarget) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    return undefined;
+}
+
+function SortIdArray(idArray)
+{
+    return ArraySort(idArray, "Int(This)", "+");
+}
+
+function IdArrayContainsSorted(sortedIdArray, value)
+{
+    var lo, hi, mid, midVal, iTarget;
+    iTarget = Int(value);
+    lo = 0;
+    hi = ArrayCount(sortedIdArray) - 1;
+    while (lo <= hi)
+    {
+        mid = Int((lo + hi) / 2);
+        midVal = Int(sortedIdArray[mid]);
+        if (midVal == iTarget) { return true; }
+        else if (midVal < iTarget) { lo = mid + 1; }
+        else { hi = mid - 1; }
+    }
+    return false;
+}
+
+function SortDateRowsByCollaboratorId(dateRows)
+{
+    return ArraySort(dateRows, "Int(This.collaborator_id)", "+");
 }
 
 function IsActiveText(sValue)
@@ -147,7 +342,6 @@ function GetEducationMethodTaskRows()
     sqlText = sqlText + "       t.p.value('(education_method_id)[1]', 'bigint') as education_method_id,\r\n";
     sqlText = sqlText + "       t.p.value('(type)[1]', 'varchar(50)') as ptype,\r\n";
     sqlText = sqlText + "       t.p.value('(delay_days)[1]', 'int') as delay_days,\r\n";
-    sqlText = sqlText + "       t.p.value('(days)[1]', 'int') as days,\r\n";
     sqlText = sqlText + "       t.p.value('(name)[1]', 'varchar(max)') as pname\r\n";
     sqlText = sqlText + "from compound_programs cs\r\n";
     sqlText = sqlText + "inner join compound_program c on c.id = cs.id\r\n";
@@ -177,7 +371,6 @@ function GetProgramIds(taskRows, matrixId)
 function ResolveMatrixContext(matrixId, allProgramRows, taskRows)
 {
     var matrixRow, programIds;
-
     matrixRow = ArrayOptFind(allProgramRows, "Int(This.id) == Int(matrixId)");
     if (matrixRow == undefined)
     {
@@ -187,13 +380,11 @@ function ResolveMatrixContext(matrixId, allProgramRows, taskRows)
     {
         throw ("Модульная программа [" + matrixRow.name + "] (id=" + matrixId + ") деактивирована (f_matrix_active) -- отчёт недоступен для деактивированных программ.");
     }
-
     programIds = GetProgramIds(taskRows, matrixId);
     if (ArrayCount(programIds) == 0)
     {
-        throw ("У модульной программы [" + matrixRow.name + "] не найдено ни одной задачи с типом [Учебная программа] (education_method)");
+        throw ("У модульной программы [" + matrixRow.name + "] не найдено ни одной задачи с типом \"Учебная программа\" (education_method)");
     }
-
     return { matrixRow: matrixRow, programIds: programIds };
 }
 
@@ -205,13 +396,13 @@ function FindProgramName(programNames, iProgramId)
 }
 
 /*
-* "Старт через" (delay_days) и "Продолжительность" (days) программы.
+* "Старт через" (delay_days) программы.
 */
-function FindProgramTiming(programNames, iProgramId)
+function FindProgramDelayDays(programNames, iProgramId)
 {
     var row;
     row = ArrayOptFind(programNames, "Int(This.id) == Int(iProgramId)");
-    return (row != undefined ? { delayDays: OptInt(row.delay_days, 0), days: OptInt(row.days, 0) } : { delayDays: 0, days: 0 });
+    return (row != undefined ? OptInt(row.delay_days, 0) : 0);
 }
 
 function GetActiveCollaboratorRows()
@@ -224,10 +415,7 @@ function GetPositionIdsByCommonPosition(iCommonPositionFilter)
     var positionRows, positionIds, i;
     positionRows = ArraySelectAll(XQuery("for $elem in positions where $elem/position_common_id = " + iCommonPositionFilter + " return $elem"));
     positionIds = [];
-    for (i = 0; i < ArrayCount(positionRows); i++)
-    {
-        positionIds.push(Int(positionRows[i].id));
-    }
+    for (i = 0; i < ArrayCount(positionRows); i++) { positionIds.push(Int(positionRows[i].id)); }
     return positionIds;
 }
 
@@ -309,55 +497,6 @@ function GetCompletionDateRows(programIds)
     return ArraySelectAll(XQuery("sql:" + sqlText));
 }
 
-function SortRowsById(rows)
-{
-    return ArraySort(rows, "Int(This.id)", "+");
-}
-
-function BinarySearchById(sortedRows, targetId)
-{
-    var lo, hi, mid, midId, iTarget;
-    iTarget = Int(targetId);
-    lo = 0;
-    hi = ArrayCount(sortedRows) - 1;
-    while (lo <= hi)
-    {
-        mid = Int((lo + hi) / 2);
-        midId = Int(sortedRows[mid].id);
-        if (midId == iTarget) { return sortedRows[mid]; }
-        else if (midId < iTarget) { lo = mid + 1; }
-        else { hi = mid - 1; }
-    }
-    return undefined;
-}
-
-function SortIdArray(idArray)
-{
-    return ArraySort(idArray, "Int(This)", "+");
-}
-
-function IdArrayContainsSorted(sortedIdArray, value)
-{
-    var lo, hi, mid, midVal, iTarget;
-    iTarget = Int(value);
-    lo = 0;
-    hi = ArrayCount(sortedIdArray) - 1;
-    while (lo <= hi)
-    {
-        mid = Int((lo + hi) / 2);
-        midVal = Int(sortedIdArray[mid]);
-        if (midVal == iTarget) { return true; }
-        else if (midVal < iTarget) { lo = mid + 1; }
-        else { hi = mid - 1; }
-    }
-    return false;
-}
-
-function SortDateRowsByCollaboratorId(dateRows)
-{
-    return ArraySort(dateRows, "Int(This.collaborator_id)", "+");
-}
-
 function FindCity(sortedCityRows, collaboratorID)
 {
     var cityRow, sCity;
@@ -428,6 +567,15 @@ function FindCompletionDate(sortedDateRows, collaboratorID, programID)
     return "";
 }
 
+function CollaboratorHasMirCode(sortedMirCodeRows, collaboratorID, mirCodeFilter)
+{
+    var row, codes;
+    row = BinarySearchById(sortedMirCodeRows, collaboratorID);
+    if (row == undefined) { return false; }
+    codes = ExtractMirCodes(row.mir_codes);
+    return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
+}
+
 /*
 * Замена .split() (не работает на платформе).
 */
@@ -464,24 +612,9 @@ function ExtractMirCodes(rawValue)
     for (i = 0; i < ArrayCount(parts); i++)
     {
         fields = ArrayDirect(ArraySelect(SplitByDelimiter(String(parts[i]), "#"), "This != ''"));
-        if (ArrayCount(fields) > 0)
-        {
-            codes.push(String(fields[0]));
-        }
+        if (ArrayCount(fields) > 0) { codes.push(String(fields[0])); }
     }
     return codes;
-}
-
-function CollaboratorHasMirCode(sortedMirCodeRows, collaboratorID, mirCodeFilter)
-{
-    var row, codes;
-    row = BinarySearchById(sortedMirCodeRows, collaboratorID);
-    if (row == undefined)
-    {
-        return false;
-    }
-    codes = ExtractMirCodes(row.mir_codes);
-    return (ArrayOptFind(codes, "String(This) == String(mirCodeFilter)") != undefined);
 }
 
 function SplitByStar(sPattern)
@@ -595,112 +728,201 @@ function MirCodeAxisExcludeMatches(sPatternsList, employeeCodes)
 function CollaboratorMatchesMatrixAudience(collaboratorRow, matrixRow, sortedMirCodeRows, sortedStatusRows)
 {
     var sPosition, sOrg, sSubdivision, sStatus, employeeCodes, mirCodeRow, statusRow;
-
+ 
     sPosition = String(collaboratorRow.position_name);
     sOrg = String(collaboratorRow.org_name);
     sSubdivision = String(collaboratorRow.position_parent_name);
-
+ 
     mirCodeRow = BinarySearchById(sortedMirCodeRows, Int(collaboratorRow.id));
     employeeCodes = (mirCodeRow != undefined ? ExtractMirCodes(mirCodeRow.mir_codes) : []);
-
+ 
     statusRow = BinarySearchById(sortedStatusRows, Int(collaboratorRow.id));
     sStatus = (statusRow != undefined && statusRow.status != undefined ? String(statusRow.status) : "");
-
+ 
     if (AxisExcludeMatches(matrixRow.f_position_names_exclude, sPosition)) { return false; }
     if (AxisExcludeMatches(matrixRow.f_org_names_exclude, sOrg)) { return false; }
     if (AxisExcludeMatches(matrixRow.f_subdivision_names_exclude, sSubdivision)) { return false; }
     if (MirCodeAxisExcludeMatches(matrixRow.f_mir_code_exclude, employeeCodes)) { return false; }
     if (AxisExcludeMatches(matrixRow.f_collaborator_statuses_exclude, sStatus)) { return false; }
-
+ 
     if (!AxisMatches(matrixRow.f_position_names, sPosition)) { return false; }
     if (!AxisMatches(matrixRow.f_org_names, sOrg)) { return false; }
     if (!AxisMatches(matrixRow.f_subdivision_names, sSubdivision)) { return false; }
     if (!MirCodeAxisMatches(matrixRow.f_mir_code, employeeCodes)) { return false; }
-
+ 
     return true;
 }
 
 /*
-* Цвет статуса по п.6 ТЗ: пройдено -- green; срок истёк (дней с приёма >= старт +
-* продолжительность) или нет даты приёма -- red; иначе -- white.
-*/
-function BuildStatusColor(bPassed, iDaysWorked, iDelayDays, iDurationDays)
-{
-    if (bPassed)
-    {
-        return "green";
-    }
-    if (iDaysWorked < 0)
-    {
-        return "red";
-    }
-    if (iDaysWorked >= (OptInt(iDelayDays, 0) + OptInt(iDurationDays, 0)))
-    {
-        return "red";
-    }
-    return "white";
-}
-
-/*
-* Строки отчёта для одного сотрудника -- по одной на каждую программу.
-* @param {Object} collaborator
-* @param {Object} lookups        -   Отсортированные справочники + programNames (см. LoadLookups()).
-* @param {number[]} programIds
-* @param {boolean} bInAudience
+* Ручные фильтры страницы: типовая должность, макрорегион, мир-код.
+* @param {Object[]} collaboratorRows
+* @param {Object} filters   -   см. ReadFilters().
+* @param {Object} lookups   -   см. LoadLookups().
 * @returns {Object[]}
 */
-function BuildReportRows(collaborator, lookups, programIds, bInAudience)
+function ApplyManualFilters(collaboratorRows, filters, lookups)
 {
-    var rows, row, i, programID, bPassed, iDaysWorked, programTiming;
-    rows = [];
-    iDaysWorked = FindDaysWorked(lookups.hireSorted, Int(collaborator.id));
-    for (i = 0; i < ArrayCount(programIds); i++)
+    var allowedPositionIds, filteredRows, i, macroRow, iPositionFilter, sMacroregionFilter, sMirCodeFilter;
+
+    iPositionFilter = filters.positionCommonId;
+    sMacroregionFilter = filters.macroregion;
+    sMirCodeFilter = filters.mirCode;
+ 
+    filteredRows = collaboratorRows;
+ 
+    if (iPositionFilter > 0)
     {
-        programID = programIds[i];
-        row = new Object();
-        row.fullname = String(collaborator.fullname);
-        row.position_name = String(collaborator.position_name);
-        row.subdivision_name = String(collaborator.position_parent_name);
-        row.macroregion = FindMacroregion(lookups.macroSorted, Int(collaborator.id));
-        row.city = FindCity(lookups.citySorted, Int(collaborator.id));
-        row.program_name = FindProgramName(lookups.programNames, programID);
-        row.completion_date = FindCompletionDate(lookups.dateSorted, Int(collaborator.id), programID);
-        row.in_audience = bInAudience;
-
-        bPassed = (row.completion_date != "");
-        row.is_passed = bPassed;
-        programTiming = FindProgramTiming(lookups.programNames, programID);
-        row.is_period_started = IsPeriodStarted(iDaysWorked, programTiming.delayDays);
-        row.status_color = BuildStatusColor(bPassed, iDaysWorked, programTiming.delayDays, programTiming.days);
-
-        rows.push(row);
+        allowedPositionIds = SortIdArray(GetPositionIdsByCommonPosition(iPositionFilter));
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            if (IdArrayContainsSorted(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0))) { filteredRows.push(collaboratorRows[i]); }
+        }
     }
-    return rows;
+ 
+    if (sMacroregionFilter != "")
+    {
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            macroRow = BinarySearchById(lookups.macroSorted, Int(collaboratorRows[i].id));
+            if (macroRow != undefined && String(macroRow.macroregion) == sMacroregionFilter) { filteredRows.push(collaboratorRows[i]); }
+        }
+    }
+ 
+    if (sMirCodeFilter != "")
+    {
+        collaboratorRows = filteredRows;
+        filteredRows = [];
+        for (i = 0; i < ArrayCount(collaboratorRows); i++)
+        {
+            if (CollaboratorHasMirCode(lookups.mirCodeSorted, Int(collaboratorRows[i].id), sMirCodeFilter)) { filteredRows.push(collaboratorRows[i]); }
+        }
+    }
+ 
+    return filteredRows;
 }
 
 /*
-* Режим отчёта: URL -> параметр кнопки -> "total". Неизвестный режим -- ошибка.
-* @param {string} sFullUrl
+* Накопитель для пары (город, программа) -- находит существующий или создаёт новый.
+*/
+function GetOrCreateCityProgramAcc(acc, sCity, iProgramId, sProgramName, sMacroregion)
+{
+    var i, newAcc;
+    for (i = 0; i < ArrayCount(acc); i++)
+    {
+        if (acc[i].city == sCity && Int(acc[i].programId) == Int(iProgramId)) { return acc[i]; }
+    }
+    newAcc = { city: sCity, programId: Int(iProgramId), programName: sProgramName, macroregion: sMacroregion, total: 0, plan: 0, mandatory: 0, fact: 0 };
+    acc.push(newAcc);
+    return newAcc;
+}
+
+/*
+* факт/план в % с округлением; "-" при плане 0. Сначала умножение, потом деление --
+* деление целых в движке теряет дробную часть.
+*/
+function FormatPercent(nFact, nPlan)
+{
+    var iFact, iPlan, iRounded;
+    if (nPlan <= 0) { return "-"; }
+    iFact = Int(nFact);
+    iPlan = Int(nPlan);
+    iRounded = Int((iFact * 100 + Int(iPlan / 2)) / iPlan);
+    return String(iRounded) + "%";
+}
+
+/*
+* HTML-таблица для Excel: видимые колонки виджета в том же порядке, итоговая строка жирным.
+* @param {Object[]} resultRows   -   Строки в формате RESULT выборки (включая "Общий итог").
 * @returns {string}
 */
-function GetResultType(sFullUrl)
+function BuildExcelHtml(resultRows)
 {
-    var sResultType;
+    var html, i, row, sTdStyle;
+ 
+    html = new Binary();
+    html.AppendStr("<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\" xmlns=\"http://www.w3.org/TR/REC-html40\"><head><meta charset=\"utf-8\"></head><body>");
+    html.AppendStr("<table border=\"1\" cellpadding=\"2\" cellspacing=\"0\">");
+ 
+    html.AppendStr("<tr>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Город</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Учебная программа</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Общее кол-во сотрудников</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>План</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Факт</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Процент</b></td>");
+    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Обязательно к прохождению</b></td>");
+    html.AppendStr("</tr>");
+ 
+    for (i = 0; i < ArrayCount(resultRows); i++)
+    {
+        row = resultRows[i];
+        sTdStyle = (i == ArrayCount(resultRows) - 1 ? " style=\"font-weight:bold\"" : "");
+        html.AppendStr("<tr>");
+        html.AppendStr("<td" + sTdStyle + ">" + HtmlEncode(String(row.city)) + "</td>");
+        html.AppendStr("<td" + sTdStyle + ">" + HtmlEncode(String(row.program)) + "</td>");
+        html.AppendStr("<td" + sTdStyle + " align=\"center\">" + String(row.total) + "</td>");
+        html.AppendStr("<td" + sTdStyle + " align=\"center\">" + String(row.plan) + "</td>");
+        html.AppendStr("<td" + sTdStyle + " align=\"center\">" + String(row.fact) + "</td>");
+        html.AppendStr("<td" + sTdStyle + " align=\"center\">" + HtmlEncode(String(row.percent)) + "</td>");
+        html.AppendStr("<td" + sTdStyle + " align=\"center\">" + String(row.mandatory) + "</td>");
+        html.AppendStr("</tr>");
+    }
+ 
+    html.AppendStr("</table></body></html>");
+    return html.GetStr();
+}
 
-    sResultType = GetQueryParam(sFullUrl, "result_type");
-    if (sResultType == "")
+/*
+* Отсортированные ID подчинённых пользователя (вся цепочка вниз); undefined для члена
+* УОРиАП (без сужения); пустой массив -- подчинённых нет.
+* @param {number} iCurUserId
+* @returns {number[]}
+*/
+function GetSortedSubordinateIds(iCurUserId)
+{
+    var managerRows, sortedByManagerRows, subordinateIds;
+
+    if (IsUorApMember(iCurUserId))
     {
-        sResultType = GetResultTypeParamSafe();
+        LogAlert(1, "GetSortedSubordinateIds(). userId=" + iCurUserId + " -- УОРиАП, без сужения.");
+        return undefined;
     }
-    if (sResultType == "")
+
+    managerRows = GetManagerIdRows();
+    sortedByManagerRows = SortRowsByManagerId(managerRows);
+    subordinateIds = GetManagerHierarchySubordinateIds(sortedByManagerRows, iCurUserId);
+    LogAlert(1, "GetSortedSubordinateIds(). userId=" + iCurUserId + "; подчинённых: " + ArrayCount(subordinateIds));
+    if (ArrayCount(subordinateIds) == 0)
     {
-        sResultType = "total";
+        return [];
     }
-    if (sResultType != "total" && sResultType != "plan" && sResultType != "fact" && sResultType != "mandatory")
+    return SortIdArray(subordinateIds);
+}
+
+/*
+* Оставляет в пуле только подчинённых; sortedSubordinateIds == undefined -- без изменений.
+* @param {Object[]} activeRows
+* @param {number[]} sortedSubordinateIds
+* @returns {Object[]}
+*/
+function FilterBySubordinates(activeRows, sortedSubordinateIds)
+{
+    var subFilteredRows, k;
+
+    if (sortedSubordinateIds == undefined)
     {
-        throw ("Неизвестный режим отчёта result_type=[" + sResultType + "] -- ожидается одно из: total, plan, fact, mandatory");
+        return activeRows;
     }
-    return sResultType;
+    subFilteredRows = [];
+    for (k = 0; k < ArrayCount(activeRows); k++)
+    {
+        if (IdArrayContainsSorted(sortedSubordinateIds, Int(activeRows[k].id))) { subFilteredRows.push(activeRows[k]); }
+    }
+    return subFilteredRows;
 }
 
 /*
@@ -715,8 +937,7 @@ function ReadFilters(sFullUrl)
         programId: OptInt(GetQueryParam(sFullUrl, "program_id"), 0),
         macroregion: GetQueryParam(sFullUrl, "macroregion"),
         mirCode: GetQueryParam(sFullUrl, "mir_code"),
-        positionCommonId: OptInt(GetQueryParam(sFullUrl, "position_common_id"), 0),
-        city: GetQueryParam(sFullUrl, "city")
+        positionCommonId: OptInt(GetQueryParam(sFullUrl, "position_common_id"), 0)
     };
 }
 
@@ -737,10 +958,7 @@ function FilterProgramIds(programIds, iProgramFilter)
     filteredProgramIds = [];
     for (i = 0; i < ArrayCount(programIds); i++)
     {
-        if (Int(programIds[i]) == iProgramFilter)
-        {
-            filteredProgramIds.push(programIds[i]);
-        }
+        if (Int(programIds[i]) == iProgramFilter) { filteredProgramIds.push(programIds[i]); }
     }
     if (ArrayCount(filteredProgramIds) == 0)
     {
@@ -750,7 +968,7 @@ function FilterProgramIds(programIds, iProgramFilter)
 }
 
 /*
-* Названия и тайминг программ ({id, name, delay_days, days}) из задач матрицы.
+* Названия программ и "Старт через" ({id, name, delay_days}) из задач матрицы.
 */
 function BuildProgramNames(taskRows, matrixId, programIds)
 {
@@ -763,15 +981,14 @@ function BuildProgramNames(taskRows, matrixId, programIds)
         programNames.push({
             id: Int(programIds[j]),
             name: (taskRowForName != undefined && taskRowForName.pname != undefined ? String(taskRowForName.pname) : "id=" + programIds[j]),
-            delay_days: (taskRowForName != undefined ? OptInt(taskRowForName.delay_days, 0) : 0),
-            days: (taskRowForName != undefined ? OptInt(taskRowForName.days, 0) : 0)
+            delay_days: (taskRowForName != undefined ? OptInt(taskRowForName.delay_days, 0) : 0)
         });
     }
     return programNames;
 }
 
 /*
-* Отсортированные справочники по сотрудникам и даты прохождения программ.
+* Отсортированные справочники по сотрудникам, даты прохождения и названия программ.
 * @param {number[]} programIds
 * @param {Object[]} programNames
 * @returns {Object}
@@ -781,183 +998,145 @@ function LoadLookups(programIds, programNames)
     var lookups;
 
     lookups = new Object();
-    lookups.mirCodeSorted = SortRowsById(GetMirCodeRows());
-    lookups.statusSorted = SortRowsById(GetStatusRows());
-    lookups.hireSorted = SortRowsById(GetHireDateRows());
     lookups.macroSorted = SortRowsById(GetMacroregionRows());
     lookups.citySorted = SortRowsById(GetCityRows());
     lookups.dateSorted = SortDateRowsByCollaboratorId(GetCompletionDateRows(programIds));
+    lookups.mirCodeSorted = SortRowsById(GetMirCodeRows());
+    lookups.statusSorted = SortRowsById(GetStatusRows());
+    lookups.hireSorted = SortRowsById(GetHireDateRows());
     lookups.programNames = programNames;
     return lookups;
 }
 
 /*
-* Ручной фильтр по типовой должности.
+* Общее / План / Обязательно по парам (город, программа) -- только сотрудники из
+* аудитории матрицы. План -- период прохождения наступил (IsPeriodStarted()).
 */
-function FilterByPosition(collaboratorRows, iPositionFilter)
+function AccumulateTotals(acc, collaboratorRows, matrixRow, lookups, programIds)
 {
-    var allowedPositionIds, filteredCollaboratorRows, i;
+    var i, j, bInAudience, sCity, sMacroregionForRow, iDaysWorked, sProgramName, cityProgramAcc, sDate;
 
-    if (iPositionFilter <= 0)
-    {
-        return collaboratorRows;
-    }
-    allowedPositionIds = SortIdArray(GetPositionIdsByCommonPosition(iPositionFilter));
-    filteredCollaboratorRows = [];
-    for (i = 0; i < ArrayCount(collaboratorRows); i++)
-    {
-        if (IdArrayContainsSorted(allowedPositionIds, OptInt(collaboratorRows[i].position_id, 0)))
-        {
-            filteredCollaboratorRows.push(collaboratorRows[i]);
-        }
-    }
-    return filteredCollaboratorRows;
-}
-
-/*
-* Ручные фильтры по макрорегиону, мир-коду и городу -- в том же порядке, что в выборке.
-* @param {Object[]} collaboratorRows
-* @param {Object} filters
-* @param {Object} lookups
-* @returns {Object[]}
-*/
-function FilterByAttributes(collaboratorRows, filters, lookups)
-{
-    var filteredCollaboratorRows, i, row;
-
-    filteredCollaboratorRows = [];
-    for (i = 0; i < ArrayCount(collaboratorRows); i++)
-    {
-        row = collaboratorRows[i];
-        if (filters.macroregion != "" && FindMacroregion(lookups.macroSorted, Int(row.id)) != filters.macroregion) { continue; }
-        if (filters.mirCode != "" && !CollaboratorHasMirCode(lookups.mirCodeSorted, Int(row.id), filters.mirCode)) { continue; }
-        if (filters.city != "" && FindCity(lookups.citySorted, Int(row.id)) != filters.city) { continue; }
-        filteredCollaboratorRows.push(row);
-    }
-    return filteredCollaboratorRows;
-}
-
-/*
-* Строки (сотрудник x программа) для сотрудников из аудитории матрицы.
-*/
-function BuildAllReportRows(collaboratorRows, matrixRow, lookups, programIds)
-{
-    var reportRows, collaboratorReportRows, i, j, bInAudience;
-
-    reportRows = [];
     for (i = 0; i < ArrayCount(collaboratorRows); i++)
     {
         bInAudience = CollaboratorMatchesMatrixAudience(collaboratorRows[i], matrixRow, lookups.mirCodeSorted, lookups.statusSorted);
-        if (!bInAudience)
+        if (!bInAudience) { continue; }
+        sCity = FindCity(lookups.citySorted, Int(collaboratorRows[i].id));
+        sMacroregionForRow = FindMacroregion(lookups.macroSorted, Int(collaboratorRows[i].id));
+        iDaysWorked = FindDaysWorked(lookups.hireSorted, Int(collaboratorRows[i].id));
+        for (j = 0; j < ArrayCount(programIds); j++)
         {
-            continue;
-        }
-        collaboratorReportRows = BuildReportRows(collaboratorRows[i], lookups, programIds, bInAudience);
-        for (j = 0; j < ArrayCount(collaboratorReportRows); j++)
-        {
-            reportRows.push(collaboratorReportRows[j]);
+            sProgramName = FindProgramName(lookups.programNames, programIds[j]);
+            cityProgramAcc = GetOrCreateCityProgramAcc(acc, sCity, programIds[j], sProgramName, sMacroregionForRow);
+            sDate = FindCompletionDate(lookups.dateSorted, Int(collaboratorRows[i].id), programIds[j]);
+            cityProgramAcc.total = cityProgramAcc.total + 1;
+            if (IsPeriodStarted(iDaysWorked, FindProgramDelayDays(lookups.programNames, programIds[j]))) { cityProgramAcc.plan = cityProgramAcc.plan + 1; }
+            if (sDate == "") { cityProgramAcc.mandatory = cityProgramAcc.mandatory + 1; }
         }
     }
-    return reportRows;
 }
 
 /*
-* Отбор строк по режиму: plan -- период наступил, fact -- пройдено, mandatory -- не
-* пройдено, total -- все.
-* @param {Object[]} reportRows
-* @param {string} sResultType
+* Факт по парам (город, программа) -- прошедшие сотрудники из аудитории матрицы.
+*/
+function AccumulateFacts(acc, collaboratorRows, matrixRow, lookups, programIds)
+{
+    var i, j, bInAudience, sCity, sMacroregionForRow, sProgramName, cityProgramAcc, sDate;
+
+    for (i = 0; i < ArrayCount(collaboratorRows); i++)
+    {
+        bInAudience = CollaboratorMatchesMatrixAudience(collaboratorRows[i], matrixRow, lookups.mirCodeSorted, lookups.statusSorted);
+        if (!bInAudience) { continue; }
+        sCity = FindCity(lookups.citySorted, Int(collaboratorRows[i].id));
+        sMacroregionForRow = FindMacroregion(lookups.macroSorted, Int(collaboratorRows[i].id));
+        for (j = 0; j < ArrayCount(programIds); j++)
+        {
+            sDate = FindCompletionDate(lookups.dateSorted, Int(collaboratorRows[i].id), programIds[j]);
+            if (sDate != "")
+            {
+                sProgramName = FindProgramName(lookups.programNames, programIds[j]);
+                cityProgramAcc = GetOrCreateCityProgramAcc(acc, sCity, programIds[j], sProgramName, sMacroregionForRow);
+                cityProgramAcc.fact = cityProgramAcc.fact + 1;
+            }
+        }
+    }
+}
+
+/*
+* Сортировка строк как в выборке: по программе, затем по городу (пузырьком, на месте).
+*/
+function SortAccByProgramAndCity(acc)
+{
+    var iOuter, iInner, tmpAcc;
+
+    for (iOuter = 0; iOuter < ArrayCount(acc) - 1; iOuter++)
+    {
+        for (iInner = 0; iInner < ArrayCount(acc) - 1 - iOuter; iInner++)
+        {
+            if (acc[iInner].programName > acc[iInner + 1].programName
+                || (acc[iInner].programName == acc[iInner + 1].programName && acc[iInner].city > acc[iInner + 1].city))
+            {
+                tmpAcc = acc[iInner];
+                acc[iInner] = acc[iInner + 1];
+                acc[iInner + 1] = tmpAcc;
+            }
+        }
+    }
+}
+
+/*
+* Строки таблицы в формате выборки + итоговая строка "Общий итог".
+* @param {Object[]} acc
 * @returns {Object[]}
 */
-function FilterRowsByResultType(reportRows, sResultType)
+function BuildResultRows(acc)
 {
-    var filteredResultRows, i, bKeep;
+    var resultRows, id, totalAcc, i, row;
 
-    if (sResultType != "plan" && sResultType != "fact" && sResultType != "mandatory")
+    resultRows = [];
+    id = 0;
+    totalAcc = { total: 0, plan: 0, mandatory: 0, fact: 0 };
+    for (i = 0; i < ArrayCount(acc); i++)
     {
-        return reportRows;
-    }
-    filteredResultRows = [];
-    for (i = 0; i < ArrayCount(reportRows); i++)
-    {
-        if (sResultType == "plan") { bKeep = reportRows[i].is_period_started; }
-        else if (sResultType == "fact") { bKeep = (reportRows[i].completion_date != ""); }
-        else { bKeep = (reportRows[i].completion_date == ""); }
-        if (bKeep)
-        {
-            filteredResultRows.push(reportRows[i]);
-        }
-    }
-    return filteredResultRows;
-}
-
-/*
-* Цвет заливки ячейки статуса -- то же значение status_color, что получает виджет.
-*/
-function StatusColorToHex(sStatusColor)
-{
-    if (sStatusColor == "green") { return "#00B050"; }
-    if (sStatusColor == "red") { return "#FF0000"; }
-    return "#FFFFFF";
-}
-
-/*
-* Название режима для заголовка файла -- те же подписи, что в модалке "Выбор отчета".
-*/
-function ResultTypeTitle(sResultType)
-{
-    if (sResultType == "plan") { return "План"; }
-    if (sResultType == "fact") { return "Факт"; }
-    if (sResultType == "mandatory") { return "Обязательно к прохождению"; }
-    return "Общее кол-во";
-}
-
-/*
-* HTML-таблица для Excel: строка с названием режима, заголовки, строки отчёта.
-* @param {Object[]} reportRows
-* @param {string} sResultType
-* @returns {string}
-*/
-function BuildExcelHtml(reportRows, sResultType)
-{
-    var html, i, row;
-
-    html = new Binary();
-    html.AppendStr("<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\" xmlns=\"http://www.w3.org/TR/REC-html40\"><head><meta charset=\"utf-8\"></head><body>");
-    html.AppendStr("<table border=\"1\" cellpadding=\"2\" cellspacing=\"0\">");
-
-    html.AppendStr("<tr><td colspan=\"5\" bgcolor=\"#98ddfc\"><b>" + HtmlEncode(ResultTypeTitle(sResultType)) + "</b></td></tr>");
-
-    html.AppendStr("<tr>");
-    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Статус</b></td>");
-    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>ФИО</b></td>");
-    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Должность</b></td>");
-    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Подразделение</b></td>");
-    html.AppendStr("<td bgcolor=\"#FCE5CD\"><b>Дата прохождения</b></td>");
-    html.AppendStr("</tr>");
-
-    for (i = 0; i < ArrayCount(reportRows); i++)
-    {
-        row = reportRows[i];
-        html.AppendStr("<tr>");
-        html.AppendStr("<td bgcolor=\"" + StatusColorToHex(String(row.status_color)) + "\"></td>");
-        html.AppendStr("<td>" + HtmlEncode(String(row.fullname)) + "</td>");
-        html.AppendStr("<td>" + HtmlEncode(String(row.position_name)) + "</td>");
-        html.AppendStr("<td>" + HtmlEncode(String(row.subdivision_name)) + "</td>");
-        html.AppendStr("<td align=\"center\">" + HtmlEncode(String(row.completion_date)) + "</td>");
-        html.AppendStr("</tr>");
+        id = id + 1;
+        row = acc[i];
+        resultRows.push({
+            id: id,
+            city: row.city,
+            program: row.programName,
+            total: row.total,
+            plan: row.plan,
+            fact: row.fact,
+            percent: FormatPercent(row.fact, row.plan),
+            mandatory: row.mandatory
+        });
+        totalAcc.total = totalAcc.total + row.total;
+        totalAcc.plan = totalAcc.plan + row.plan;
+        totalAcc.mandatory = totalAcc.mandatory + row.mandatory;
+        totalAcc.fact = totalAcc.fact + row.fact;
     }
 
-    html.AppendStr("</table></body></html>");
-    return html.GetStr();
+    id = id + 1;
+    resultRows.push({
+        id: id,
+        city: "Общий итог",
+        program: "-",
+        total: totalAcc.total,
+        plan: totalAcc.plan,
+        fact: totalAcc.fact,
+        percent: FormatPercent(totalAcc.fact, totalAcc.plan),
+        mandatory: totalAcc.mandatory
+    });
+    return resultRows;
 }
 
 /*
 * Кладёт HTML в кэш и возвращает команду открыть страницу скачивания. Ключ кэша --
-* "голая" curUserID (её читает assessment_excel_export.html), запасной -- curUserId из LPE.
+* "голая" curUserID (её читает assessment_excel_export.html), запасной -- iCurUserId.
 * @param {string} sHtml
+* @param {number} iCurUserId
 * @returns {Object}
 */
-function SaveExportAndGetResult(sHtml)
+function SaveExportAndGetResult(sHtml, iCurUserId)
 {
     var sBareCurUserId;
 
@@ -965,9 +1144,8 @@ function SaveExportAndGetResult(sHtml)
     catch (_exBareUserId) { sBareCurUserId = ""; }
     if (sBareCurUserId == "" || sBareCurUserId == "undefined" || sBareCurUserId == "null")
     {
-        LogAlert(3, "SaveExportAndGetResult(). curUserID недоступна -- пробуем curUserId из LPE.");
-        try { sBareCurUserId = String(curUserId); }
-        catch (_exLpeUserId) { sBareCurUserId = ""; }
+        LogAlert(3, "SaveExportAndGetResult(). curUserID недоступна -- ключ кэша по curUserId=" + iCurUserId);
+        sBareCurUserId = String(iCurUserId);
     }
     tools_web.set_user_data("excel_html_" + sBareCurUserId, ({ "html": sHtml }), 3600);
 
@@ -987,8 +1165,8 @@ function SaveExportAndGetResult(sHtml)
 */
 function Run()
 {
-    var sFullUrl, sResultType, filters, taskRows, matrixContext, programIds, lookups;
-    var collaboratorRows, reportRows;
+    var iCurUserId, sortedSubordinateIds, sFullUrl, filters, taskRows, matrixContext, programIds;
+    var lookups, manualFilteredRows, acc, resultRows;
 
     RESULT = new Object();
 
@@ -996,33 +1174,35 @@ function Run()
 
     try
     {
-        sFullUrl = GetCurPageUrlSafe();
-        sResultType = GetResultType(sFullUrl);
-        filters = ReadFilters(sFullUrl);
-        LogAlert(1, "Run(). URL=[" + sFullUrl + "]; result_type=[" + sResultType + "]");
-
-        if (filters.matrixId == 0) { throw ("Не выбрана матрица обучения -- настройте фильтры перед выгрузкой."); }
-
-        taskRows = GetEducationMethodTaskRows();
-        matrixContext = ResolveMatrixContext(filters.matrixId, GetCompoundProgramRows(), taskRows);
-        programIds = FilterProgramIds(matrixContext.programIds, filters.programId);
-        lookups = LoadLookups(programIds, BuildProgramNames(taskRows, filters.matrixId, programIds));
-
-        collaboratorRows = FilterByPosition(GetActiveCollaboratorRows(), filters.positionCommonId);
-        collaboratorRows = FilterByAttributes(collaboratorRows, filters, lookups);
-        reportRows = BuildAllReportRows(collaboratorRows, matrixContext.matrixRow, lookups, programIds);
-        reportRows = FilterRowsByResultType(reportRows, sResultType);
-        LogAlert(1, "Run(). Сотрудников после фильтров: " + ArrayCount(collaboratorRows) + "; строк отчёта: " + ArrayCount(reportRows));
-
-        if (ArrayCount(reportRows) == 0)
+        iCurUserId = GetCurUserIdSafe();
+        sortedSubordinateIds = GetSortedSubordinateIds(iCurUserId);
+        if (sortedSubordinateIds != undefined && ArrayCount(sortedSubordinateIds) == 0)
         {
+            // Та же ситуация, в которой выборка отдаёт пустую таблицу.
             RESULT = { command: "alert", view: "warning", msg: "Нет данных для выгрузки -- таблица отчёта пуста." };
-            LogAlert(3, "Run(). Нет данных для выгрузки, result_type=" + sResultType);
+            LogAlert(3, "Run(). Не УОРиАП и нет подчинённых (таблица на странице тоже пуста), userId=" + iCurUserId);
         }
         else
         {
-            RESULT = SaveExportAndGetResult(BuildExcelHtml(reportRows, sResultType));
-            LogAlert(2, "Run(). Выгрузка готова: result_type=" + sResultType + ", строк " + ArrayCount(reportRows));
+            sFullUrl = GetCurPageUrlSafe();
+            filters = ReadFilters(sFullUrl);
+            LogAlert(1, "Run(). URL=[" + sFullUrl + "]");
+            if (filters.matrixId == 0) { throw ("Не выбрана матрица обучения -- настройте фильтры перед выгрузкой."); }
+
+            taskRows = GetEducationMethodTaskRows();
+            matrixContext = ResolveMatrixContext(filters.matrixId, GetCompoundProgramRows(), taskRows);
+            programIds = FilterProgramIds(matrixContext.programIds, filters.programId);
+            lookups = LoadLookups(programIds, BuildProgramNames(taskRows, filters.matrixId, programIds));
+            manualFilteredRows = ApplyManualFilters(FilterBySubordinates(GetActiveCollaboratorRows(), sortedSubordinateIds), filters, lookups);
+
+            acc = [];
+            AccumulateTotals(acc, manualFilteredRows, matrixContext.matrixRow, lookups, programIds);
+            AccumulateFacts(acc, manualFilteredRows, matrixContext.matrixRow, lookups, programIds);
+            SortAccByProgramAndCity(acc);
+            resultRows = BuildResultRows(acc);
+
+            RESULT = SaveExportAndGetResult(BuildExcelHtml(resultRows), iCurUserId);
+            LogAlert(2, "Run(). Выгрузка готова: строк (город x программа) " + (ArrayCount(resultRows) - 1) + " + итоговая; сотрудников в пуле " + ArrayCount(manualFilteredRows));
         }
     }
     catch (_ex)
