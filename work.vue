@@ -1,55 +1,60 @@
-// ДИАГНОСТИКА v2: что доступно в коде ВЫБОРКИ (вызов через /pp/Ext5/extjs_json_collection_data.html).
-// Вставить в начало кода выборки (перед блоком try { curSite; }), открыть страницу с меню,
-// прислать ВЕСЬ лог 'diag_cur_site' от START до END.
-// v2: + дамп Request.Session.Env, Referer/Host, пробный вызов tools_web.get_menu_items().
+// Выборка: меню шапки портала (код меню приходит из LPE-параметра sMenuCode, сейчас = "header").
+//
+// ИСТОРИЯ (02.11.2026, после обновления платформы):
+// - Было: в начале проверка try { curSite; } catch -> MESSAGE "Текущий сайт не инициализирован", return false.
+//   После обновления выборка вызывается через /pp/Ext5/extjs_json_collection_data.html, и curSite / curSiteID
+//   в её контексте НЕ определены (подтверждено логом diag_cur_site; в Request.Session.Env поля curSite тоже нет).
+// - Первая половина старого кода (сборка меню из curSite.menus) на результат не влияла: её RESULT
+//   затирался строкой RESULT = [] перед второй половиной. Удалена вместе с проверкой curSite.
+// - Подтверждено реальным тестом в коде выборки (diag_cur_site v2): tools_web.get_menu_items(sMenuCode, 2, 1, 10)
+//   работает без curSite и вернул 10 пунктов 1-го уровня. Оставлена только эта ветка.
 
-sLogName = 'diag_cur_site';
+sLogName = 'header_menu_collection';
 EnableLog(sLogName, true);
 function alert(sInputObj) { LogEvent(sLogName, sInputObj); return sInputObj; }
 
-alert("==== START " + StrDate(Date(), true));
-
-// --- переменные сайта/окружения ---
-try { alert("curSite.id = " + String(curSite.id)); } catch (_e1) { alert("curSite: НЕТ (" + ExtractUserError(_e1) + ")"); }
-try { alert("curSiteID = " + String(curSiteID)); } catch (_e2) { alert("curSiteID: НЕТ (" + ExtractUserError(_e2) + ")"); }
-try { alert("Env = " + tools.object_to_text(Env, 'json')); } catch (_e3) { alert("Env: НЕТ (" + ExtractUserError(_e3) + ")"); }
-try { alert("Env.curSiteID = " + String(Env.curSiteID)); } catch (_e4) { alert("Env.curSiteID: НЕТ (" + ExtractUserError(_e4) + ")"); }
-try { alert("Env.curSite.id = " + String(Env.curSite.id)); } catch (_e5) { alert("Env.curSite: НЕТ (" + ExtractUserError(_e5) + ")"); }
-try { alert("Request.Session.Env.curSiteID = " + String(Request.Session.Env.curSiteID)); } catch (_e6) { alert("Request.Session.Env.curSiteID: НЕТ (" + ExtractUserError(_e6) + ")"); }
-try { alert("Request.Session.Env.curSite.id = " + String(Request.Session.Env.curSite.id)); } catch (_e7) { alert("Request.Session.Env.curSite: НЕТ (" + ExtractUserError(_e7) + ")"); }
-try { alert("curUserID = " + String(curUserID)); } catch (_e8) { alert("curUserID: НЕТ (" + ExtractUserError(_e8) + ")"); }
-try { alert("sMenuCode = " + String(sMenuCode)); } catch (_e10) { alert("sMenuCode: НЕТ (" + ExtractUserError(_e10) + ")"); }
-
-// --- полный дамп Env сессии: ищем id сайта под другим именем ---
-try { alert("DUMP Request.Session.Env = " + tools.object_to_text(Request.Session.Env, 'json')); } catch (_e12) { alert("DUMP Request.Session.Env: ОШИБКА (" + ExtractUserError(_e12) + ")"); }
-
-// --- откуда пришёл запрос ---
-try { alert("Request.Url = " + String(Request.Url)); } catch (_e9) { alert("Request.Url: НЕТ (" + ExtractUserError(_e9) + ")"); }
-try { alert("Referer = " + String(Request.Header.GetOptProperty("Referer"))); } catch (_e13) { alert("Referer: ОШИБКА (" + ExtractUserError(_e13) + ")"); }
-try { alert("Host = " + String(Request.Header.GetOptProperty("Host"))); } catch (_e14) { alert("Host: ОШИБКА (" + ExtractUserError(_e14) + ")"); }
-
-// --- пробный вызов: работает ли tools_web.get_menu_items без curSite ---
+RESULT = [];
+ERROR = 0;
+MESSAGE = "";
 try
 {
     Session = Request.Session;
-    arrDiagMenu = tools_web.get_menu_items(sMenuCode, 2, 1, 10);
-    alert("get_menu_items: OK, пунктов 1-го уровня = " + ArrayCount(arrDiagMenu));
-    for (oDiagItem in arrDiagMenu)
-    {
-        alert("  menu: " + String(oDiagItem.name) + " -> " + String(oDiagItem.link_href));
-    }
-}
-catch (_e15) { alert("get_menu_items: ОШИБКА (" + ExtractUserError(_e15) + ")"); }
+    arrMenuItems = tools_web.get_menu_items(sMenuCode, 2, 1, 10);
 
-// --- список сайтов ---
-try
+    /*---------------------- Первый уровень + дочерние ------------------------*/
+    _id = 0;
+    for (oMenuItem in arrMenuItems)
+    {
+        _id++;
+        RESULT.push(
+        {
+            id: String(_id),
+            parent_id: '',
+            text: String(oMenuItem.name),
+            path: oMenuItem.link_href,
+            icon: ""
+        });
+
+        _id_child = 0;
+        for (oFirstLevelItem in oMenuItem.items)
+        {
+            _id_child++;
+            RESULT.push(
+            {
+                id: String(_id + "_" + _id_child),
+                parent_id: String(_id),
+                text: String(oFirstLevelItem.name),
+                path: oFirstLevelItem.link_href,
+                icon: ""
+            });
+        }
+    }
+    /*-------------------------------------------------------------------------*/
+}
+catch (_ex)
 {
-    arrSites = ArraySelectAll(XQuery("for $elem in sites return $elem"));
-    for (oSite in arrSites)
-    {
-        alert("site: id=" + String(oSite.id) + " | name=" + String(oSite.name));
-    }
+    RESULT = [];
+    ERROR = 1;
+    MESSAGE = ExtractUserError(_ex);
+    try { alert("RemoteCollection: header menu: ОШИБКА: " + MESSAGE); } catch (_exLog) {}
 }
-catch (_e11) { alert("XQuery sites: ОШИБКА (" + ExtractUserError(_e11) + ")"); }
-
-alert("==== END");
